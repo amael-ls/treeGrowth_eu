@@ -127,7 +127,3 @@ kept_indices = sort(
 		sample(x = 2:(length(time) - 1), size = n, replace = TRUE)))
 
 censusData = data[kept_indices]
-
-#### Run stan model
-
-
