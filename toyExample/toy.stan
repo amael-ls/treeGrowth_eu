@@ -43,6 +43,7 @@ parameters {
 	real quad_slopes_precip; // Species-specific value
 
 	real<lower = 0.000001> processError; // Constrained by default
+	real<lower = 0.000001> measureError; // Constrained by default
 
 	vector<lower = 0>[n_hiddenState] Y_generated; // State vector Y (hidden markov process), positive
 }
@@ -73,7 +74,9 @@ model {
 	for (i in 1:n_indiv)
 	{
 		// --- Parent data (uncertainty on the initial measure, should be country-specific!)
-		Y_generated[count + 1] ~ normal(Yobs[parents_index[i]], 0.1);
+		// Y_generated[count + 1] ~ normal(Yobs[parents_index[i]], measureError); // This is wrong, it should be the opposite!
+		target += normal_lpdf(Yobs[parents_index[i]] | Y_generated[count + 1], measureError);
+
 		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
 			mean_gamma_ij = intercepts + slopes_dbh*Y_generated[count + j - 1] +
@@ -100,7 +103,7 @@ model {
 	// 	print("y[", i, "] = ", Y_generated[i]);
 
 	// Compare generated children with obs children
-	target += normal_lpdf(Yobs[children_index] | Y_generated[childrenObs_index], 0.1);
+	target += normal_lpdf(Yobs[children_index] | Y_generated[childrenObs_index], measureError);
 }
 
 // generated quantities {
