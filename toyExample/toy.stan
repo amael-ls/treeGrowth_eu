@@ -36,29 +36,11 @@ transformed data {
 }
 
 parameters {
-	// Hyper parameters
-	// --- intercept
-	real intercepts_mean;
-	real<lower = 0> intercepts_sd; // Constrained by default
-
-	// --- dbh
-	real<lower = 0.000001> dbh_mean;
-	real<lower = 0.000001> dbh_var; // Constrained by default
-
-	// --- precipitations
-	real precip_mean;
-	real<lower = 0.000001> precip_sd; // Constrained by default
-
-	real quad_precip_mean;
-	// real<lower = 0.000001> quad_precip_var; // Constrained by default
-	real<lower = 0.000001> quad_precip_sd; // Constrained by default
-
 	// Parameters
-	real intercepts[n_indiv]; // Individual-specific value (random effect)
-	real<lower = 0> slopes_dbh[n_indiv]; // Individual-specific value (random effect), Markov process coefficient
-	real slopes_precip[n_indiv]; // Individual-specific value (random effect, roots/competition for water might be different)
-	// real<upper = 0> quad_slopes_precip[n_indiv]; // Individual-specific value for the quadratic value (random effect, idem)
-	real quad_slopes_precip[n_indiv]; // Individual-specific value for the quadratic value (random effect, idem)
+	real intercepts; // Species-specific value
+	real slopes_dbh; // Species-specific value, Markov process coefficient
+	real slopes_precip; // Species-specific value
+	real quad_slopes_precip[n_indiv]; // Species-specific value
 
 	real<lower = 0.000001> processError; // Constrained by default
 
@@ -76,33 +58,11 @@ model {
 	int count = 0;
 	real mean_gamma_ij;
 
-	// print("sigma = ", processError);
-
-	// Hyper priors
-	// --- intercept
-	target += normal_lpdf(intercepts_mean | 0, 1000);
-	target += gamma_lpdf(intercepts_sd | 0.01, 0.01); // Gives a mean of 1 and variance of 100
-	// print("target 1:", target());
-
-	// --- dbh
-	target += gamma_lpdf(dbh_mean | 0.1, 0.1); // Gives a mean of 1 and variance of 10
-	target += gamma_lpdf(dbh_var | 0.01, 0.01); // Gives a mean of 1 and variance of 100
-
-	// print("target 2:", target());
-
-	// --- precipitations
-	target += normal_lpdf(precip_mean | 0, 100);
-	target += gamma_lpdf(precip_sd | 0.01, 0.01); // Gives a mean of 1 and variance of 100
-
-	target += normal_lpdf(quad_precip_mean | 0, 100);
-	target += gamma_lpdf(quad_precip_sd | 0.01, 0.01); // Gives a mean of 1 and variance of 100
-
 	// Priors
-	target += normal_lpdf(intercepts | intercepts_mean, intercepts_sd);
-	target += gamma_lpdf(slopes_dbh | dbh_mean^2/dbh_var, dbh_mean/dbh_var);
-	target += normal_lpdf(slopes_precip | precip_mean, precip_sd);
-	target += normal_lpdf(quad_slopes_precip | quad_precip_mean, quad_precip_sd);
-	// target += gamma_lpdf(quad_slopes_precip_m | quad_precip_mean^2/quad_precip_var, quad_precip_mean/quad_precip_var);
+	target += normal_lpdf(intercepts | 0, 1000);
+	target += gamma_lpdf(slopes_dbh | 1^2/10, 1/10); // Gives a mean of 1, and variance of 10
+	target += normal_lpdf(slopes_precip | 0, 1000);
+	target += normal_lpdf(quad_slopes_precip | 0, 1000);
 
 	// print("target 3:", target());
 
