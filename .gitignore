@@ -1,3 +1,7 @@
 createDummyData_old.R
 notes/*
 .DS_Store
+*.rds
+*.pdf
+toyExample/test*
+eitzel2013/
