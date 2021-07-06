@@ -40,7 +40,7 @@ parameters {
 	real intercepts; // Species-specific value
 	real slopes_dbh; // Species-specific value, Markov process coefficient
 	real slopes_precip; // Species-specific value
-	real quad_slopes_precip[n_indiv]; // Species-specific value
+	real quad_slopes_precip; // Species-specific value
 
 	real<lower = 0.000001> processError; // Constrained by default
 
@@ -60,7 +60,7 @@ model {
 
 	// Priors
 	target += normal_lpdf(intercepts | 0, 1000);
-	target += gamma_lpdf(slopes_dbh | 1^2/10, 1/10); // Gives a mean of 1, and variance of 10
+	target += gamma_lpdf(slopes_dbh | 1.0^2/10, 1.0/10); // Gives a mean of 1, and variance of 10, /!\ integer division rounds to integer!
 	target += normal_lpdf(slopes_precip | 0, 1000);
 	target += normal_lpdf(quad_slopes_precip | 0, 1000);
 
@@ -76,9 +76,9 @@ model {
 		Y_generated[count + 1] ~ normal(Yobs[parents_index[i]], 0.1);
 		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
-			mean_gamma_ij = intercepts[i] + slopes_dbh[i]*Y_generated[count + j - 1] +
-				slopes_precip[i]*normalised_precip[climate_index[i] + j - 2] + // -1 (shift index) and -1 (previous year)
-				quad_slopes_precip[i]*normalised_precip[climate_index[i] + j - 2]^2; // -1 (shift index) and -1 (previous year)
+			mean_gamma_ij = intercepts + slopes_dbh*Y_generated[count + j - 1] +
+				slopes_precip*normalised_precip[climate_index[i] + j - 2] + // -1 (shift index) and -1 (previous year)
+				quad_slopes_precip*normalised_precip[climate_index[i] + j - 2]^2; // -1 (shift index) and -1 (previous year)
 			
 			// if (mean_gamma_ij <= 0)
 			// {
