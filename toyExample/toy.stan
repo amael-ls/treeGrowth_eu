@@ -5,7 +5,7 @@
 		- I call "parent" the first measured dbh of each individual. The parents have to be treated separately
 	
 	Reminder:
-		- The gamma distribution of stan uses in this order shape (alpha) and rate (beta). It can however be reparametrised
+		- The gamma distribution of stan uses, in this order, shape (alpha) and rate (beta). It can however be reparametrised
 			using mean and var: alpha = mean^2/var, beta = mean/var
 */
 

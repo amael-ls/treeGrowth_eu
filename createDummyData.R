@@ -9,7 +9,7 @@
 # I generate yearly data, but will parameterise the model with data available only
 # every five years. The unknown data between two census must, therefore, been infered.
 # 
-# Here, we assume that a good year is followd by a bad year with a proba 0.7, and that a bad year is followed
+# Here, we assume that a good year is followed by a bad year with a proba 0.7, and that a bad year is followed
 # by a good year with a proba 0.55:
 #		P(Good | Bad) = 0.55
 #		P(Bad | Bad) = 0.45
@@ -31,11 +31,11 @@ library(data.table)
 
 #### Generate data
 ## Common variables
-n = 20 # Number of individuals
+n = 200 # Number of individuals
 if (n %% 2 != 0)
 	warning("It would be better to choose an even number")
 
-time = 0:4
+time = 0:10
 id = rep(1:n, each = length(time))
 
 nbMeasurements = length(id)
