@@ -7,10 +7,8 @@ rm(list = ls())
 graphics.off()
 
 library(data.table)
-
-# library(stringi)
-# library(raster)
-# library(sp)
+library(bayesplot)
+library(cmdstanr)
 
 options(max.print = 500)
 ###########################################################?
@@ -87,7 +85,7 @@ for (xy in 1:n_plots)
 
 treeStates_dt[, range(true_dbh)]
 
-treeStates_dt[, observed_dbh := rnorm(n = .N, mean = true_dbh, sd = sigma_measure)]
+treeStates_dt[, dbh := rnorm(n = .N, mean = true_dbh, sd = sigma_measure)]
 
 #### Generate partial data set (keep only first and last measurements)
 kept_rows = sort(c(treeStates_dt[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1],
@@ -185,3 +183,182 @@ for (plot in indices[, unique(plot_id)])
 }
 
 indices = indices[index_gen != 0]
+
+
+
+###########################################################?
+######## 		THIRD PART: Run stan program 		########
+###########################################################?
+
+#### Tool function
+## Initiate Y_gen with reasonable value (by default, stan would generate them between 0 and 2---constraint Y_gen > 0)
+init_fun = function(...)
+{
+	providedArgs = list(...)
+	requiredArgs = c("dbh_parents", "years_indiv", "average_G", "n_hiddenState")
+	if (!all(requiredArgs %in% names(providedArgs)))
+		stop("You must provide chain_id, Yobs, and years_indiv")
+	
+	# print(providedArgs)
+
+	# chain_id = providedArgs[["chain_id"]]
+	dbh_parents = providedArgs[["dbh_parents"]]
+	years_indiv = providedArgs[["years_indiv"]]
+	average_G = providedArgs[["average_G"]]
+	n_hiddenState = providedArgs[["n_hiddenState"]]
+
+	Y_gen = numeric(n_hiddenState)
+
+	count = 0
+
+	for (i in 1:n_indiv) # Not that this forbid trees to shrink
+	{
+		Y_gen[count + 1] = rgamma(1, shape = dbh_parents[i]^2, rate = dbh_parents[i]) # Mean = dbh_parents[i], Variance = 1
+		for (j in 2:years_indiv[i])
+			Y_gen[count + j] = Y_gen[count + j - 1] + average_G[i] + rgamma(1, shape = 0.25, rate = 0.5)
+
+		count = count + years_indiv[i];
+	}
+
+	return(list(Y_generated = Y_gen))
+}
+
+#### Load data
+## Data are already in memory
+precip = precipitations_yearly
+rm(precipitations_yearly)
+
+# Set everyone to child type
+indices[, type := "child"]
+
+# Correct for those who are parent type
+indices[indices[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1], type := "parent"]
+
+# Compute nb years per individual
+indices[, nbYearsPerIndiv := max(year) - min(year) + 1, by = .(plot_id, tree_id)]
+
+checkUp = all(indices[, nbYearsPerIndiv == index_precip_end - index_precip_start + 1])
+if(!checkUp)
+	stop("Suspicious indexing. Review the indices data.table")
+
+if (length(precip) != indices[.N, index_precip_end])
+	stop("Dimension mismatch between climate and indices")
+
+if (indices[, .N] != treeData[, .N])
+	stop("Dimension mismatch between indices and treeData")
+
+n_obs = treeData[, .N]
+print(paste("Number of data:", n_obs))
+
+n_indiv = unique(treeData[, .(tree_id, plot_id)])[, .N]
+print(paste("Number of individuals:", treeData[, .N]))
+
+nbYearsPerIndiv = unique(indices[, .(tree_id, plot_id, nbYearsPerIndiv)])[, nbYearsPerIndiv]
+if (length(nbYearsPerIndiv) != n_indiv)
+	stop("Dimension mismatch between nbYearsPerIndiv and n_indiv")
+
+parents_index = treeData[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1]
+children_index = treeData[, .I[which(year != min(year))], by = .(plot_id, tree_id)][, V1]
+last_child_index = treeData[, .I[which.max(year)], by = .(plot_id, tree_id)][, V1]
+not_parent_index = 1:indices[.N, index_gen]
+not_parent_index = not_parent_index[!(not_parent_index %in% indices[type == "parent", index_gen])]
+
+if (length(parents_index) != n_indiv)
+	stop("Dimension mismatch between parents_index and n_indiv")
+
+if (length(children_index) != n_obs - n_indiv)
+	stop("Dimension mismatch between children_index and number of children")
+
+if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
+	stop("Dimension mismatch between not_parent_index, n_hiddenState, and n_indiv")
+
+#### Stan model
+## Define stan variables
+# Common variables
+maxIter = 1e4
+n_chains = 4
+
+# Data to provide
+stanData = list(
+	# Number of data
+	n_indiv = n_indiv, # Number of individuals
+	n_precip = length(precip), # Dimension of the climate vector
+	n_obs = n_obs, # Number of trees observations
+	n_hiddenState = indices[.N, index_gen], # Dimension of the state space vector
+	n_children = n_obs - n_indiv, # Number of children trees observations = n_obs - n_indiv
+	nbYearsPerIndiv = nbYearsPerIndiv, # Number of years for each individual
+
+	# Indices
+	parents_index = parents_index, # Index of each parent in the observed data
+	parentsObs_index = indices[type == "parent", index_gen], # Corresponding index of observed parents in Y_generated
+	children_index = children_index, # Index of children in the observed data
+	childrenObs_index = indices[type == "child", index_gen], # Corresponding index of observed children in Y_generated
+	climate_index = indices[type == "parent", index_precip_start], # Index of the climate associated to each parent
+	not_parent_index = not_parent_index, # Index in Y_generated of states that cannot be compared to data
+
+	# Observations
+	Yobs = treeData[, dbh],
+
+	# Explanatory variable
+	precip = precip, # Precipitations
+
+	# Parameter for parralel calculus
+	grainsize = 1
+)
+
+# Initial value for states only
+average_G = (treeData[last_child_index, dbh] - treeData[parents_index, dbh])/
+	(treeData[last_child_index, year] - treeData[parents_index, year])
+
+if (length(average_G) != n_indiv)
+	stop("Dimensions mismatch between average_G and number of individuals")
+
+initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_index, dbh],
+ 	years_indiv = nbYearsPerIndiv, average_G = average_G,
+ 	n_hiddenState = indices[.N, index_gen])
+
+length(initVal_Y_gen)
+
+for (i in 1:n_chains)
+	print(range(initVal_Y_gen[[i]]))
+
+## Compile stan model
+# model = stan_model(file = "./toy.stan")
+# model = cmdstan_model("toyPara_reduce_sum.stan", cpp_options = list(stan_threads = TRUE)) # list(stan_threads = TRUE, stan_opencl = TRUE)
+# model = cmdstan_model("toyPara_GPUs.stan") #, cpp_options = list(stan_opencl = TRUE))
+
+model = cmdstan_model("toyPara_GPUs.stan", cpp_options = list(stan_threads = TRUE))
+
+## Run model
+start = proc.time()
+
+# results = stan(file = "toy.stan", data = stanData, cores = n_chains,
+# 	iter = maxIter, chains = n_chains, init = initVal_Y_gen)
+
+# results = model$sample(data = stanData, parallel_chains = n_chains, threads_per_chain = 8, refresh = 2,
+# 	iter_warmup = maxIter/2, iter_sampling = maxIter/2, chains = n_chains, init = initVal_Y_gen)
+
+results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 1000, chains = n_chains,
+	threads_per_chain = 2, iter_warmup = maxIter/2, iter_sampling = maxIter/2, init = initVal_Y_gen)
+
+# results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 2, chains = n_chains,
+# 	opencl_ids = c(0, 0), iter_warmup = maxIter/2, iter_sampling = maxIter/2, init = initVal_Y_gen)
+
+proc.time() - start
+
+results
+
+plot_title = ggplot2::ggtitle("Posterior distributions", "with medians and 80% intervals")
+
+# "slopes_dbh", "slopes_precip", "quad_slopes_precip", "processError", "measureError"
+mcmc_areas(results$draws("intercepts")) + plot_title
+
+# intercept = 2.4
+
+# slope_precip = 0.004
+# quad_slope_precip = -0.00001
+
+# slope_dbh = 1.1
+
+# sigma_process = 4
+# sigma_measure = 1
