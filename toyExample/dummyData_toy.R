@@ -97,3 +97,91 @@ setorder(treeData, plot_id, tree_id, year)
 
 
 
+###########################################################?
+######## 		Second PART: Create indices 		########
+###########################################################?
+
+#### Tool function
+fillYears = function(years)
+{
+	if (length(years) < 2)
+		stop("From fillYears: Their should be at least two years to fill the gaps")
+
+	if (is.unsorted(years))
+		stop("From fillYears: years are assumed to be sorted!")
+
+	fill_years = years[1]:years[length(years)]
+	indices = which(fill_years %in% years)
+	
+	return (list(fill_years = fill_years, indices = indices))
+}
+
+#### Get precipitations (in real, from a raster but here from treeStates_dt)
+values = unique(treeStates_dt[, .(plot_id, year, precipitations)])
+setnames(values, old = "plot_id", new = "id")
+
+#### 'Joining' climate with tree data
+count = 0
+start = 0
+end = 0
+iter = 0
+
+nbIndiv = unique(treeData[, .(plot_id, tree_id)])[, .N]
+length_filled_years = sum(treeData[, max(year) - min(year) + 1, by = .(plot_id, tree_id)][, V1])
+
+indices = data.table(year = integer(length_filled_years), tree_id = integer(length_filled_years),
+	plot_id = integer(length_filled_years), index_gen = integer(length_filled_years),
+	index_precip_start = integer(length_filled_years), index_precip_end = integer(length_filled_years))
+
+for (plot in treeData[, unique(plot_id)])
+{
+	for (indiv in treeData[plot_id == plot, unique(tree_id)])
+	{
+		years_indices = fillYears(treeData[plot_id == plot & tree_id == indiv, year])
+		start = end + 1
+		end = end + length(years_indices[["fill_years"]])
+		indices[start:end, year := years_indices[["fill_years"]]]
+		indices[start:end, tree_id := indiv]
+		indices[start:end, plot_id := plot]
+		indices[years_indices[["indices"]] + count, index_gen := years_indices[["indices"]] + count]
+		count = count + years_indices[["indices"]][length(years_indices[["indices"]])]
+		iter = iter + 1
+		if (iter %% 1000 == 0)
+			print(paste(round(iter*100/nbIndiv, digits = 3), "% done"))
+	}
+}
+
+## Create the indices for the climate, and format climate data
+start = 0
+end = 0
+count = 0
+iter = 0
+
+length_clim = sum(treeData[, max(year) - min(year) + 1, by = .(plot_id)][, V1])
+precipitations_yearly = numeric(length_clim)
+
+for (plot in indices[, unique(plot_id)])
+{
+	precip_years = indices[plot_id == plot, sort(unique(year))]
+	
+	start = end + 1
+	end = start + length(precip_years) - 1
+
+	precipitations_yearly[start:end] = as.numeric(values[id == plot & year %in% precip_years , precipitations])
+
+	for (tree in indices[plot_id == plot, unique(tree_id)])
+	{
+		precip_start = min(which(indices[tree_id == tree & plot_id == plot, year] %in% precip_years)) + count
+		precip_end = max(which(indices[tree_id == tree & plot_id == plot, year] %in% precip_years)) + count
+
+		indices[tree_id == tree & plot_id == plot,
+			c("index_precip_start", "index_precip_end") := .(precip_start, precip_end)]
+		
+		iter = iter + 1
+		if (iter %% 1000 == 0)
+			print(paste(round(iter*100/nbIndiv, digits = 3), "% done"))
+	}
+	count = count + length(precip_years)
+}
+
+indices = indices[index_gen != 0]
