@@ -245,7 +245,6 @@ init_fun = function(...)
 
 ## A hint on how the priors look like
 # Define UI for sliders
-library(shiny)
 ui = fluidPage(
 	# ---- App title
 	titlePanel("Priors preview"),
@@ -338,19 +337,6 @@ server = function(input, output) {
 }
 
 shinyApp(ui, server)
-
-
-inp = list(range_dgamma = c(5, 10))
-lala = function(x, inp) {return (dgamma(x, shape = inp$range_dgamma[1], rate = 1))}
-
-curve(dgamma(x, shape = 5^2/5, rate = 5/5),
-			0, 5, lwd = 5, col = "#363945",
-			ylab = "Gamma pdf")
-
-		DescTools::Shade(
-			lala(x, inp),
-			breaks = c(1, 2), col = "#A1A1A166", density = NA)
-
 
 #### Load data
 ## Data are already in memory
