@@ -106,16 +106,6 @@ print(paste0(round(treeData[, .N]*100/treeStates_dt[, .N], 2), " % of the data k
 
 setorder(treeData, plot_id, tree_id, year)
 
-#### plots
-# plot(treeStates_dt[, unique_id], treeStates_dt[, true_dbh], pch = 19, cex = 0.7, col = "red", ty = "o", xlab = "unique id", ylab = expression(dbh[i](t)),
-# 	ylim = c(min(treeStates_dt[, .(true_dbh, dbh)]) - abs(min(treeStates_dt[, .(true_dbh, dbh)]))/10,
-# 		max(treeStates_dt[, .(true_dbh, dbh)] + max(treeStates_dt[, .(true_dbh, dbh)]/10))), las = 1)
-# points(treeData[, unique_id], treeData[, dbh], pch = 3, cex = 0.8, col = "blue", ty = "o", lty = 3)
-
-# legend("top", legend = c("Obs. (with missing data)", "True states"), pch = c(3, 19),
-# 	col = c("blue", "red"), lty = c(3, 1), horiz=TRUE, bty="n", cex=0.9)
-
-
 ###########################################################?
 ######## 		Second PART: Create indices 		########
 ###########################################################?
@@ -361,8 +351,6 @@ loglik_1D = function(variance, list_args)
 	}
 	return (minus_loglik)
 }
-
-loglik_1D(variance = 10, list_args = arguments_ls)
 
 #### Plot
 ## Load the stan results to get the generated states
