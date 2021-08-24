@@ -106,13 +106,13 @@ print(paste0(round(treeData[, .N]*100/treeStates_dt[, .N], 2), " % of the data k
 setorder(treeData, plot_id, tree_id, year)
 
 #### plots
-plot(treeStates_dt[, unique_id], treeStates_dt[, true_dbh], pch = 19, cex = 0.7, col = "red", ty = "o", xlab = "unique id", ylab = expression(dbh[i](t)),
-	ylim = c(min(treeStates_dt[, .(true_dbh, dbh)]) - abs(min(treeStates_dt[, .(true_dbh, dbh)]))/10,
-		max(treeStates_dt[, .(true_dbh, dbh)] + max(treeStates_dt[, .(true_dbh, dbh)]/10))), las = 1)
-points(treeData[, unique_id], treeData[, dbh], pch = 3, cex = 0.8, col = "blue", ty = "o", lty = 3)
+# plot(treeStates_dt[, unique_id], treeStates_dt[, true_dbh], pch = 19, cex = 0.7, col = "red", ty = "o", xlab = "unique id", ylab = expression(dbh[i](t)),
+# 	ylim = c(min(treeStates_dt[, .(true_dbh, dbh)]) - abs(min(treeStates_dt[, .(true_dbh, dbh)]))/10,
+# 		max(treeStates_dt[, .(true_dbh, dbh)] + max(treeStates_dt[, .(true_dbh, dbh)]/10))), las = 1)
+# points(treeData[, unique_id], treeData[, dbh], pch = 3, cex = 0.8, col = "blue", ty = "o", lty = 3)
 
-legend("top", legend = c("Obs. (with missing data)", "True states"), pch = c(3, 19),
-	col = c("blue", "red"), lty = c(3, 1), horiz=TRUE, bty="n", cex=0.9)
+# legend("top", legend = c("Obs. (with missing data)", "True states"), pch = c(3, 19),
+# 	col = c("blue", "red"), lty = c(3, 1), horiz=TRUE, bty="n", cex=0.9)
 
 
 ###########################################################?
@@ -271,12 +271,12 @@ ui = fluidPage(
 			# ---- Input: Mean associated to normal distribution plot
 			sliderInput("mean_dgamma", "mean (gamma distrib):",
 				min = 0, max = 200,
-				value = 5, step = 0.1),
+				value = 5, step = 1),
 
 			# ---- Input: Std deviation associated to normal distribution plot
 			sliderInput("var_dgamma", "variance (gamma distrib):",
-				min = 0, max = 200,
-				value = 5, step = 0.1),
+				min = 0, max = 1000,
+				value = 5, step = 1),
 
 			# ---- Input: Range to plot gamma distribution
 			sliderInput("range_dgamma", "Range gamma:",
@@ -286,7 +286,7 @@ ui = fluidPage(
 			# ---- Input: Integration range
 			sliderInput("integration_range", "a: P(X < a):",
 				min = 0, max = 200,
-				value = 1, step = 0.1)
+				value = 1, step = 0.5)
 		),
 
 		# ---- Main panel for displaying outputs
@@ -332,7 +332,7 @@ server = function(input, output) {
 
 		DescTools::Shade(
 			dgamma(x, shape = sh, rate = ra),
-			breaks = c(0, input$integration_range), col = "#A1A1A166", density = NA)
+			breaks = c(0.01, input$integration_range), col = "#A1A1A166", density = NA)
 		})
 }
 
@@ -392,8 +392,8 @@ Y_generated_0 = rnorm(n_indiv, treeData[parents_index, dbh], 5)
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 4e3
-n_chains = 4
+maxIter = 6e3
+n_chains = 3
 
 # Data to provide
 stanData = list(
@@ -458,8 +458,7 @@ start = proc.time()
 # results = model$sample(data = stanData, parallel_chains = n_chains, threads_per_chain = 8, refresh = 2,
 # 	iter_warmup = maxIter/2, iter_sampling = maxIter/2, chains = n_chains, init = initVal_Y_gen)
 
-# maxIter = 2
-results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 400, chains = n_chains,
+results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 200, chains = n_chains, # threads_per_chain = 2,
 	iter_warmup = maxIter/2, iter_sampling = maxIter/2, init = initVal_Y_gen, max_treedepth = 14, adapt_delta = 0.95)
 
 # results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 2, chains = n_chains,
@@ -467,14 +466,34 @@ results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 40
 
 proc.time() - start
 
-results
+results$save_object(file = paste0("./toyPara_GPUs_nonInformative_noProcessError_", format(Sys.time(), "%d-%m-%Y_%Hh%M"), ".rds"))
+
 results$cmdstan_diagnose()
 
-plot_title = ggplot2::ggtitle("Posterior distributions", "with medians and 80% intervals")
-mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title + ggplot2::geom_vline(quad_slope_precip)
+plot_title = ggplot2::ggtitle("Posterior distribution quad slop precip", "with medians and 80% intervals")
+mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = quad_slope_precip, color = "#FFA500")
 
 plot_title = ggplot2::ggtitle("Traces for intercept")
 mcmc_trace(results$draws("intercepts")) + plot_title
+
+plot_title = ggplot2::ggtitle("Posterior distribution intercept", "with medians and 80% intervals")
+mcmc_areas(results$draws("intercepts"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = intercept, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Traces for measure error")
+mcmc_trace(results$draws("measureError")) + plot_title
+
+plot_title = ggplot2::ggtitle("Posterior distribution measure error", "with medians and 80% intervals")
+mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = sigma_measure, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Traces for process error")
+mcmc_trace(results$draws("processError")) + plot_title
+
+plot_title = ggplot2::ggtitle("Posterior distribution process error", "with medians and 80% intervals")
+mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = sigma_process, color = "#FFA500")
 
 # "slopes_dbh", "slopes_precip", "quad_slopes_precip", "processError", "measureError"
 
@@ -487,6 +506,18 @@ mcmc_trace(results$draws("intercepts")) + plot_title
 
 # sigma_process = 4
 # sigma_measure = 1
+
+## Check-up states
+chosen_state = 4
+if (chosen_state > treeStates_dt[, .N])
+	stop(paste("chosen_state must be smaller than", treeStates_dt[, .N]))
+
+plot_title = ggplot2::ggtitle(paste("Traces for state", chosen_state))
+mcmc_trace(results$draws(paste0("Y_generated[", chosen_state, "]"))) + plot_title
+
+plot_title = ggplot2::ggtitle(paste("Posterior distribution for state", chosen_state), "with medians and 80% intervals")
+mcmc_areas(results$draws(paste0("Y_generated[", chosen_state, "]")), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = treeStates_dt[chosen_state, true_dbh], color = "#FFA500")
 
 # Colours from https://www.w3schools.com/colors/colors_2021.asp
 
@@ -531,3 +562,4 @@ mcmc_trace(results$draws("intercepts")) + plot_title
 # buttercream = "#EFE1CE"
 # desert_mist = "#E0B589"
 # willow = "#9A8B4F"
+
