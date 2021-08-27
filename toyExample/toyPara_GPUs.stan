@@ -50,15 +50,14 @@ transformed data {
 
 parameters {
 	// Parameters
-	real intercepts; // Species-specific value
+	// real intercepts; // Species-specific value
 	real<lower = 0> slopes_dbh; // Species-specific value, Markov process coefficient
-	real slopes_precip; // Species-specific value
-	real quad_slopes_precip; // Species-specific value
+	// real slopes_precip; // Species-specific value
+	// real quad_slopes_precip; // Species-specific value
 
 	// real<lower = 0.000001> processError; // Constrained by default
 	real<lower = 0.000001> measureError; // Constrained by default
 
-	// real<lower = 0> Y_generated[n_hiddenState]; // State vector Y (hidden markov process), positive
 	vector<lower = 0>[n_hiddenState] Y_generated; // State vector Y (hidden markov process), positive
 }
 
@@ -70,10 +69,10 @@ model {
 	int k = 0;
 
 	// Priors
-	target += normal_lpdf(intercepts | 2, 10);
+	// target += normal_lpdf(intercepts | 2, 10);
 	target += gamma_lpdf(slopes_dbh | 1.0^2/100, 1.0/100); // Gives a mean = 1, and variance = 100, /!\ integer division rounds to integer!
-	target += normal_lpdf(slopes_precip | 0, 10);
-	target += normal_lpdf(quad_slopes_precip | 0, 10);
+	// target += normal_lpdf(slopes_precip | 0, 10);
+	// target += normal_lpdf(quad_slopes_precip | 0, 10);
 
 	// print("target 3:", target());
 
@@ -87,9 +86,10 @@ model {
 		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
 			k = k + 1;
-			expected_true_dbh[k] = intercepts + slopes_dbh*Y_generated[count + j - 1] +
-				slopes_precip*normalised_precip[climate_index[i] + j - 2] + // -1 (shift index) and -1 (previous year)
-				quad_slopes_precip*normalised_precip[climate_index[i] + j - 2]^2; // -1 (shift index) and -1 (previous year)
+			expected_true_dbh[k] = slopes_dbh*Y_generated[count + j - 1];
+			// expected_true_dbh[k] = intercepts + slopes_dbh*Y_generated[count + j - 1] +
+			// 	slopes_precip*normalised_precip[climate_index[i] + j - 2] + // -1 (shift index) and -1 (previous year)
+			// 	quad_slopes_precip*normalised_precip[climate_index[i] + j - 2]^2; // -1 (shift index) and -1 (previous year)
 
 			// if (is_inf(expected_true_dbh[k]))
 			// 	print(k);
