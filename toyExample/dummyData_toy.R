@@ -29,7 +29,6 @@ record_min = 3
 record_max = 6
 
 n_census_per_plot = sample(x = record_min:record_max, size = n_plots, replace = TRUE)
-# n_census_per_plot = rep(3, n_plots)
 
 if (any(n_census_per_plot < 2))
 	stop("There should be at least 2 census per plot")
@@ -73,10 +72,10 @@ for (xy in 1:n_plots)
 	treeStates_dt[(count + 1):(count + nb_measures_plot), precipitations := rep(precip, n_indiv_per_plot[xy])]
 
 	# Initial state
-	initial_dbh = rgamma(n_indiv_per_plot[xy], shape = 150^2/300, rate = 150/300)
+	initial_dbh = rgamma(n_indiv_per_plot[xy], shape = 150^2/500, rate = 150/500)
 	index = seq(from = 1, to = nb_measures_plot, by = n_census_per_plot[xy]) + count
-	treeStates_dt[index, true_dbh := initial_dbh]
-	treeStates_dt[index, true_dbh_noError := initial_dbh]
+	# treeStates_dt[index, true_dbh := initial_dbh]
+	treeStates_dt[index, true_dbh := rnorm(n = n_indiv_per_plot[xy], mean = initial_dbh, sd = sigma_process)]
 
 	for (j in 1:(n_census_per_plot[xy] - 1))
 	{
@@ -84,7 +83,6 @@ for (xy in 1:n_plots)
 			slope_precip*treeStates_dt[index + j - 1, precipitations] +
 			quad_slope_precip*(treeStates_dt[index + j - 1, precipitations])^2
 		treeStates_dt[index + j, true_dbh := rnorm(n = n_indiv_per_plot[xy], mean = next_dbh, sd = sigma_process)]
-		treeStates_dt[index + j, true_dbh_noError := next_dbh]
 	}
 	
 	count = count + nb_measures_plot
@@ -92,7 +90,7 @@ for (xy in 1:n_plots)
 
 treeStates_dt[, range(true_dbh)]
 
-treeStates_dt[, dbh := rnorm(n = .N, mean = true_dbh, sd = sigma_measure)]
+treeStates_dt[, observed_dbh := rnorm(n = .N, mean = true_dbh, sd = sigma_measure)]
 setorder(treeStates_dt, plot_id, tree_id, year)
 treeStates_dt[, unique_id := 1:.N]
 
@@ -100,20 +98,50 @@ treeStates_dt[, unique_id := 1:.N]
 kept_rows = sort(c(treeStates_dt[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1],
 	treeStates_dt[, .I[which.max(year)], by = .(plot_id, tree_id)][, V1]))
 
+##! Quick and dirty solution to also keep an intermediate measure between year_min and year_max
+cheating = integer(sum(n_indiv_per_plot))
+for (i in 1:sum(n_indiv_per_plot))
+	cheating[i] = round((kept_rows[2*i - 1] + kept_rows[2*i])/2)
+
+
+if (any(cheating %in% kept_rows))
+	warning("Some individuals did not get an extra measurment")
+
+kept_rows = sort(c(kept_rows, cheating))
+
+##! Quick and dirty solution to keep everything
+kept_rows = unique(1:treeStates_dt[, .N])
+
 treeData = treeStates_dt[kept_rows]
 print(paste0(round(treeData[, .N]*100/treeStates_dt[, .N], 2), " % of the data kept"))
 
 setorder(treeData, plot_id, tree_id, year)
 
 #### plots
-# plot(treeStates_dt[, unique_id], treeStates_dt[, true_dbh], pch = 19, cex = 0.7, col = "red", ty = "o", xlab = "unique id", ylab = expression(dbh[i](t)),
-# 	ylim = c(min(treeStates_dt[, .(true_dbh, dbh)]) - abs(min(treeStates_dt[, .(true_dbh, dbh)]))/10,
-# 		max(treeStates_dt[, .(true_dbh, dbh)] + max(treeStates_dt[, .(true_dbh, dbh)]/10))), las = 1)
-# points(treeData[, unique_id], treeData[, dbh], pch = 3, cex = 0.8, col = "blue", ty = "o", lty = 3)
+## General plot
+plot(treeStates_dt[, unique_id], treeStates_dt[, true_dbh], pch = 19, cex = 0.7, col = "red", ty = "o", xlab = "unique id", ylab = expression(observed_dbh[i](t)),
+	ylim = c(min(treeStates_dt[, .(true_dbh, observed_dbh)]) - abs(min(treeStates_dt[, .(true_dbh, observed_dbh)]))/10,
+		max(treeStates_dt[, .(true_dbh, observed_dbh)] + max(treeStates_dt[, .(true_dbh, observed_dbh)]/10))), las = 1)
+points(treeData[, unique_id], treeData[, observed_dbh], pch = 3, cex = 0.8, col = "blue", ty = "o", lty = 3)
 
-# legend("top", legend = c("Obs. (with missing data)", "True states"), pch = c(3, 19),
-# 	col = c("blue", "red"), lty = c(3, 1), horiz=TRUE, bty="n", cex=0.9)
+legend("top", legend = c("Obs. (with missing data)", "True states"), pch = c(3, 19),
+	col = c("blue", "red"), lty = c(3, 1), horiz=TRUE, bty="n", cex=0.9)
 
+## Few plots
+par(mfrow = c(3, 1))
+for (i in 1:3)
+{
+	plot(treeStates_dt[(tree_id == i) & (plot_id == 1), unique_id], treeStates_dt[(tree_id == i) & (plot_id == 1), true_dbh],
+		pch = 19, cex = 0.7, col = "red", ty = "o", xlab = "unique id", ylab = expression(observed_dbh[i](t)),
+		las = 1)
+	points(treeData[(tree_id == i) & (plot_id == 1), unique_id],
+		treeData[(tree_id == i) & (plot_id == 1), observed_dbh],
+		pch = 3, cex = 0.8, col = "blue", ty = "o", lty = 3)
+
+	legend("top", legend = c("Obs. (with missing data)", "True states"), pch = c(3, 19),
+		col = c("blue", "red"), lty = c(3, 1), horiz=TRUE, bty="n", cex=0.9)
+}
+dev.off()
 
 ###########################################################?
 ######## 		Second PART: Create indices 		########
@@ -336,7 +364,7 @@ server = function(input, output) {
 		})
 }
 
-shinyApp(ui, server)
+# shinyApp(ui, server)
 
 #### Load data
 ## Data are already in memory
@@ -387,12 +415,12 @@ if (length(children_index) != n_obs - n_indiv)
 if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
 	stop("Dimensions mismatch between not_parent_index, n_hiddenState, and n_indiv")
 
-Y_generated_0 = rnorm(n_indiv, treeData[parents_index, dbh], 5)
+Y_generated_0 = rnorm(n_indiv, treeData[parents_index, observed_dbh], 5)
 
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 4e3
+maxIter = 6e3
 n_chains = 3
 
 # Data to provide
@@ -417,7 +445,7 @@ stanData = list(
 	Y_generated_0 = Y_generated_0,
 
 	# Observations
-	Yobs = treeData[, dbh],
+	Yobs = treeData[, observed_dbh],
 
 	# Explanatory variable
 	precip = precip, # Precipitations
@@ -427,13 +455,13 @@ stanData = list(
 )
 
 # Initial value for states only
-average_G = (treeData[last_child_index, dbh] - treeData[parents_index, dbh])/
+average_G = (treeData[last_child_index, observed_dbh] - treeData[parents_index, observed_dbh])/
 	(treeData[last_child_index, year] - treeData[parents_index, year])
 
 if (length(average_G) != n_indiv)
 	stop("Dimensions mismatch between average_G and number of individuals")
 
-initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_index, dbh],
+initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_index, observed_dbh],
  	years_indiv = nbYearsPerIndiv, average_G = average_G,
  	n_hiddenState = indices[.N, index_gen])
 
@@ -466,18 +494,18 @@ results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 20
 
 proc.time() - start
 
-results$save_object(file = paste0("./toyPara_GPUs_nonInformative_noProcessError_", format(Sys.time(), "%d-%m-%Y_%Hh%M"), ".rds"))
+# results$save_object(file = paste0("./toyPara_GPUs_nonInformative_noProcessError_", format(Sys.time(), "%d-%m-%Y_%Hh%M"), ".rds"))
 
 results$cmdstan_diagnose()
 
 #### Plots of posterior distributions and traces
-## Intercept
-plot_title = ggplot2::ggtitle("Traces for intercept")
-mcmc_trace(results$draws("intercepts")) + plot_title
+# ## Intercept
+# plot_title = ggplot2::ggtitle("Traces for intercept")
+# mcmc_trace(results$draws("intercepts")) + plot_title
 
-plot_title = ggplot2::ggtitle("Posterior distribution intercept", "with medians and 80% intervals")
-mcmc_areas(results$draws("intercepts"), prob = 0.8) + plot_title +
-	ggplot2::geom_vline(xintercept = intercept, color = "#FFA500")
+# plot_title = ggplot2::ggtitle("Posterior distribution intercept", "with medians and 80% intervals")
+# mcmc_areas(results$draws("intercepts"), prob = 0.8) + plot_title +
+# 	ggplot2::geom_vline(xintercept = intercept, color = "#FFA500")
 
 ## Slope for dbh
 plot_title = ggplot2::ggtitle("Posterior distribution slope dbh", "with medians and 80% intervals")
@@ -487,29 +515,29 @@ mcmc_areas(results$draws("slopes_dbh"), prob = 0.8) + plot_title +
 plot_title = ggplot2::ggtitle("Traces for slope dbh")
 mcmc_trace(results$draws("slopes_dbh")) + plot_title
 
-## Slope for precipitation
-plot_title = ggplot2::ggtitle("Posterior distribution slope precip", "with medians and 80% intervals")
-mcmc_areas(results$draws("slopes_precip"), prob = 0.8) + plot_title +
-	ggplot2::geom_vline(xintercept = slope_precip, color = "#FFA500")
+# ## Slope for precipitation
+# plot_title = ggplot2::ggtitle("Posterior distribution slope precip", "with medians and 80% intervals")
+# mcmc_areas(results$draws("slopes_precip"), prob = 0.8) + plot_title +
+# 	ggplot2::geom_vline(xintercept = slope_precip, color = "#FFA500")
 
-plot_title = ggplot2::ggtitle("Traces for slope precip")
-mcmc_trace(results$draws("slopes_precip")) + plot_title
+# plot_title = ggplot2::ggtitle("Traces for slope precip")
+# mcmc_trace(results$draws("slopes_precip")) + plot_title
 
-## Slope for precipitation (quadratique term)
-plot_title = ggplot2::ggtitle("Posterior distribution slope precip (quadratic term)", "with medians and 80% intervals")
-mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title +
-	ggplot2::geom_vline(xintercept = quad_slope_precip, color = "#FFA500")
+# ## Slope for precipitation (quadratique term)
+# plot_title = ggplot2::ggtitle("Posterior distribution slope precip (quadratic term)", "with medians and 80% intervals")
+# mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title +
+# 	ggplot2::geom_vline(xintercept = quad_slope_precip, color = "#FFA500")
 
-plot_title = ggplot2::ggtitle("Traces for slope precip (quadratic term)")
-mcmc_trace(results$draws("quad_slopes_precip")) + plot_title
+# plot_title = ggplot2::ggtitle("Traces for slope precip (quadratic term)")
+# mcmc_trace(results$draws("quad_slopes_precip")) + plot_title
 
 ## Measurement error
-plot_title = ggplot2::ggtitle("Traces for measure error")
-mcmc_trace(results$draws("measureError")) + plot_title
-
 plot_title = ggplot2::ggtitle("Posterior distribution measure error", "with medians and 80% intervals")
 mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title +
 	ggplot2::geom_vline(xintercept = sigma_measure, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Traces for measure error")
+mcmc_trace(results$draws("measureError")) + plot_title
 
 ## Process error
 plot_title = ggplot2::ggtitle("Traces for process error")
@@ -531,7 +559,7 @@ mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title +
 # sigma_measure = 1
 
 ## Check-up states
-chosen_state = 4
+chosen_state = 50
 if (chosen_state > treeStates_dt[, .N])
 	stop(paste("chosen_state must be smaller than", treeStates_dt[, .N]))
 
