@@ -47,10 +47,10 @@ treeStates_dt = data.table(year = integer(nb_measures), tree_id = integer(nb_mea
 	plot_id = integer(nb_measures), true_dbh = numeric(nb_measures), precipitations = numeric(nb_measures))
 
 ## Parameters
-intercept = 2.4
+intercept = 0 # 2.4
 
-slope_precip = 0.004
-quad_slope_precip = -0.00001
+slope_precip = 0 # 0.004
+quad_slope_precip = 0 # -0.00001
 
 slope_dbh = 1.1
 
@@ -357,10 +357,10 @@ if(!checkUp)
 	stop("Suspicious indexing. Review the indices data.table")
 
 if (length(precip) != indices[.N, index_precip_end])
-	stop("Dimension mismatch between climate and indices")
+	stop("Dimensions mismatch between climate and indices")
 
 if (indices[, .N] != treeData[, .N])
-	stop("Dimension mismatch between indices and treeData")
+	stop("Dimensions mismatch between indices and treeData")
 
 n_obs = treeData[, .N]
 print(paste("Number of data:", n_obs))
@@ -379,20 +379,20 @@ not_parent_index = 1:indices[.N, index_gen]
 not_parent_index = not_parent_index[!(not_parent_index %in% indices[type == "parent", index_gen])]
 
 if (length(parents_index) != n_indiv)
-	stop("Dimension mismatch between parents_index and n_indiv")
+	stop("Dimensions mismatch between parents_index and n_indiv")
 
 if (length(children_index) != n_obs - n_indiv)
-	stop("Dimension mismatch between children_index and number of children")
+	stop("Dimensions mismatch between children_index and number of children")
 
 if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
-	stop("Dimension mismatch between not_parent_index, n_hiddenState, and n_indiv")
+	stop("Dimensions mismatch between not_parent_index, n_hiddenState, and n_indiv")
 
 Y_generated_0 = rnorm(n_indiv, treeData[parents_index, dbh], 5)
 
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 6e3
+maxIter = 4e3
 n_chains = 3
 
 # Data to provide
@@ -470,24 +470,8 @@ results$save_object(file = paste0("./toyPara_GPUs_nonInformative_noProcessError_
 
 results$cmdstan_diagnose()
 
-plot_title = ggplot2::ggtitle("Posterior distribution quad slope precip", "with medians and 80% intervals")
-mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title +
-	ggplot2::geom_vline(xintercept = quad_slope_precip, color = "#FFA500")
-
-plot_title = ggplot2::ggtitle("Posterior distribution slope precip", "with medians and 80% intervals")
-mcmc_areas(results$draws("slopes_precip"), prob = 0.8) + plot_title +
-	ggplot2::geom_vline(xintercept = slope_precip, color = "#FFA500")
-
-plot_title = ggplot2::ggtitle("Traces for slope precip")
-mcmc_trace(results$draws("slopes_precip")) + plot_title
-
-plot_title = ggplot2::ggtitle("Posterior distribution slope dbh", "with medians and 80% intervals")
-mcmc_areas(results$draws("slopes_dbh"), prob = 0.8) + plot_title +
-	ggplot2::geom_vline(xintercept = slope_dbh, color = "#FFA500")
-
-plot_title = ggplot2::ggtitle("Traces for slope dbh")
-mcmc_trace(results$draws("slopes_dbh")) + plot_title
-
+#### Plots of posterior distributions and traces
+## Intercept
 plot_title = ggplot2::ggtitle("Traces for intercept")
 mcmc_trace(results$draws("intercepts")) + plot_title
 
@@ -495,6 +479,31 @@ plot_title = ggplot2::ggtitle("Posterior distribution intercept", "with medians 
 mcmc_areas(results$draws("intercepts"), prob = 0.8) + plot_title +
 	ggplot2::geom_vline(xintercept = intercept, color = "#FFA500")
 
+## Slope for dbh
+plot_title = ggplot2::ggtitle("Posterior distribution slope dbh", "with medians and 80% intervals")
+mcmc_areas(results$draws("slopes_dbh"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = slope_dbh, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Traces for slope dbh")
+mcmc_trace(results$draws("slopes_dbh")) + plot_title
+
+## Slope for precipitation
+plot_title = ggplot2::ggtitle("Posterior distribution slope precip", "with medians and 80% intervals")
+mcmc_areas(results$draws("slopes_precip"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = slope_precip, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Traces for slope precip")
+mcmc_trace(results$draws("slopes_precip")) + plot_title
+
+## Slope for precipitation (quadratique term)
+plot_title = ggplot2::ggtitle("Posterior distribution slope precip (quadratic term)", "with medians and 80% intervals")
+mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = quad_slope_precip, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Traces for slope precip (quadratic term)")
+mcmc_trace(results$draws("quad_slopes_precip")) + plot_title
+
+## Measurement error
 plot_title = ggplot2::ggtitle("Traces for measure error")
 mcmc_trace(results$draws("measureError")) + plot_title
 
@@ -502,6 +511,7 @@ plot_title = ggplot2::ggtitle("Posterior distribution measure error", "with medi
 mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title +
 	ggplot2::geom_vline(xintercept = sigma_measure, color = "#FFA500")
 
+## Process error
 plot_title = ggplot2::ggtitle("Traces for process error")
 mcmc_trace(results$draws("processError")) + plot_title
 
@@ -509,7 +519,6 @@ plot_title = ggplot2::ggtitle("Posterior distribution process error", "with medi
 mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title +
 	ggplot2::geom_vline(xintercept = sigma_process, color = "#FFA500")
 
-# "slopes_dbh", "slopes_precip", "quad_slopes_precip", "processError", "measureError"
 
 # intercept = 2.4
 
