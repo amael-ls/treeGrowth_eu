@@ -55,7 +55,7 @@ parameters {
 	// real slopes_precip; // Species-specific value
 	// real quad_slopes_precip; // Species-specific value
 
-	// real<lower = 0.000001> processError; // Constrained by default
+	real<lower = 0.000001> processError; // Constrained by default
 	real<lower = 0.000001> measureError; // Constrained by default
 
 	vector<lower = 0>[n_hiddenState] Y_generated; // State vector Y (hidden markov process), positive
@@ -76,7 +76,7 @@ model {
 
 	// print("target 3:", target());
 
-	// target += gamma_lpdf(processError | 1.0/100, 1.0/100); // Gives a mean  of 1 and variance of 100
+	target += gamma_lpdf(processError | 10.0^2/1000, 10.0/1000); // Gives a mean  of 10 and variance of 1000
 	target += gamma_lpdf(measureError | 10.0^2/1000, 10.0/1000); // Gives a mean  of 10 and variance of 1000
 	// print("target 4:", target());
 
@@ -97,19 +97,10 @@ model {
 		count += nbYearsPerIndiv[i];
 	}
 	// Prior on initial hidden state: This is a diffuse initialisation
-	target += normal_lpdf(Y_generated[parentsObs_index] | Y_generated_0, 10); // should be processError instead of 10
+	target += normal_lpdf(Y_generated[parentsObs_index] | Y_generated_0, processError); // should be processError instead of 10
 
 	// Process model
-	// if (is_inf(normal_lpdf(Y_generated[not_parent_index] | expected_true_dbh, 10))) // should be processError instead of 10
-	// {
-	// 	print("Y gen min:", min(Y_generated[not_parent_index]));
-	// 	print("Y gen min:", max(Y_generated[not_parent_index]));
-
-	// 	print("expected min:", min(expected_true_dbh));
-	// 	print("expected max:", max(expected_true_dbh));
-
-	// }
-	target += normal_lpdf(Y_generated[not_parent_index] | expected_true_dbh, 10); // should be processError instead of 10
+	target += normal_lpdf(Y_generated[not_parent_index] | expected_true_dbh, processError); // should be processError instead of 10
 	
 	// --- Observation model
 	// Compare true (hidden/latent) parents with observed parents
