@@ -470,9 +470,23 @@ results$save_object(file = paste0("./toyPara_GPUs_nonInformative_noProcessError_
 
 results$cmdstan_diagnose()
 
-plot_title = ggplot2::ggtitle("Posterior distribution quad slop precip", "with medians and 80% intervals")
+plot_title = ggplot2::ggtitle("Posterior distribution quad slope precip", "with medians and 80% intervals")
 mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title +
 	ggplot2::geom_vline(xintercept = quad_slope_precip, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Posterior distribution slope precip", "with medians and 80% intervals")
+mcmc_areas(results$draws("slopes_precip"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = slope_precip, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Traces for slope precip")
+mcmc_trace(results$draws("slopes_precip")) + plot_title
+
+plot_title = ggplot2::ggtitle("Posterior distribution slope dbh", "with medians and 80% intervals")
+mcmc_areas(results$draws("slopes_dbh"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = slope_dbh, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Traces for slope dbh")
+mcmc_trace(results$draws("slopes_dbh")) + plot_title
 
 plot_title = ggplot2::ggtitle("Traces for intercept")
 mcmc_trace(results$draws("intercepts")) + plot_title
