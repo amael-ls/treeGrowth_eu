@@ -9,13 +9,6 @@
 			using mean and var: alpha = mean^2/var, beta = mean/var
 */
 
-// functions {
-// 	real partial_sum_lpdf(real[] slice_obs, int start, int end, real[] subset_Y_gen, real measureError)
-// 		{
-// 			return normal_lpdf(slice_obs | subset_Y_gen[start:end], measureError);
-// 		}
-// }
-
 data {
 	// Number of data
 	int<lower = 1> n_obs; // Number of trees observations
@@ -41,6 +34,7 @@ parameters {
 	// Parameters
 	real<lower = 0.000001> processError; // Constrained by default
 	real<lower = 0.000001> measureError; // Constrained by default
+	real slope_dbh; // Constrained by default
 
 	vector[n_hiddenState] Y_generated; // State vector Y (hidden markov process), positive
 }
@@ -50,12 +44,13 @@ model {
 	// Priors
 	target += gamma_lpdf(processError | 10.0^2/1000, 10.0/1000); // Gives a mean  of 10 and variance of 1000
 	target += gamma_lpdf(measureError | 10.0^2/1000, 10.0/1000); // Gives a mean  of 10 and variance of 1000
+	target += normal_lpdf(slope_dbh | 1, 1);
 
 	// Model
 	target += normal_lpdf(Y_generated[1] | Y_generated_0, processError);
 	for (i in 2:nbYearsPerIndiv)
 	{
-		target += normal_lpdf(Y_generated[i] | Y_generated[i - 1], processError);
+		target += normal_lpdf(Y_generated[i] | slope_dbh*Y_generated[i - 1], processError);
 	}
 	// --- Observation model
 	// Compare true (hidden/latent) parents with observed parents
