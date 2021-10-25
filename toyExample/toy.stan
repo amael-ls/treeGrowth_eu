@@ -74,8 +74,8 @@ model {
 	for (i in 1:n_indiv)
 	{
 		// --- Parent data (uncertainty on the initial measure, should be country-specific!)
-		// Y_generated[count + 1] ~ normal(Yobs[parents_index[i]], measureError); // This is wrong, it should be the opposite!
-		target += normal_lpdf(Yobs[parents_index[i]] | Y_generated[count + 1], measureError);
+		// Y_generated[count + 1] ~ normal(Yobs[parents_index[i]], 1); // Prior
+		target += normal_lpdf(Yobs[parents_index[i]] | Y_generated[count + 1], measureError); // Can be moved after and done in para!!!
 
 		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
@@ -95,7 +95,7 @@ model {
 			// 	print("norm_precip[", climate_index[i] + j - 2, "] = ", normalised_precip[climate_index[i] + j - 2]);
 			// }
 			// Y_generated[count + j] ~ gamma(mean_gamma_ij^2/processError, mean_gamma_ij/processError);
-			Y_generated[count + j] ~ normal(mean_gamma_ij, processError);
+			Y_generated[count + j] ~ normal(mean_gamma_ij, processError); // Can be moved after and done in para!!!
 		}
 		count = count + nbYearsPerIndiv[i];
 	}
@@ -103,7 +103,7 @@ model {
 	// 	print("y[", i, "] = ", Y_generated[i]);
 
 	// Compare generated children with obs children
-	target += normal_lpdf(Yobs[children_index] | Y_generated[childrenObs_index], measureError);
+	target += normal_lpdf(Yobs[children_index] | Y_generated[childrenObs_index], measureError); // Can be done in para!!!
 }
 
 // generated quantities {
