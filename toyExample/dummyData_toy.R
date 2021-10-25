@@ -22,11 +22,11 @@ options(max.print = 500)
 set.seed(1969-08-18) # Woodstock seed
 
 # Number of plots
-n_plots = 4
+n_plots = 1
 
 # Number of census per plot
-record_min = 3
-record_max = 6
+record_min = 300
+record_max = 600
 
 n_census_per_plot = sample(x = record_min:record_max, size = n_plots, replace = TRUE)
 
@@ -34,8 +34,8 @@ if (any(n_census_per_plot < 2))
 	stop("There should be at least 2 census per plot")
 
 # Number of individuals per plot
-indiv_min = 10
-indiv_max = 30
+indiv_min = 1
+indiv_max = 1
 n_indiv_per_plot = sample(x = indiv_min:indiv_max, size = n_plots, replace = TRUE)
 
 # Number of data
@@ -48,13 +48,13 @@ treeStates_dt = data.table(year = integer(nb_measures), tree_id = integer(nb_mea
 ## Parameters
 intercept = 0 # 2.4
 
-slope_precip = 0 # 0.004
-quad_slope_precip = 0 # -0.00001
+slope_precip = 7.8476 # 0.004
+quad_slope_precip = -0.01 # -0.00001
 
-slope_dbh = 1.1
+slope_dbh = 0.95
 
 sigma_process = 10
-sigma_measure = 4
+sigma_measure = 2
 
 #### Generate complete data
 init_year_plot = sample(1990:2005, size = n_plots, replace = TRUE)
@@ -67,7 +67,7 @@ for (xy in 1:n_plots)
 	treeStates_dt[(count + 1):(count + nb_measures_plot), c("year", "plot_id", "tree_id") :=
 		.(census_years, xy, rep(1:n_indiv_per_plot[xy], each = n_census_per_plot[xy]))]
 
-	precip = runif(n = n_census_per_plot[xy], min = 650, max = 1200)
+	precip = runif(n = n_census_per_plot[xy], min = 450, max = 1050)
 
 	treeStates_dt[(count + 1):(count + nb_measures_plot), precipitations := rep(precip, n_indiv_per_plot[xy])]
 
@@ -95,25 +95,38 @@ setorder(treeStates_dt, plot_id, tree_id, year)
 treeStates_dt[, unique_id := 1:.N]
 
 #### Generate partial data set (keep only first and last measurements)
-kept_rows = sort(c(treeStates_dt[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1],
-	treeStates_dt[, .I[which.max(year)], by = .(plot_id, tree_id)][, V1]))
+# kept_rows = sort(c(treeStates_dt[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1],
+# 	treeStates_dt[, .I[which.max(year)], by = .(plot_id, tree_id)][, V1]))
 
-##! Quick and dirty solution to also keep an intermediate measure between year_min and year_max
-cheating = integer(sum(n_indiv_per_plot))
-for (i in 1:sum(n_indiv_per_plot))
-	cheating[i] = round((kept_rows[2*i - 1] + kept_rows[2*i])/2)
+# ##! Quick and dirty solution to also keep an intermediate measure between year_min and year_max
+# cheating = integer(sum(n_indiv_per_plot))
+# for (i in 1:sum(n_indiv_per_plot))
+# 	cheating[i] = round((kept_rows[2*i - 1] + kept_rows[2*i])/2)
 
+# if (any(cheating %in% kept_rows))
+# 	warning("Some individuals did not get an extra measurment")
 
-if (any(cheating %in% kept_rows))
-	warning("Some individuals did not get an extra measurment")
+# kept_rows = sort(c(kept_rows, cheating))
 
-kept_rows = sort(c(kept_rows, cheating))
+# ##! Quick and dirty solution to keep everything
+# kept_rows = unique(1:treeStates_dt[, .N])
 
-##! Quick and dirty solution to keep everything
-kept_rows = unique(1:treeStates_dt[, .N])
+##! Third quick and dirty solution that works for one individual
+nb_measures_kept = 300
+if (nb_measures_kept <= 2)
+{
+	warning("Only first and last measurement kept")
+	kept_rows = c(1, nb_measures)
+}
+
+if (nb_measures_kept > 2)
+	kept_rows = sort(c(1, sample(x = 2:(nb_measures - 1), size = nb_measures_kept - 2), nb_measures))
 
 treeData = treeStates_dt[kept_rows]
 print(paste0(round(treeData[, .N]*100/treeStates_dt[, .N], 2), " % of the data kept"))
+
+if (isTRUE(all.equal(treeData, treeStates_dt)))
+	warning("There is no missing data, are you sure it is what you want?")
 
 setorder(treeData, plot_id, tree_id, year)
 
@@ -128,20 +141,27 @@ legend("top", legend = c("Obs. (with missing data)", "True states"), pch = c(3, 
 	col = c("blue", "red"), lty = c(3, 1), horiz=TRUE, bty="n", cex=0.9)
 
 ## Few plots
-par(mfrow = c(3, 1))
-for (i in 1:3)
+if (length(unique(treeStates_dt[plot_id == 1, tree_id])) > 3)
 {
-	plot(treeStates_dt[(tree_id == i) & (plot_id == 1), unique_id], treeStates_dt[(tree_id == i) & (plot_id == 1), true_dbh],
-		pch = 19, cex = 0.7, col = "red", ty = "o", xlab = "unique id", ylab = expression(observed_dbh[i](t)),
-		las = 1)
-	points(treeData[(tree_id == i) & (plot_id == 1), unique_id],
-		treeData[(tree_id == i) & (plot_id == 1), observed_dbh],
-		pch = 3, cex = 0.8, col = "blue", ty = "o", lty = 3)
+	par(mfrow = c(3, 1))
+	for (i in 1:3)
+	{
+		plot(treeStates_dt[(tree_id == i) & (plot_id == 1), unique_id], treeStates_dt[(tree_id == i) & (plot_id == 1), true_dbh],
+			pch = 19, cex = 0.7, col = "red", ty = "o", xlab = "unique id", ylab = expression(observed_dbh[i](t)),
+			ylim = c(min(treeStates_dt[(tree_id == i) & (plot_id == 1), .(true_dbh, observed_dbh)]) -
+				abs(min(treeStates_dt[(tree_id == i) & (plot_id == 1), .(true_dbh, observed_dbh)]))/10,
+			max(treeStates_dt[(tree_id == i) & (plot_id == 1), .(true_dbh, observed_dbh)] +
+				max(treeStates_dt[(tree_id == i) & (plot_id == 1), .(true_dbh, observed_dbh)]/10))),
+			las = 1)
+		points(treeData[(tree_id == i) & (plot_id == 1), unique_id],
+			treeData[(tree_id == i) & (plot_id == 1), observed_dbh],
+			pch = 3, cex = 0.8, col = "blue", ty = "o", lty = 3)
 
-	legend("top", legend = c("Obs. (with missing data)", "True states"), pch = c(3, 19),
-		col = c("blue", "red"), lty = c(3, 1), horiz=TRUE, bty="n", cex=0.9)
+		legend("top", legend = c("Obs. (with missing data)", "True states"), pch = c(3, 19),
+			col = c("blue", "red"), lty = c(3, 1), horiz=TRUE, bty="n", cex=0.9)
+	}
+	dev.off()
 }
-dev.off()
 
 ###########################################################?
 ######## 		Second PART: Create indices 		########
@@ -420,7 +440,7 @@ Y_generated_0 = rnorm(n_indiv, treeData[parents_index, observed_dbh], 5)
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 6e3
+maxIter = 3e3
 n_chains = 3
 
 # Data to provide
@@ -461,9 +481,31 @@ average_G = (treeData[last_child_index, observed_dbh] - treeData[parents_index, 
 if (length(average_G) != n_indiv)
 	stop("Dimensions mismatch between average_G and number of individuals")
 
-initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_index, observed_dbh],
- 	years_indiv = nbYearsPerIndiv, average_G = average_G,
- 	n_hiddenState = indices[.N, index_gen])
+# initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_index, observed_dbh],
+#		years_indiv = nbYearsPerIndiv, average_G = average_G,
+#		n_hiddenState = indices[.N, index_gen])
+
+quick_and_dirty = function(...)
+{
+	providedArgs = list(...)
+	requiredArgs = c("n_hiddenState", "mean", "sd")
+	if (!all(requiredArgs %in% names(providedArgs)))
+		stop("You must provide n_hiddenState, mean, and sd")
+
+	mean = providedArgs[["mean"]]
+	sd = providedArgs[["sd"]]
+	n_hiddenState = providedArgs[["n_hiddenState"]]
+
+	Y_gen = numeric(n_hiddenState)
+
+	for (i in 1:n_hiddenState)
+		Y_gen[i] = rnorm(1, mean[i], sd)
+
+	return(list(Y_generated = Y_gen))
+}
+
+initVal_Y_gen = lapply(1:n_chains, quick_and_dirty, mean = treeStates_dt[, observed_dbh], sd = 20,
+	n_hiddenState = indices[.N, index_gen])
 
 length(initVal_Y_gen)
 
@@ -475,7 +517,9 @@ for (i in 1:n_chains)
 # model = cmdstan_model("toyPara_reduce_sum.stan", cpp_options = list(stan_threads = TRUE)) # list(stan_threads = TRUE, stan_opencl = TRUE)
 # model = cmdstan_model("toyPara_GPUs.stan", cpp_options = list(stan_opencl = TRUE))
 
-model = cmdstan_model("toyPara_GPUs.stan")
+# model = cmdstan_model("toyPara_GPUs_1indiv.stan")
+model = cmdstan_model("toyPara_GPUs_1indiv_precip.stan")
+# model = cmdstan_model("toyPara_GPUs.stan")
 
 ## Run model
 start = proc.time()
@@ -487,7 +531,8 @@ start = proc.time()
 # 	iter_warmup = maxIter/2, iter_sampling = maxIter/2, chains = n_chains, init = initVal_Y_gen)
 
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 200, chains = n_chains, # threads_per_chain = 2,
-	iter_warmup = maxIter/2, iter_sampling = maxIter/2, init = initVal_Y_gen, max_treedepth = 14, adapt_delta = 0.95)
+	iter_warmup = maxIter/2, iter_sampling = maxIter/2, init = initVal_Y_gen, save_warmup = TRUE,
+	max_treedepth = 14, adapt_delta = 0.95)
 
 # results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 2, chains = n_chains,
 # 	opencl_ids = c(0, 0), iter_warmup = maxIter/2, iter_sampling = maxIter/2, init = initVal_Y_gen)
@@ -515,21 +560,21 @@ mcmc_areas(results$draws("slopes_dbh"), prob = 0.8) + plot_title +
 plot_title = ggplot2::ggtitle("Traces for slope dbh")
 mcmc_trace(results$draws("slopes_dbh")) + plot_title
 
-# ## Slope for precipitation
-# plot_title = ggplot2::ggtitle("Posterior distribution slope precip", "with medians and 80% intervals")
-# mcmc_areas(results$draws("slopes_precip"), prob = 0.8) + plot_title +
-# 	ggplot2::geom_vline(xintercept = slope_precip, color = "#FFA500")
+## Slope for precipitation
+plot_title = ggplot2::ggtitle("Posterior distribution slope precip", "with medians and 80% intervals")
+mcmc_areas(results$draws("slopes_precip"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = slope_precip, color = "#FFA500")
 
-# plot_title = ggplot2::ggtitle("Traces for slope precip")
-# mcmc_trace(results$draws("slopes_precip")) + plot_title
+plot_title = ggplot2::ggtitle("Traces for slope precip")
+mcmc_trace(results$draws("slopes_precip")) + plot_title
 
-# ## Slope for precipitation (quadratique term)
-# plot_title = ggplot2::ggtitle("Posterior distribution slope precip (quadratic term)", "with medians and 80% intervals")
-# mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title +
-# 	ggplot2::geom_vline(xintercept = quad_slope_precip, color = "#FFA500")
+## Slope for precipitation (quadratique term)
+plot_title = ggplot2::ggtitle("Posterior distribution slope precip (quadratic term)", "with medians and 80% intervals")
+mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = quad_slope_precip, color = "#FFA500")
 
-# plot_title = ggplot2::ggtitle("Traces for slope precip (quadratic term)")
-# mcmc_trace(results$draws("quad_slopes_precip")) + plot_title
+plot_title = ggplot2::ggtitle("Traces for slope precip (quadratic term)")
+mcmc_trace(results$draws("quad_slopes_precip")) + plot_title
 
 ## Measurement error
 plot_title = ggplot2::ggtitle("Posterior distribution measure error", "with medians and 80% intervals")
@@ -540,13 +585,12 @@ plot_title = ggplot2::ggtitle("Traces for measure error")
 mcmc_trace(results$draws("measureError")) + plot_title
 
 ## Process error
-plot_title = ggplot2::ggtitle("Traces for process error")
-mcmc_trace(results$draws("processError")) + plot_title
-
 plot_title = ggplot2::ggtitle("Posterior distribution process error", "with medians and 80% intervals")
 mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title +
 	ggplot2::geom_vline(xintercept = sigma_process, color = "#FFA500")
 
+plot_title = ggplot2::ggtitle("Traces for process error")
+mcmc_trace(results$draws("processError")) + plot_title
 
 # intercept = 2.4
 
@@ -570,47 +614,125 @@ plot_title = ggplot2::ggtitle(paste("Posterior distribution for state", chosen_s
 mcmc_areas(results$draws(paste0("Y_generated[", chosen_state, "]")), prob = 0.8) + plot_title +
 	ggplot2::geom_vline(xintercept = treeStates_dt[chosen_state, true_dbh], color = "#FFA500")
 
-# Colours from https://www.w3schools.com/colors/colors_2021.asp
+# #### Colours
+# # Colours from https://www.w3schools.com/colors/colors_2021.asp
+# colour_vec = c(
+# 	"#34568B", # classic_blue
+# 	"#CD212A", # flame_scarlet
+# 	"#FFA500", # saffron
+# 	"#56C6A9", # biscay_green
+# 	"#4B5335", # chive
+# 	"#798EA4", # faded_denim
+# 	"#FA7A35", # orange_peel
+# 	"#00758F", # mosaic_blue
+# 	"#EDD59E", # sunlight
+# 	"#E8A798", # coral_pink
+# 	"#9C4722", # cinnamon_stick
+# 	"#6B5876", # grape_compote
+# 	"#B89B72", # lark
+# 	"#282D3C", # navy_blazer
+# 	"#EDF1FF", # brilliant_white
+# 	"#A09998", # ash
+# 	"#DC793E", # amberglow
+# 	"#A2242F", # samba
+# 	"#C48A69", # sandstone
+# 	"#D9CE52", # green_sheen
+# 	"#D19C97", # rose_tan
+# 	"#006B54", # ultramarine_green
+# 	"#6A2E2A", # fired_brick
+# 	"#E6AF91", # peach_nougat
+# 	"#6C244C", # magenta_purple
+# 	"#FDAC53", # marigold
+# 	"#9BB7D4", # cerulean
+# 	"#B55A30", # rust
+# 	"#F5DF4D", # illuminating
+# 	"#0072B5", # french_blue
+# 	"#A0DAA9", # green_ash
+# 	"#E9897E", # burnt_coral
+# 	"#00A170", # mint
+# 	"#926AA6", # amethyst_orchid
+# 	"#D2386C", # raspberry_sorbet
+# 	"#363945", # inkwell
+# 	"#939597", # ultimate_gray
+# 	"#EFE1CE", # buttercream
+# 	"#E0B589", # desert_mist
+# 	"#9A8B4F") # willow
 
-# classic_blue = "#34568B"
-# flame_scarlet = "#CD212A"
-# saffron = "#FFA500"
-# biscay_green = "#56C6A9"
-# chive = "#4B5335"
-# faded_denim = "#798EA4"
-# orange_peel = "#FA7A35"
-# mosaic_blue = "#00758F"
-# sunlight = "#EDD59E"
-# coral_pink = "#E8A798"
-# cinnamon_stick = "#9C4722"
-# grape_compote = "#6B5876"
-# lark = "#B89B72"
-# navy_blazer = "#282D3C"
-# brilliant_white = "#EDF1FF"
-# ash = "#A09998"
-# amberglow = "#DC793E"
-# samba = "#A2242F"
-# sandstone = "#C48A69"
-# green_sheen = "#D9CE52"
-# rose_tan = "#D19C97"
-# ultramarine_green = "#006B54"
-# fired_brick = "#6A2E2A"
-# peach_nougat = "#E6AF91"
-# magenta_purple = "#6C244C"
+# plot(1:length(colour_vec), rep(1, length(colour_vec)), pch = 19, cex = 2, col = colour_vec)
+# par(bg = rgb(204, 204, 204, maxColorValue = 255))
+# plot(1:length(colour_vec), rep(1, length(colour_vec)), pch = 19, cex = 2, col = colour_vec)
+# par(bg = rgb(103, 105, 109, maxColorValue = 255))
+# plot(1:length(colour_vec), rep(1, length(colour_vec)), pch = 19, cex = 2, col = colour_vec)
 
-# marigold = "#FDAC53"
-# cerulean = "#9BB7D4"
-# rust = "#B55A30"
-# illuminating = "#F5DF4D"
-# french_blue = "#0072B5"
-# green_ash = "#A0DAA9"
-# burnt_coral = "#E9897E"
-# mint = "#00A170"
-# amethyst_orchid = "#926AA6"
-# raspberry_sorbet = "#D2386C"
-# inkwell = "#363945"
-# ultimate_gray = "#939597"
-# buttercream = "#EFE1CE"
-# desert_mist = "#E0B589"
-# willow = "#9A8B4F"
+
+#### To restart cmdstanr from a previous run
+## From https://discourse.mc-stan.org/t/saving-reusing-adaptation-in-cmdstanr/19166/44
+library(magrittr)
+get_inits = function(chain_id){
+	warmup = results #! Quick and dirty solution to get this function workig with my variables name
+	iter_warmup = maxIter #! Quick and dirty solution to get this function workig with my variables name
+	warmup_draws = warmup$draws(inc_warmup=T)
+	final_warmup_value = warmup_draws[iter_warmup,chain_id,2:(dim(warmup_draws)[3])]
+	(
+		final_warmup_value
+		%>% tibble::as_tibble(
+			.name_repair = function(names){
+				dimnames(final_warmup_value)$variable
+			}
+		)
+		%>% tidyr::pivot_longer(cols=dplyr::everything())
+		%>% tidyr::separate(
+			name
+			, into = c('variable','index')
+			, sep = "\\["
+			, fill = 'right'
+		)
+		%>% dplyr::group_split(variable)
+		%>% purrr::map(
+			.f = function(x){
+				(
+					x
+					%>% dplyr::mutate(
+						index = stringr::str_replace(index,']','')
+					)
+					%>% tidyr::separate(
+						index
+						, into = c('first','second')
+						, sep = ","
+						, fill = 'right'
+						, convert = T
+					)
+					%>% dplyr::arrange(first,second)
+					%>% (function(x){
+						out = list()
+						if(all(is.na(x$second))){
+							out[[1]] = x$value
+						}else{
+							out[[1]] = matrix(
+								x$value
+								, nrow = max(x$first)
+								, ncol = max(x$second)
+							)
+						}
+						names(out) = x$variable[1]
+						return(out)
+					})
+				)
+			}
+		)
+		%>% unlist(recursive=F)
+		%>% return()
+	)
+}
+
+#example usage:
+# warmup = mod$sample(
+# 	data = data_for_stan, chains = parallel_chains, parallel_chains = parallel_chains, seed = seed,
+# 	iter_warmup = iter_warmup, save_warmup = T, #for inits
+# 	sig_figs = 18, iter_sampling = 0
+# )
+
+samples = model$sample(data = stanData, parallel_chains = n_chains, refresh = 200, chains = n_chains,
+	iter_warmup = 0, adapt_engaged = FALSE, inv_metric = results$inv_metric(matrix=F),
+	step_size = results$metadata()$step_size_adaptation, iter_sampling = maxIter/2, init = get_inits)
 
