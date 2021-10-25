@@ -361,7 +361,7 @@ dim(Y_generated_array)
 
 Y_generated_vector = numeric(dim(Y_generated_array)[3])
 
-for (variable in 1:dim(Y_generated)[3])
+for (variable in 1:dim(Y_generated_array)[3])
 	Y_generated_vector[variable] = mean(Y_generated_array[,,variable])
 
 ## Prepare the arguments for the function loglik_1D
@@ -374,7 +374,7 @@ arguments_ls = list(
 
 	# Data
 	true_dbh = treeStates_dt[, true_dbh],
-	Yobs = treeData[, dbh],
+	Yobs = treeData[, observed_dbh],
 
 	# States
 	Y_generated = Y_generated_vector, # treeStates_dt[, true_dbh]
@@ -394,7 +394,7 @@ arguments_ls = list(
 
 loglik_1D(variance = results$draws("measureError")[3000,1,] , list_args = arguments_ls)
 
-curve(loglik_1D(x, list_args = arguments_ls), from = 0.03, to = 2,
+curve(loglik_1D(x, list_args = arguments_ls), from = 1.9, to = 2.25,
 	xlab = "sigma measure", ylab = "Log-likelihood", lwd = 2)
 
 ####? COMMENT AND REFLEXION ZONE
