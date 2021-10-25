@@ -13,6 +13,10 @@
 
 # dt[year == min(year), newCol := 'bar' ,.(g1, g2)] # Does not work
 
+# * Finished installing CmdStan to /Users/mistral/.cmdstanr/cmdstan-2.27.0
+
+# CmdStan path set to: /Users/mistral/.cmdstanr/cmdstan-2.27.0
+
 #### Clear memory and load packages
 rm(list = ls())
 graphics.off()
@@ -21,7 +25,12 @@ options(max.print = 500)
 
 library(data.table)
 library(doParallel)
-library(rstan)
+# library(rstan)
+
+library(cmdstanr)
+# library(posterior)
+# library(bayesplot)
+# color_scheme_set("brightblue")
 
 # rstan_options(auto_write = TRUE)
 # options(mc.cores = parallel::detectCores())
@@ -116,6 +125,8 @@ if (length(nbYearsPerIndiv) != n_indiv)
 parents_index = treeData[, .I[which.min(year)], by = .(pointInventory_id, tree_id)][, V1]
 children_index = treeData[, .I[which(year != min(year))], by = .(pointInventory_id, tree_id)][, V1]
 last_child_index = treeData[, .I[which.max(year)], by = .(pointInventory_id, tree_id)][, V1]
+not_parent_index = 1:indices[.N, index_gen]
+not_parent_index = not_parent_index[!(not_parent_index %in% indices[type == "parent", index_gen])]
 
 if (length(parents_index) != n_indiv)
 	stop("Dimension mismatch between parents_index and n_indiv")
@@ -123,11 +134,14 @@ if (length(parents_index) != n_indiv)
 if (length(children_index) != n_obs - n_indiv)
 	stop("Dimension mismatch between children_index and number of children")
 
+if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
+	stop("Dimension mismatch between not_parent_index, n_hiddenState, and n_indiv")
+
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 2e3
-n_chains = 4
+maxIter = 2e2 # 2e3
+n_chains = 1 # 4
 
 # Data to provide
 stanData = list(
@@ -141,15 +155,20 @@ stanData = list(
 
 	# Indices
 	parents_index = parents_index, # Index of each parent in the observed data
+	parentsObs_index = indices[type == "parent", index_gen], # Corresponding index of observed parents in Y_generated
 	children_index = children_index, # Index of children in the observed data
 	childrenObs_index = indices[type == "child", index_gen], # Corresponding index of observed children in Y_generated
 	climate_index = indices[type == "parent", index_precip_start], # Index of the climate associated to each parent
+	not_parent_index = not_parent_index, # Index in Y_generated of states that cannot be compared to data
 
 	# Observations
 	Yobs = treeData[, dbh],
 
 	# Explanatory variable
-	precip = precip # Precipitations
+	precip = precip, # Precipitations
+
+	# Parameter for parralel calculus
+	grainsize = 1
 )
 
 # Initial value for states only
@@ -169,13 +188,25 @@ for (i in 1:n_chains)
 	print(range(initVal_Y_gen[[i]]))
 
 ## Compile stan model
-model = stan_model(file = "./toy.stan")
+# model = stan_model(file = "./toy.stan")
+model = cmdstan_model("toyPara_reduce_sum.stan", cpp_options = list(stan_threads = TRUE)) # list(stan_threads = TRUE, stan_opencl = TRUE)
+model = cmdstan_model("toyPara_GPUs.stan") #, cpp_options = list(stan_opencl = TRUE))
+# model = cmdstan_model("toy.stan", cpp_options = list(stan_opencl = TRUE))
 
 ## Run model
 start = proc.time()
 
-results = stan(file = "toy.stan", data = stanData, cores = n_chains,
-	iter = maxIter, chains = n_chains, init = initVal_Y_gen)
+# results = stan(file = "toy.stan", data = stanData, cores = n_chains,
+# 	iter = maxIter, chains = n_chains, init = initVal_Y_gen)
+
+# results = model$sample(data = stanData, parallel_chains = n_chains, threads_per_chain = 8, refresh = 2,
+# 	iter_warmup = maxIter/2, iter_sampling = maxIter/2, chains = n_chains, init = initVal_Y_gen)
+
+results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 2, chains = n_chains,
+	threads_per_chain = 8, iter_warmup = maxIter/2, iter_sampling = maxIter/2, init = initVal_Y_gen)
+
+# results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 2, chains = n_chains,
+# 	opencl_ids = c(0, 0), iter_warmup = maxIter/2, iter_sampling = maxIter/2, init = initVal_Y_gen)
 
 proc.time() - start
 
@@ -183,6 +214,19 @@ saveRDS(results, "test_2.rds")
 
 stopCluster(cl)
 
+results$sampler_diagnostics()
+
+# k = 0
+
+# for (i in 1:n_indiv)
+# {
+# 	for (j in 2:nbYearsPerIndiv[i])
+# 		k = k + 1;
+# }
+# k
+
+# n_hiddenState = indices[.N, index_gen]
+# n_hiddenState - n_indiv
 
 #! CRASH TEST ZONE
 results = readRDS("./test_2.rds")
@@ -250,4 +294,71 @@ dev.off()
 # 		print(paste0(i*100/n_indiv, " % done"))
 # }
 
+library(cmdstanr)
+model = cmdstan_model("test_GPU.stan", cpp_options = list(stan_opencl = TRUE))
+
+## Run model
+set.seed(1969-08-18) # Woodstock seed
+N = 100000
+x = runif(N, 0, 3)
+y = rnorm(N, -2.3 + 5*x, 2)
+
+results = model$sample(data = list(N = N, x = x, y = y), parallel_chains = 4, refresh = 200, chains = 4,
+	opencl_ids = c(0, 0), iter_warmup = 1000, iter_sampling = 1000)
+
+
 #! END CRASH TEST ZONE
+
+# salloc --account=def-dgravel --time=00:30 --gres=gpu:1 --mem=8192
+
+library(cmdstanr)
+
+generator = function(seed = 0, n = 1000, k = 10) {
+  set.seed(seed)
+  X <- matrix(rnorm(n * k), ncol = k)
+  
+  y <- 3 * X[,1] - 2 * X[,2] + 1
+  y <- ifelse(runif(n) < 1 / (1 + exp(-y)), 1, 0)
+  
+  list(k = ncol(X), n = nrow(X), y = y, X = X)
+}
+
+data <- generator(1, 100000, 20)
+
+# we will write the data to da file ourselves
+# so we dont do it twice for GPU an CPU version
+data_file <- paste0(tempfile(), ".json")
+write_stan_json(data, data_file)
+
+opencl_options = list(
+  stan_opencl = TRUE,
+  opencl_platform_id = 0,
+  opencl_device_id = 0 #in your case its 1 here
+)
+
+model_code <- "
+data {
+  int<lower=1> k;
+  int<lower=0> n;
+  matrix[n, k] X;
+  int y[n];
+} 
+ 
+parameters {
+  vector[k] beta;
+  real alpha;
+} 
+
+model {
+  target += bernoulli_logit_glm_lpmf(y | X, alpha, beta);
+}
+"
+
+stan_file <- write_stan_file(model_code)
+
+mod <- cmdstan_model(stan_file)
+mod_cl <- cmdstan_model(stan_file, cpp_options = opencl_options)
+
+fit <- mod$sample(data = data_file, iter_sampling = 500, iter_warmup = 500, chains = 4, parallel_chains = 4, refresh = 0)
+fit_cl <- mod_cl$sample(data = data_file, iter_sampling=500, iter_warmup = 500, chains = 4, parallel_chains = 4, refresh = 0)
+
