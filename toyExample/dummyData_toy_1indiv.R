@@ -37,19 +37,29 @@ sigma_process = 1
 sigma_measure = 1
 
 #### Generate complete data
+## Climate
+set.seed(1969-08-18) # Woodstock seed
+# precip = runif(n = n_census_per_plot, min = 450, max = 1050)
+
+## Diameter at breast height (dbh)
 init_year_plot = 2005
 
 census_years = init_year_plot:(init_year_plot + n_census_per_plot - 1)
 treeStates_dt[, c("year", "plot_id", "tree_id") :=
 	.(census_years, 1, 1:n_indiv_per_plot)]
 
+# treeStates_dt[, precip := precip]
+# rm(precip)
+
 # Initial state
 initial_dbh = rgamma(n_indiv_per_plot, shape = 150^2/500, rate = 150/500)
 treeStates_dt[1, true_dbh := rnorm(n = 1, mean = initial_dbh, sd = sigma_process)]
 
+# 7.853*treeStates_dt[, mean(precip)] - 0.01*treeStates_dt[, mean(precip^2)]
+
 for (j in 1:(n_census_per_plot - 1))
 {
-	next_dbh = treeStates_dt[j, true_dbh]
+	next_dbh = 0.95*treeStates_dt[j, true_dbh] # + 7.854*treeStates_dt[j, precip] - 0.01*treeStates_dt[j, precip^2]
 	treeStates_dt[j + 1, true_dbh := rnorm(n = n_indiv_per_plot, mean = next_dbh, sd = sigma_process)]
 }
 
@@ -270,6 +280,14 @@ mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title +
 
 plot_title = ggplot2::ggtitle("Traces for process error")
 mcmc_trace(results$draws("processError")) + plot_title
+
+## Slope dbh
+plot_title = ggplot2::ggtitle("Posterior distribution slope dbh", "with medians and 80% intervals")
+mcmc_areas(results$draws("slope_dbh"), prob = 0.8) + plot_title +
+	ggplot2::geom_vline(xintercept = 0.95, color = "#FFA500")
+
+plot_title = ggplot2::ggtitle("Traces for slope dbh")
+mcmc_trace(results$draws("slope_dbh")) + plot_title
 
 ## Check-up states
 chosen_state = 3
