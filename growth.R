@@ -15,7 +15,7 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
-# library(doParallel) #! TO UNCOMMENT FOR COMPUTE CANADA
+library(doParallel) #! TO UNCOMMENT FOR COMPUTE CANADA
 library(bayesplot)
 library(cmdstanr)
 
@@ -27,7 +27,7 @@ if (!("future" %in% installed.packages()))
 
 #### Create the cluster
 ## Cluster variables
-array_id = 150 #! REMOVE THIS LINE WHEN DONE WITH TEST
+# array_id = 150 #! REMOVE THIS LINE WHEN DONE WITH TEST
 array_id = as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID")) # Each array takes care of one year and process all the variables for that year
 print(paste0("array id = ", array_id))
 
@@ -50,15 +50,19 @@ print(paste("number of cores:", future::availableCores()))
 init_fun = function(...)
 {
 	providedArgs = list(...)
-	requiredArgs = c("dbh_parents", "years_indiv", "average_G", "n_hiddenState")
+	requiredArgs = c("dbh_parents", "years_indiv", "average_G", "n_hiddenState", "normalise")
 	if (!all(requiredArgs %in% names(providedArgs)))
-		stop("You must provide chain_id, Yobs, and years_indiv")
+		stop("You must provide chain_id, Yobs, years_indiv, and normalise")
 
 	# chain_id = providedArgs[["chain_id"]]
 	dbh_parents = providedArgs[["dbh_parents"]]
 	years_indiv = providedArgs[["years_indiv"]]
 	average_G = providedArgs[["average_G"]]
 	n_hiddenState = providedArgs[["n_hiddenState"]]
+	normalise = providedArgs[["normalise"]]
+
+	if (normalise & !all(c("mu_dbh", "sd_dbh") %in% names(providedArgs)))
+		stop("You must provide mu_dbh and sd_dbh in order to normalise")
 
 	Y_gen = numeric(n_hiddenState)
 
@@ -73,6 +77,12 @@ init_fun = function(...)
 		count = count + years_indiv[i];
 	}
 
+	if (normalise)
+	{
+		mu_dbh = providedArgs[["mu_dbh"]]
+		sd_dbh = providedArgs[["sd_dbh"]]
+		Y_gen = (Y_gen - mu_dbh)/sd_dbh
+	}
 	return(list(latentState = Y_gen))
 }
 
@@ -175,7 +185,7 @@ if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 4e3
+maxIter = 2e3
 n_chains = 3
 
 # Initial value for states only
@@ -187,7 +197,7 @@ if (length(average_G) != n_indiv)
 
 initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_index, dbh],
  	years_indiv = nbYearsPerIndiv, average_G = average_G,
- 	n_hiddenState = indices[.N, index_gen])
+ 	n_hiddenState = indices[.N, index_gen], normalise = TRUE, mu_dbh = mean(treeData[, dbh]), sd_dbh = sd(treeData[, dbh]))
 
 length(initVal_Y_gen)
 
@@ -227,6 +237,7 @@ stanData = list(
 
 	# Diffuse initialisation for the parents #! Need to think more about it, not used for now
 	# Y_generated_0 = rnorm(n = n_indiv, treeData[parents_index, dbh], sd = 1),
+	initialParents = initVal_Y_gen[[1]]$latentState[indices[type == "parent", index_gen]]
 
 	# Parameter for parallel calculus
 	# grainsize = 1
@@ -236,14 +247,14 @@ stanData = list(
 model = cmdstan_model("growth.stan")
 
 ## Run model
-results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 200, chains = n_chains,
-	iter_warmup = maxIter/2, iter_sampling = maxIter/2, save_warmup = TRUE, # init = initVal_Y_gen,
-	max_treedepth = 11, adapt_delta = 0.8)
-
-diagnose = results$cmdstan_diagnose()
+results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 400, chains = n_chains,
+	iter_warmup = maxIter/2, iter_sampling = maxIter/2, save_warmup = TRUE, init = initVal_Y_gen,
+	max_treedepth = 12, adapt_delta = 0.8)
 
 results$save_output_files(dir = "./", basename = "growth-", timestamp = TRUE, random = TRUE)
 results$save_object(file = paste0("growth-", format(Sys.time(), "%Y-%m-%d_%Hh%M"), ".rds"))
+
+diagnose = results$cmdstan_diagnose()
 
 # stanfit <- rstan::read_stan_csv(fit$output_files())
 #### Few plots
@@ -283,6 +294,24 @@ plot_title = ggplot2::ggtitle("Traces for quad_slopes_precip")
 temp_plot = mcmc_trace(results$draws("quad_slopes_precip")) + plot_title
 ggplot2::ggsave(filename = "quad_slopes_precip-traces.pdf", plot = temp_plot, device = "pdf")
 
+# processError
+plot_title = ggplot2::ggtitle("Posterior distribution processError", "with medians and 80% intervals")
+temp_plot = mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title
+ggplot2::ggsave(filename = "processError-distrib.pdf", plot = temp_plot, device = "pdf")
+
+plot_title = ggplot2::ggtitle("Traces for processError")
+temp_plot = mcmc_trace(results$draws("processError")) + plot_title
+ggplot2::ggsave(filename = "processError-traces.pdf", plot = temp_plot, device = "pdf")
+
+# measureError
+plot_title = ggplot2::ggtitle("Posterior distribution measureError", "with medians and 80% intervals")
+temp_plot = mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title
+ggplot2::ggsave(filename = "measureError-distrib.pdf", plot = temp_plot, device = "pdf")
+
+plot_title = ggplot2::ggtitle("Traces for measureError")
+temp_plot = mcmc_trace(results$draws("measureError")) + plot_title
+ggplot2::ggsave(filename = "measureError-traces.pdf", plot = temp_plot, device = "pdf")
+
 for (i in c(1:3, 12:14))
 {
 	plot_title = ggplot2::ggtitle(paste0("Posterior distribution latentState[", i, "]"),
@@ -294,3 +323,19 @@ for (i in c(1:3, 12:14))
 	temp_plot = mcmc_trace(results$draws(paste0("latentState[", i, "]"), inc_warmup = TRUE)) + plot_title
 	ggplot2::ggsave(filename = paste0("latentState_", i, "-traces.pdf"), plot = temp_plot, device = "pdf")
 }
+
+####! CRASH TEST ZONE
+
+n = 1e4
+intercept = 2
+slope = 0.5
+sigma = 2.3
+
+x = runif(n, 0, 100)
+y = rnorm(n, intercept + slope*x, sigma)
+
+lin = lm(y ~ x)
+mean(residuals(lin))
+sd(residuals(lin))/sigma
+
+####! END CRASH TEST ZONE
