@@ -283,6 +283,8 @@ normalisation(dt = treeData, colnames = "dbh", folder = savingPath, filename = "
 normalisation(dt = climate, colnames = "pr", folder = savingPath, filename = "climate_normalisation.rds", indices = indices,
 	col_ind_start = "index_clim_start", col_ind_end = "index_clim_end")
 
+climate_mu_sd = readRDS(paste0(savingPath, "climate_normalisation.rds"))
+
 #### Stan model
 ## Define stan variables
 # Common variables
@@ -335,6 +337,8 @@ stanData = list(
 
 	# Explanatory variable
 	precip = climate[, pr], # Precipitations
+	climate_mu = climate_mu_sd[variable == "pr", mu],
+	climate_sd = climate_mu_sd[variable == "pr", sd],
 
 	# Diffuse initialisation for the parents #! Need to think more about it, not used for now
 	# Y_generated_0 = rnorm(n = n_indiv, treeData[parents_index, dbh], sd = 1),
