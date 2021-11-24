@@ -3,6 +3,8 @@
 	Comments:
 		- Yobs is an array of reals, containing all the observations
 		- I call "parent" the first measured dbh of each individual. The parents have to be treated separately
+		- The observation error for the French data is fixed to 2.5 mm on the circumference. This gives an error of 2.5/pi mm on the dbh
+			Note that this error must then be expressed on the normalised scale: divide by sd(dbh)
 	
 	Reminder:
 		- The gamma distribution of stan uses, in this order, shape (alpha) and rate (beta). It can however be reparametrised
@@ -98,10 +100,8 @@ model {
 	
 	// --- Observation model
 	// Compare true (hidden/latent) parents with observed parents
-	target += normal_lpdf(Yobs_normalised[parents_index] | latentState[parentsObs_index], 0.03);
+	target += normal_lpdf(Yobs_normalised[parents_index] | latentState[parentsObs_index], 0.006); // (2.5/pi)/sd(dbh)
 
 	// Compare true (hidden/latent) children with observed children
-	target += normal_lpdf(Yobs_normalised[children_index] | latentState[childrenObs_index], 0.03);
+	target += normal_lpdf(Yobs_normalised[children_index] | latentState[childrenObs_index], 0.006); // (2.5/pi)/sd(dbh)
 }
-
-// DE34 7535 1960 0300 2466 42
