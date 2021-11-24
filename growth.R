@@ -473,13 +473,12 @@ for (i in c(1:3, 12:14))
 # (sd(y)*beta_0 + mean(y))/intercept # Should be near 1
 # beta_1*sd(y)/slope # Should be near 1
 
-# ## Run linear model, both x and y are normalised
+## Run linear model, both x and y are normalised
 # lin_norm3 = lm(y_norm ~ x_norm)
-# mean(residuals(lin_norm2)) # Should be near 0
-# sd(residuals(lin_norm2))*sd(y)/sigma # Should be near 1
+# mean(residuals(lin_norm3)) # Should be near 0
+# sd(residuals(lin_norm3))*sd(y)/sigma # Should be near 1
 # beta_0 = coefficients(lin_norm3)["(Intercept)"]
 # beta_1 = coefficients(lin_norm3)["x_norm"]
 # (sd(y)*beta_0 + mean(y) - mean(x)/sd(x)*sd(y)*beta_1)/intercept # Should be near 1
 # (sd(y)*beta_1)/sd(x)/slope # Should be near 1
-
 ####! END CRASH TEST ZONE
