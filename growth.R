@@ -18,6 +18,7 @@ library(data.table)
 library(doParallel) #! TO UNCOMMENT FOR COMPUTE CANADA
 library(bayesplot)
 library(cmdstanr)
+library(stringi)
 
 if (!("callr" %in% installed.packages()))
 	install.packages("callr", repos = "http://cran.us.r-project.org")
@@ -131,6 +132,9 @@ if ((array_id < 1) | (array_id > length(ls_species)))
 
 species = ls_species[array_id]
 treeData = treeData[speciesName_sci == species]
+savingPath = paste0("./", species, "/")
+if (!dir.exists(savingPath))
+	dir.create(savingPath)
 
 ## Climate
 climate = readRDS(paste0(clim_folder, "FR_reshaped_climate.rds"))
@@ -185,7 +189,7 @@ if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 2e3
+maxIter = 3e3
 n_chains = 3
 
 # Initial value for states only
@@ -247,95 +251,134 @@ stanData = list(
 model = cmdstan_model("growth.stan")
 
 ## Run model
-results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 400, chains = n_chains,
+results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 150, chains = n_chains,
 	iter_warmup = maxIter/2, iter_sampling = maxIter/2, save_warmup = TRUE, init = initVal_Y_gen,
 	max_treedepth = 12, adapt_delta = 0.8)
 
-results$save_output_files(dir = "./", basename = "growth-", timestamp = TRUE, random = TRUE)
-results$save_object(file = paste0("growth-", format(Sys.time(), "%Y-%m-%d_%Hh%M"), ".rds"))
+time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
+results$save_output_files(dir = savingPath, basename = paste0("growth-", time_ended), timestamp = FALSE, random = TRUE)
+results$save_object(file = paste0(savingPath, "growth-", format(Sys.time(), "%Y-%m-%d_%Hh%M"), ".rds"))
 
 diagnose = results$cmdstan_diagnose()
 
 # stanfit <- rstan::read_stan_csv(fit$output_files())
 #### Few plots
+# Folder to save plots
+figurePath = paste0(savingPath, time_ended, "/")
+if (!dir.exists(figurePath))
+	dir.create(figurePath)
+
 # Intercept
 plot_title = ggplot2::ggtitle("Posterior distribution intercepts", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("intercepts"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = "intercept-distrib.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "intercept-distrib.pdf"), plot = temp_plot, device = "pdf")
 
 plot_title = ggplot2::ggtitle("Traces for intercepts")
 temp_plot = mcmc_trace(results$draws("intercepts")) + plot_title
-ggplot2::ggsave(filename = "intercept-traces.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "intercept-traces.pdf"), plot = temp_plot, device = "pdf")
 
 # Slopes_dbh
 plot_title = ggplot2::ggtitle("Posterior distribution slopes_dbh", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("slopes_dbh"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = "slopes_dbh-distrib.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "slopes_dbh-distrib.pdf"), plot = temp_plot, device = "pdf")
 
 plot_title = ggplot2::ggtitle("Traces for slopes_dbh")
 temp_plot = mcmc_trace(results$draws("slopes_dbh")) + plot_title
-ggplot2::ggsave(filename = "slopes_dbh-traces.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "slopes_dbh-traces.pdf"), plot = temp_plot, device = "pdf")
 
 # Slopes_precip
 plot_title = ggplot2::ggtitle("Posterior distribution slopes_precip", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("slopes_precip"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = "slopes_precip-distrib.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "slopes_precip-distrib.pdf"), plot = temp_plot, device = "pdf")
 
 plot_title = ggplot2::ggtitle("Traces for slopes_precip")
 temp_plot = mcmc_trace(results$draws("slopes_precip")) + plot_title
-ggplot2::ggsave(filename = "slopes_precip-traces.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "slopes_precip-traces.pdf"), plot = temp_plot, device = "pdf")
 
 # Quad_slopes_precip
 plot_title = ggplot2::ggtitle("Posterior distribution quad_slopes_precip", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = "quad_slopes_precip-distrib.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "quad_slopes_precip-distrib.pdf"), plot = temp_plot, device = "pdf")
 
 plot_title = ggplot2::ggtitle("Traces for quad_slopes_precip")
 temp_plot = mcmc_trace(results$draws("quad_slopes_precip")) + plot_title
-ggplot2::ggsave(filename = "quad_slopes_precip-traces.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "quad_slopes_precip-traces.pdf"), plot = temp_plot, device = "pdf")
 
 # processError
 plot_title = ggplot2::ggtitle("Posterior distribution processError", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = "processError-distrib.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "processError-distrib.pdf"), plot = temp_plot, device = "pdf")
 
 plot_title = ggplot2::ggtitle("Traces for processError")
 temp_plot = mcmc_trace(results$draws("processError")) + plot_title
-ggplot2::ggsave(filename = "processError-traces.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "processError-traces.pdf"), plot = temp_plot, device = "pdf")
 
 # measureError
 plot_title = ggplot2::ggtitle("Posterior distribution measureError", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = "measureError-distrib.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "measureError-distrib.pdf"), plot = temp_plot, device = "pdf")
 
 plot_title = ggplot2::ggtitle("Traces for measureError")
 temp_plot = mcmc_trace(results$draws("measureError")) + plot_title
-ggplot2::ggsave(filename = "measureError-traces.pdf", plot = temp_plot, device = "pdf")
+ggplot2::ggsave(filename = paste0(figurePath, "measureError-traces.pdf"), plot = temp_plot, device = "pdf")
 
 for (i in c(1:3, 12:14))
 {
 	plot_title = ggplot2::ggtitle(paste0("Posterior distribution latentState[", i, "]"),
 		"with medians and 80% intervals")
 	temp_plot = mcmc_areas(results$draws(paste0("latentState[", i, "]")), prob = 0.8) + plot_title
-	ggplot2::ggsave(filename = paste0("latentState_", i, "-distrib.pdf"), plot = temp_plot, device = "pdf")
+	ggplot2::ggsave(filename = paste0(figurePath, "latentState_", i, "-distrib.pdf"), plot = temp_plot, device = "pdf")
 
 	plot_title = ggplot2::ggtitle(paste0("Traces for latentState[", i, "]"))
 	temp_plot = mcmc_trace(results$draws(paste0("latentState[", i, "]"), inc_warmup = TRUE)) + plot_title
-	ggplot2::ggsave(filename = paste0("latentState_", i, "-traces.pdf"), plot = temp_plot, device = "pdf")
+	ggplot2::ggsave(filename = paste0(figurePath, "latentState_", i, "-traces.pdf"), plot = temp_plot, device = "pdf")
 }
 
 ####! CRASH TEST ZONE
+## Create data
+# n = 1e4
+# intercept = 2
+# slope = 0.5
+# sigma = 2.3
 
-n = 1e4
-intercept = 2
-slope = 0.5
-sigma = 2.3
+# x = runif(n, 0, 100)
+# x_norm = (x - mean(x))/sd(x)
 
-x = runif(n, 0, 100)
-y = rnorm(n, intercept + slope*x, sigma)
+# y = rnorm(n, intercept + slope*x, sigma)
+# y_norm = (y - mean(y))/sd(y)
 
-lin = lm(y ~ x)
-mean(residuals(lin))
-sd(residuals(lin))/sigma
+# ## Run linear model, no normalisation
+# lin = lm(y ~ x)
+# mean(residuals(lin)) # Should be near 0
+# sd(residuals(lin))/sigma # Should be near 1
+# coefficients(lin)["(Intercept)"]/intercept # Should be near 1
+# coefficients(lin)["x"]/slope # Should be near 1
+
+# ## Run linear model, x is normalised
+# lin_norm = lm(y ~ x_norm)
+# mean(residuals(lin_norm)) # Should be near 0
+# sd(residuals(lin_norm))/sigma # Should be near 1
+# beta_0 = coefficients(lin_norm)["(Intercept)"]
+# beta_1 = coefficients(lin_norm)["x_norm"]
+# (beta_0 - beta_1*mean(x)/sd(x))/intercept # Should be near 1
+# beta_1/sd(x)/slope # Should be near 1
+
+# ## Run linear model, y is normalised
+# lin_norm2 = lm(y_norm ~ x)
+# mean(residuals(lin_norm2)) # Should be near 0
+# sd(residuals(lin_norm2))*sd(y)/sigma # Should be near 1
+# beta_0 = coefficients(lin_norm2)["(Intercept)"]
+# beta_1 = coefficients(lin_norm2)["x"]
+# (sd(y)*beta_0 + mean(y))/intercept # Should be near 1
+# beta_1*sd(y)/slope # Should be near 1
+
+# ## Run linear model, both x and y are normalised
+# lin_norm3 = lm(y_norm ~ x_norm)
+# mean(residuals(lin_norm2)) # Should be near 0
+# sd(residuals(lin_norm2))*sd(y)/sigma # Should be near 1
+# beta_0 = coefficients(lin_norm3)["(Intercept)"]
+# beta_1 = coefficients(lin_norm3)["x_norm"]
+# (sd(y)*beta_0 + mean(y) - mean(x)/sd(x)*sd(y)*beta_1)/intercept # Should be near 1
+# (sd(y)*beta_1)/sd(x)/slope # Should be near 1
 
 ####! END CRASH TEST ZONE
