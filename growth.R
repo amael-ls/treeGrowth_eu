@@ -112,6 +112,98 @@ forced_states = function(dbh_parents, dbh_children, parentsObs_index, childrenOb
 	return(states)
 }
 
+## Function to compute the mean and sd of given variables in a data table
+normalisation = function(dt, colnames = names(df), folder = "./", filename = "normalisation.rds", rm_na = TRUE, ...)
+{
+	if (rm_na)
+		print("Warning: rm_na is activated, normalisation won't take NA into account")
+
+	if (!is.data.table(dt))
+		stop("This function is written for data table only")
+
+	if (stri_sub(str = folder, from = stri_length(folder)) != "/")
+		folder = paste0(folder, "/")
+
+	if (!all(colnames %in% names(dt)))
+	{
+		warning(paste0("The following columns do not exist in the provided data and are ignored:\n- ",
+			paste0(colnames[!(colnames %in% names(dt))], collapse = "\n- ")))
+		colnames = colnames[colnames %in% names(dt)]
+	}
+
+	providedArgs = list(...)
+	providedArgs_names = names(providedArgs)
+	if ("indices" %in% providedArgs_names)
+	{
+		if (!any(c("col_ind", "col_ind_start", "col_ind_end") %in% providedArgs_names))
+			stop("Indices provided without any column selected")
+		
+		ind = providedArgs[["indices"]]
+		
+		if ("col_ind" %in% providedArgs_names)
+		{
+			col_ind = providedArgs[["col_ind"]]
+			if (!(col_ind %in% names(indices)))
+				stop(paste("Indices does not contain a column named", col_ind))
+
+			rowsToKeep = indices[, ..col_ind]
+
+			if (any(c("col_ind_start", "col_ind_end") %in% providedArgs_names))
+				warning("col_ind_start or col_ind_end ignored")
+		}
+
+		if (("col_ind_start" %in% providedArgs_names) & !("col_ind" %in% providedArgs_names))
+		{
+			if (!("col_ind_end" %in% providedArgs_names))
+				stop("A starting index is provided but there is no stopping index")
+			
+			col_ind_start = providedArgs[["col_ind_start"]]
+			if (!(col_ind_start %in% names(indices)))
+				stop(paste("Indices does not contain a column named", col_ind_start))
+
+			col_ind_start = providedArgs[["col_ind_start"]]
+
+			col_start = unique(indices[[col_ind_start]])
+
+			col_ind_end = providedArgs[["col_ind_end"]]
+			if (!(col_ind_end %in% names(indices)))
+				stop(paste("Indices does not contain a column named", col_ind_end))
+			
+			col_ind_end = providedArgs[["col_ind_end"]]
+
+			col_end = unique(indices[[col_ind_end]])
+
+			if (length(col_start) != length(col_end))
+				stop("Starting and ending indices length mismatches")
+
+			rowsToKeep = integer(length = sum(col_end - col_start + 1))
+			count = 1
+			for (i in 1:length(col_start))
+			{
+				rowsToKeep[count:(count + col_end[i] - col_start[i])] = col_start[i]:col_end[i]
+				count = count + col_end[i] - col_start[i] + 1
+			}
+		}
+	}
+	
+	n = length(colnames)
+	mu_sd = data.table(variable = character(n), mu = numeric(n), sd = numeric(n))
+
+	if (!("indices" %in% providedArgs_names))
+		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1,],
+			as.matrix(dt[, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1,])]
+
+	if ("indices" %in% providedArgs_names)
+	{
+
+		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[rowsToKeep, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1,],
+			as.matrix(dt[rowsToKeep, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1,])]
+	}
+
+	saveRDS(mu_sd, file = paste0(folder, filename))
+	print(paste0("files containing coefficients saved at: ", folder, filename))
+}
+
 #### Load data
 ## Paths
 mainFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
@@ -185,6 +277,11 @@ if (length(children_index) != n_obs - n_indiv)
 
 if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
 	stop("Dimension mismatch between not_parent_index, n_hiddenState, and n_indiv")
+
+#### Compute and save normalising constantes
+normalisation(dt = treeData, colnames = "dbh", folder = savingPath, filename = "dbh_normalisation.rds")
+normalisation(dt = climate, colnames = "pr", folder = savingPath, filename = "climate_normalisation.rds", indices = indices,
+	col_ind_start = "index_clim_start", col_ind_end = "index_clim_end")
 
 #### Stan model
 ## Define stan variables
