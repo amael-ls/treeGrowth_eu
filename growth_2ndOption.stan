@@ -5,7 +5,8 @@
 		- I call "parent" the first measured dbh of each individual. The parents have to be treated separately
 		- The observation error for the French data is fixed to 2.5 mm on the circumference. This gives an error of 2.5/pi mm on the dbh
 			Note that this error must then be expressed on the normalised scale: divide by sd(dbh)
-		- This version of the growth model follows a discussion with Florian
+		- This version of the growth model follows a discussion with Florian and Lisa
+		- Note that I did not normalise dbh as I use a power function in the posterior distrib. This prevent a division by 0
 	
 	Reminder:
 		- The gamma distribution of stan uses, in this order, shape (alpha) and rate (beta). It can however be reparametrised
@@ -29,9 +30,6 @@ data {
 	int<lower = 1, upper = n_precip - 1> climate_index[n_indiv]; // Index of the climate associated to each parent
 	int<lower = 2, upper = n_hiddenState> not_parent_index[n_hiddenState - n_indiv]; // Index of states without data
 
-	// Initial state, used to start the states and compare with latentState[parentsObs_index] (i.e., a prior parameter)
-	// vector<lower = 0>[n_indiv] initialParents;
-
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
 
@@ -43,72 +41,110 @@ data {
 
 transformed data {
 	vector[n_precip] normalised_precip = (precip - climate_mu)/climate_sd; // Normalised precipitations
-	vector[n_obs] Yobs_normalised = (Yobs - mean(Yobs))/sd(Yobs); // Normalised dbh observations
 }
 
 parameters {
 	// Parameters
-	real intercepts; // Species-specific value
-	// real<lower = 0> slopes_dbh; // Species-specific value, Markov process coefficient
-	real slopes_dbh; // Species-specific value, Markov process coefficient
-	real slopes_precip; // Species-specific value
-	real quad_slopes_precip; // Species-specific value
+	real<lower = 0> potentialMaxGrowth;
+	real power_dbh; // Coefficient showing how growth is a (hopefully!) decreasing function of dbh
+	real optimal_precip; // Optimal precipitation niche value
+	real<lower = 0> width_precip_niche; // Width of the niche along the precipitation axis
 
-	real<lower = 0.000001> processError; // Constrained by default // ADD upper bound
+	real<lower = 0.000001, upper = 1> processError; // Constrained by default // CHANGE THE UPPER VALUE TO SOMETHING SMARTER
 	// real<lower = 0.000001> measureError; // Constrained by default
 
-	// vector<lower = 0>[n_hiddenState] latentState; // State vector Y (hidden markov process), positive
-	vector[n_hiddenState] latentState; // State vector Y (hidden markov process), positive
+	vector[n_hiddenState] latent_dbh; // Real (and unobserved) dbh
 }
 
-// THE COMPLEX INDEXING HAS BEEN CHECKED (23rd August 2021)
 model {
 	// Declare variables
 	int count = 0;
 	real expected_latent_dbh[n_hiddenState - n_indiv];
+	real expected_latent_yearlyGrowth;
 	int k = 0;
 
 	// Priors
-	target += normal_lpdf(intercepts | 0, 100);
-	// target += gamma_lpdf(slopes_dbh | 1.0/1000, 1.0/1000);
-	target += normal_lpdf(slopes_dbh | 0, 100);
-	target += normal_lpdf(slopes_precip | 0, 100);
-	target += normal_lpdf(quad_slopes_precip | 0, 100);
+	target += gamma_lpdf(potentialMaxGrowth | 1.0^2/10, 1.0/10);
+	target += normal_lpdf(power_dbh | 0, 5);
+	target += normal_lpdf(optimal_precip | 0, 10);
+	target += gamma_lpdf(width_precip_niche | 1.0^2/10000, 1.0/10000); // Gives a mean  of 1 and variance of 10000
 
-	// print("target 3:", target());
-
-	target += gamma_lpdf(processError | 10.0^2/10000, 10.0/10000); // Gives a mean  of 10 and variance of 10000
+	target += gamma_lpdf(processError | 1.0^2/10000, 1.0/10000); // Gives a mean  of 1 and variance of 10000
 	// target += gamma_lpdf(measureError | 1.0^2/1000, 1.0/1000); // Gives a mean  of 10 and variance of 1000
 
-	// Model // THE COMPLEX INDEXING HAS BEEN CHECKED (23rd August 2021)
+	// Model
 	for (i in 1:n_indiv)
 	{
 		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
 			k = k + 1;
-			// expectedGrowth[k] = exp(baseGrowth + growthL *latentState[count + j - 1] +
-			// 	slopes_precip*normalised_precip[climate_index[i] + j - 2] + // -1 (shift index) and -1 (previous year)
-			// 	quad_slopes_precip*normalised_precip[climate_index[i] + j - 2]^2); // -1 (shift index) and -1 (previous year)
+			expected_latent_yearlyGrowth = potentialMaxGrowth *
+				latent_dbh[count + j - 1]^power_dbh *
+				exp(-(normalised_precip[climate_index[i] + j - 2] - optimal_precip)^2/width_precip_niche^2);
 
-			// latentState[count + j] = latentState[count + j - 1] + realGrowth
-
-			expected_latent_dbh[k] = intercepts + slopes_dbh*latentState[count + j - 1] +
-				slopes_precip*normalised_precip[climate_index[i] + j - 2] + // -1 (shift index) and -1 (previous year)
-				quad_slopes_precip*normalised_precip[climate_index[i] + j - 2]^2; // -1 (shift index) and -1 (previous year)
+			expected_latent_dbh[k] = latent_dbh[count + j - 1] + expected_latent_yearlyGrowth;
+			if (is_nan(expected_latent_dbh[k]))
+				print(latent_dbh[count + j - 1]);
 		}
 		count += nbYearsPerIndiv[i];
 	}
 	// Prior on initial hidden state: This is a diffuse initialisation
-	target += normal_lpdf(latentState[parentsObs_index] | 0, 1e6); // Diffuse initialisation
-	// target += normal_lpdf(latentState[parentsObs_index] | initialParents, 10); // Not too diffused initialisation
+	target += normal_lpdf(latent_dbh[parentsObs_index] | 0, 1e6); // Diffuse initialisation
 
 	// Process model
-	target += gamma_lpdf(realGrowth | expectedGrowth, processError);
+	target += normal_lpdf(latent_dbh[not_parent_index] | expected_latent_dbh, processError);
 	
 	// --- Observation model
 	// Compare true (hidden/latent) parents with observed parents
-	target += normal_lpdf(Yobs_normalised[parents_index] | latentState[parentsObs_index], 0.006); // (2.5/pi)/sd(dbh)
+	target += normal_lpdf(Yobs[parents_index] | latent_dbh[parentsObs_index], 0.795); // 2.5/pi
 
 	// Compare true (hidden/latent) children with observed children
-	target += normal_lpdf(Yobs_normalised[children_index] | latentState[childrenObs_index], 0.006); // (2.5/pi)/sd(dbh)
+	target += normal_lpdf(Yobs[children_index] | latent_dbh[childrenObs_index], 0.795); // 2.5/pi
 }
+
+// Model with stuff written by Florian
+// model {
+// 	// Declare variables
+// 	int count = 0;
+// 	real expected_latent_dbh[n_hiddenState - n_indiv];
+// 	int k = 0;
+
+// 	// Priors
+// 	target += normal_lpdf(intercepts | 0, 100);
+// 	target += normal_lpdf(slopes_dbh | 0, 100);
+// 	target += normal_lpdf(slopes_precip | 0, 100);
+// 	target += normal_lpdf(quad_slopes_precip | 0, 100);
+
+// 	// print("target 3:", target());
+
+// 	target += gamma_lpdf(processError | 10.0^2/10000, 10.0/10000); // Gives a mean  of 10 and variance of 10000
+// 	// target += gamma_lpdf(measureError | 1.0^2/1000, 1.0/1000); // Gives a mean  of 10 and variance of 1000
+
+// 	// Model // THE COMPLEX INDEXING HAS BEEN CHECKED (23rd August 2021)
+// 	for (i in 1:n_indiv)
+// 	{
+// 		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
+// 		{
+// 			k = k + 1;
+// 			expectedGrowth[k] = exp(baseGrowth + growthL *latentState[count + j - 1] +
+// 				slopes_precip*normalised_precip[climate_index[i] + j - 2] + // -1 (shift index) and -1 (previous year)
+// 				quad_slopes_precip*normalised_precip[climate_index[i] + j - 2]^2); // -1 (shift index) and -1 (previous year)
+
+// 			latentState[count + j] = latentState[count + j - 1] + realGrowth
+// 		}
+// 		count += nbYearsPerIndiv[i];
+// 	}
+// 	// Prior on initial hidden state: This is a diffuse initialisation
+// 	target += normal_lpdf(latentState[parentsObs_index] | 0, 1e6); // Diffuse initialisation
+// 	// target += normal_lpdf(latentState[parentsObs_index] | initialParents, 10); // Not too diffused initialisation
+
+// 	// Process model
+// 	target += gamma_lpdf(realGrowth | expectedGrowth, processError);
+	
+// 	// --- Observation model
+// 	// Compare true (hidden/latent) parents with observed parents
+// 	target += normal_lpdf(Yobs_normalised[parents_index] | latentState[parentsObs_index], 0.006); // (2.5/pi)/sd(dbh)
+
+// 	// Compare true (hidden/latent) children with observed children
+// 	target += normal_lpdf(Yobs_normalised[children_index] | latentState[childrenObs_index], 0.006); // (2.5/pi)/sd(dbh)
+// }
