@@ -10,6 +10,7 @@ options(max.print = 500)
 library(data.table)
 library(cmdstanr)
 library(stringi)
+library(DHARMa)
 library(terra)
 
 #### Tool function
@@ -64,6 +65,10 @@ growth = function(dbh, precip, params, norm_clim_dt, isScaled = FALSE)
 	return (G)
 }
 
+## Dbh function (expected dbh at time t + 1 given climate and dbh at time t)
+nextDBH = function(currentDBH, precip, params, norm_clim_dt, isScaled = FALSE)
+	return (currentDBH + growth(currentDBH, precip, params, norm_clim_dt, isScaled))
+
 ## Get name of the last run
 getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd")
 {
@@ -83,11 +88,17 @@ getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd
 	return (dt[.N, file])
 }
 
-#### Load results
-results = readRDS("Tilia_platyphyllos/growth-2021-11-29_05h17.rds")
+#### Read data
+## Common variables
+species = "Tilia_platyphyllos"
+path = paste0("./", species, "/")
+lastRun = getLastRun(path)
 
 isPrecip_normalised = TRUE
-isDBH_normalised = FALSE
+isDBH_normalised = TRUE
+
+## Load results
+results = readRDS(paste0(path, lastRun))
 
 if (isPrecip_normalised)
 {
@@ -101,23 +112,83 @@ if (isDBH_normalised)
 	norm_dbh_dt = readRDS("Tilia_platyphyllos/dbh_normalisation.rds")
 }
 
-#### Rescale parameters
+#### Get parameters
 paramsNames = c("potentialMaxGrowth", "power_dbh", "optimal_precip", "width_precip_niche", "processError")
 meanParams = getParams(results, paramsNames)
-real_scale_params = rescaleParams(optimal_clim_s = meanParams["optimal_precip"],
-	width_clim_niche_s = meanParams["width_precip_niche"], norm_clim_dt = norm_clim_dt)
+processError = meanParams[["processError"]]
+
+#### Residuals
+## Load data
+treeFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
+treeData = readRDS(paste0(treeFolder, "trees_forest_reshaped.rds"))
+treeData = treeData[speciesName_sci == species]
+
+## Get dbh and time
+dbh_start = treeData[treeData[, .I[which.min(year)], by = .(tree_id, pointInventory_id)][, V1], dbh]
+dbh_end = treeData[treeData[, .I[which.max(year)], by = .(tree_id, pointInventory_id)][, V1], dbh]
+
+t_start = treeData[treeData[, .I[which.min(year)], by = .(tree_id, pointInventory_id)][, V1], year]
+t_end = treeData[treeData[, .I[which.max(year)], by = .(tree_id, pointInventory_id)][, V1], year]
+delta_t = t_end - t_start
+
+## Climate
+climFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/climateData/Chelsa/yearlyAverage/"
+climate = readRDS(paste0(climFolder, "FR_reshaped_climate.rds"))
+
+## indices
+indices = readRDS(paste0(treeFolder, species, "_indices.rds"))
+indices = unique(indices[, .(tree_id, pointInventory_id, index_clim_start, index_clim_end)])
+
+## Create simulations
+n_rep = 25
+dt = data.table(rep_dbh_end = rep(dbh_end, each = n_rep), sampled = numeric(n_rep * length(dbh_end)))
+if (isDBH_normalised)
+	dt[, rep_dbh_end := rep_dbh_end/norm_dbh_dt[, sd]]
+
+count = 0
+
+for (i in 1:length(dbh_end))
+{
+	for (iter in 1:n_rep)
+	{
+		currentDbh = dbh_start[i]/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
+		currentClim_index = indices[i, index_clim_start]
+		for (yr in 1:delta_t[i])
+		{
+			precip = climate[currentClim_index, pr]
+			currentDbh = rnorm(1, rnorm(1, nextDBH(currentDbh, precip, meanParams, norm_clim_dt), processError), 0.05)
+			currentClim_index = currentClim_index + 1
+		}
+		count = count + 1
+		dt[count, sampled := currentDbh]
+	}
+	if (i %% 20 == 0)
+		print(paste0(round(i*100/length(dbh_end), 2), "% done"))
+}
+
+## Reshape simulations into a matrix length(dbh) x n_rep
+sims = matrix(data = dt[, sampled], nrow = n_rep, ncol = length(dbh_end)) # each column is for one data point (the way I organised the dt)
+sims = t(sims) # Transpose the matrix for dharma
+
+forDharma = createDHARMa(simulatedResponse = sims,
+	observedResponse = dbh_end/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1))
+#, fittedPredictedResponse = avg(dbh, alpha0_ptw_med, alpha1_ptw_med))
+
+plot(forDharma)
+dev.off()
+
+####! CRASH TEST ZONE
+treeFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
+treeData = readRDS(paste0(treeFolder, "trees_forest_reshaped.rds"))
+treeData = treeData[speciesName_sci == "Tilia_platyphyllos"]
 
 latent_1_6 = getParams(results, paste0("latent_dbh[", 1:6, "]"))
 x = 2000:2005
 test = lm(latent_1_6 ~ x)
 summary(test)
 
-mainFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
-treeData = readRDS(paste0(mainFolder, "trees_forest_reshaped.rds"))
-treeData = treeData[speciesName_sci == "Tilia_platyphyllos"]
-
 jpeg("./latent_real_2ndOption.jpg", height = 1080, width = 1080, quality = 100)
-plot(2000:2005, latent_1_6, pch = 19, col = "#34568B", cex = 4,
+plot(2000:2005, norm_dbh_dt[, sd]*latent_1_6, pch = 19, col = "#34568B", cex = 4,
 	xlab = "Year", ylab = "Diameter at breast height (scaled)")
 points(x = 2000, y = treeData[1, dbh], pch = 19, col = "#FA7A35", cex = 2)
 points(x = 2005, y = treeData[2, dbh], pch = 19, col = "#CD212A", cex = 2)
@@ -130,7 +201,12 @@ curve(growth(x, 0, params = meanParams, norm_clim_dt, isScaled = TRUE), from = 5
 	lwd = 2, col = "#34568B", xlab = "dbh", ylab = "Growth (in mm/yr)")
 dev.off()
 
-####! CRASH TEST ZONE
+pdf("./growth_precip.pdf", height = 7, width = 7)
+op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
+curve(growth(250/norm_dbh_dt[, sd], x, params = meanParams, norm_clim_dt, isScaled = FALSE), from = 650, to = 1500,
+	lwd = 2, col = "#34568B", xlab = "Precipitation (mm/yr)", ylab = "Growth (in mm/yr)")
+dev.off()
+
 # What follows works only for the French data that have a particular structure. For the general case, use indices
 dbh0 = treeData[seq(1, .N - 1, by = 2), dbh]
 dbh1 = treeData[seq(2, .N, by = 2), dbh]
