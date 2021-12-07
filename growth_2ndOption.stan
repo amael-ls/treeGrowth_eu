@@ -40,6 +40,7 @@ data {
 }
 
 transformed data {
+	vector[n_obs] normalised_Yobs = Yobs/sd(Yobs); // Normalised but NOT centred dbh
 	vector[n_precip] normalised_precip = (precip - climate_mu)/climate_sd; // Normalised precipitations
 }
 
@@ -50,7 +51,7 @@ parameters {
 	real optimal_precip; // Optimal precipitation niche value
 	real<lower = 0> width_precip_niche; // Width of the niche along the precipitation axis
 
-	real<lower = 0.000001, upper = 1> processError; // Constrained by default // CHANGE THE UPPER VALUE TO SOMETHING SMARTER
+	real<lower = 0.000001, upper = 10> processError; // Constrained by default // CHANGE THE UPPER VALUE TO SOMETHING SMARTER
 	// real<lower = 0.000001> measureError; // Constrained by default
 
 	vector[n_hiddenState] latent_dbh; // Real (and unobserved) dbh
@@ -83,8 +84,6 @@ model {
 				exp(-(normalised_precip[climate_index[i] + j - 2] - optimal_precip)^2/width_precip_niche^2);
 
 			expected_latent_dbh[k] = latent_dbh[count + j - 1] + expected_latent_yearlyGrowth;
-			if (is_nan(expected_latent_dbh[k]))
-				print(latent_dbh[count + j - 1]);
 		}
 		count += nbYearsPerIndiv[i];
 	}
@@ -96,10 +95,12 @@ model {
 	
 	// --- Observation model
 	// Compare true (hidden/latent) parents with observed parents
-	target += normal_lpdf(Yobs[parents_index] | latent_dbh[parentsObs_index], 0.795); // 2.5/pi
+	// target += normal_lpdf(Yobs[parents_index] | latent_dbh[parentsObs_index], 0.795); // 2.5/pi
+	target += normal_lpdf(normalised_Yobs[parents_index] | latent_dbh[parentsObs_index], 0.006); // 2.5/pi/sd(dbh)
 
 	// Compare true (hidden/latent) children with observed children
-	target += normal_lpdf(Yobs[children_index] | latent_dbh[childrenObs_index], 0.795); // 2.5/pi
+	// target += normal_lpdf(Yobs[children_index] | latent_dbh[childrenObs_index], 0.795); // 2.5/pi
+	target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh[childrenObs_index], 0.006); // 2.5/pi/sd(dbh)
 }
 
 // Model with stuff written by Florian
@@ -126,9 +127,9 @@ model {
 // 		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
 // 		{
 // 			k = k + 1;
-// 			expectedGrowth[k] = exp(baseGrowth + growthL *latentState[count + j - 1] +
-// 				slopes_precip*normalised_precip[climate_index[i] + j - 2] + // -1 (shift index) and -1 (previous year)
-// 				quad_slopes_precip*normalised_precip[climate_index[i] + j - 2]^2); // -1 (shift index) and -1 (previous year)
+//			expectedGrowth[k] = exp(baseGrowth + growthL *latentState[count + j - 1] +
+//				slopes_precip*normalised_precip[climate_index[i] + j - 2] + // -1 (shift index) and -1 (previous year)
+//				quad_slopes_precip*normalised_precip[climate_index[i] + j - 2]^2); // -1 (shift index) and -1 (previous year)
 
 // 			latentState[count + j] = latentState[count + j - 1] + realGrowth
 // 		}
