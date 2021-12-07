@@ -168,6 +168,43 @@ forDharma = createDHARMa(simulatedResponse = sims,
 plot(forDharma)
 dev.off()
 
+# #### Residuals using posterior samples directly (should have nIter/2 samples per measure)
+# ## Get the posterior distrib of the states that have data to be compared to
+# n_rep = results$metadata()$iter_sampling
+# dt = data.table(measured = rep(treeData[, dbh], each = n_rep), sampled_mean = numeric(n_rep * treeData[, .N]),
+# 	sampled_med = numeric(n_rep * treeData[, .N]))
+# if (isDBH_normalised)
+# 	dt[, measured := measured/norm_dbh_dt[, sd]]
+
+# for (i in 1:treeData[, .N])
+# {
+# 	dt[((i - 1)*n_rep + 1):(i*n_rep),
+# 		sampled_mean := rnorm(n_rep, rowMeans(results$draws(paste0("latent_dbh[", indices_data[i], "]"))), 0.006)]
+# 	dt[((i - 1)*n_rep + 1):(i*n_rep),
+# 		sampled_med := rnorm(n_rep, apply(results$draws(paste0("latent_dbh[", indices_data[i], "]")), 1, median), 0.006)]
+# 	if (i %% 200 == 0)
+# 		print(paste0(round(i*100/treeData[, .N], 2), "% done"))
+# }
+
+# ## Reshape simulations into a matrix length(dbh) x n_rep
+# sims = matrix(data = dt[, sampled_mean], nrow = n_rep, ncol = treeData[, .N]) # each column is for one data point (the way I organised the dt)
+# sims = t(sims) # Transpose the matrix for dharma
+
+# forDharma = createDHARMa(simulatedResponse = sims,
+# 	observedResponse = dt[seq(1, .N, by = n_rep), measured]) # all.equal(ll, treeData[, dbh]/norm_dbh_dt[, sd]) 
+# # , fittedPredictedResponse = dt[seq(1, .N, by = n_rep), sampled_med])
+
+# # fittedPredictedResponse: optional fitted predicted response. For
+# #	Bayesian posterior predictive simulations, using the median
+# #	posterior prediction as fittedPredictedResponse is
+# #	recommended. If not provided, the mean simulatedResponse will
+# #	be used.
+
+# plot(forDharma)
+# dev.off()
+
+# plot(dt[, measured], dt[, sampled])
+
 #### Plot posterior distributions and traces of parameters
 # Folder to save plots
 figurePath = paste0(path, time_ended, "/")
