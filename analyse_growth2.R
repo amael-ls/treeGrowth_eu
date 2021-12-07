@@ -15,24 +15,12 @@ library(DHARMa)
 library(terra)
 
 #### Tool function
-## Function to rescale the coefficients on the real scale (i.e., the coeffs have been computed on the normalised scale).
-# Remark: Variables with _s are on the normalised scale, and variables with _r are on the real 'physical' scale
-rescaleParams = function(optimal_clim_s, width_clim_niche_s, norm_clim_dt)
-{
-	# Get the normalising constantes from
-	mu_clim = norm_clim_dt[variable == "pr", mu]
-	sd_clim = norm_clim_dt[variable == "pr", sd]
-
-	# Recompute the coeffs on real scale
-	optimal_clim_r = mu_clim - sd_clim*optimal_clim_s
-	width_clim_niche_r = sd_clim*width_clim_niche_s
-
-	return (c(optimal_clim_r = optimal_clim_r, width_clim_niche_r = width_clim_niche_r))
-}
-
 ## Get fixed values parameters
 getParams = function(model_cmdstan, params_names, type = "mean")
 {
+	if (!(type %in% c("mean", "median")))
+		stop("Unknown type. Please choose median or mean")
+	
 	vals = numeric(length(params_names))
 	names(vals) = params_names
 	for (i in 1:length(params_names))
@@ -123,7 +111,8 @@ processError = meanParams[["processError"]]
 #### Residuals
 ## Load data
 treeFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
-treeData = readRDS(paste0(treeFolder, "trees_forest_reshaped.rds"))
+# treeData = readRDS(paste0(treeFolder, "trees_forest_reshaped.rds"))
+treeData = readRDS(paste0(path, "trees_forest_reshaped.rds"))
 treeData = treeData[speciesName_sci == species]
 
 ## Get dbh and time
@@ -136,10 +125,13 @@ delta_t = t_end - t_start
 
 ## Climate
 climFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/climateData/Chelsa/yearlyAverage/"
-climate = readRDS(paste0(climFolder, "FR_reshaped_climate.rds"))
+# climate = readRDS(paste0(climFolder, "FR_reshaped_climate.rds"))
+climate = readRDS(paste0(path, "FR_reshaped_climate.rds"))
 
 ## indices
-indices = readRDS(paste0(treeFolder, species, "_indices.rds"))
+# indices = readRDS(paste0(treeFolder, species, "_indices.rds"))
+indices = readRDS(paste0(path, species, "_indices.rds"))
+indices_data = indices[, index_gen] 
 indices = unique(indices[, .(tree_id, pointInventory_id, index_clim_start, index_clim_end)])
 
 ## Create simulations
