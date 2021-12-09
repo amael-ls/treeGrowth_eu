@@ -31,6 +31,9 @@ beta1 = 2.3
 
 sigma_res = sqrt(2)
 
+realParameters = c(beta0, sigma_beta, beta0_group, beta1, sigma_res)
+names(realParameters) = c("beta0", "sigma_beta", paste0("beta0_", 1:n_group), "beta1", "sigma_res")
+
 ## Explanatory variable
 x = runif(n = n_data, min = -5, max = 10)
 dt = data.table(y = numeric(n_data), x = x, group = rep(1:n_group, data_per_group))
@@ -48,4 +51,6 @@ for (i in 1:n_group)
 
 plot(dt[, x], dt[, y], pch = 19, col = dt[, colour])
 
+#### Save data
 saveRDS(dt, "./data.rds")
+saveRDS(realParameters, "realParameters.rds")
