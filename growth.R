@@ -7,6 +7,7 @@
 #	2. It is an initial condition, which help to start the hidden states. This also means that Y_generated_0 "is forgotten" as iterations
 #		goes by
 #
+# cd projects/def-dgravel/amael/postdoc/bayForDemo/growth/
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -15,9 +16,9 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
-library(doParallel) #! TO UNCOMMENT FOR COMPUTE CANADA
-library(bayesplot)
+library(doParallel)
 library(cmdstanr)
+library(magrittr)
 library(stringi)
 
 if (!("callr" %in% installed.packages()))
@@ -28,7 +29,7 @@ if (!("future" %in% installed.packages()))
 
 #### Create the cluster
 ## Cluster variables
-# array_id = 150 #! REMOVE THIS LINE WHEN DONE WITH TEST
+array_id = 150 #! REMOVE THIS LINE WHEN DONE WITH TEST
 array_id = as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID")) # Each array takes care of one year and process all the variables for that year
 print(paste0("array id = ", array_id))
 
@@ -84,32 +85,7 @@ init_fun = function(...)
 		sd_dbh = providedArgs[["sd_dbh"]]
 		Y_gen = (Y_gen - mu_dbh)/sd_dbh
 	}
-	return(list(latentState = Y_gen))
-}
-
-## Function to ... #! works exclusively when trees are measured twice (like in the French data)
-forced_states = function(dbh_parents, dbh_children, parentsObs_index, childrenObs_index, years_indiv, n_hiddenState)
-{
-	states = numeric(n_hiddenState)
-	other_index = 1:n_hiddenState
-	other_index = other_index[!(other_index %in% parentsObs_index) & !(other_index %in% childrenObs_index)]
-	
-	interp_slop = (dbh_children - dbh_parents)/years_indiv
-	
-	states[parentsObs_index] = dbh_parents
-	states[childrenObs_index] = dbh_children
-
-	count = 0
-	for (indiv in 1:length(dbh_parents))
-	{
-		for (yr in 1:(years_indiv[indiv] - 1))
-		{
-			count = count + 1
-			states[other_index[count]] = dbh_parents + yr*interp_slop[indiv]
-		}
-	}
-
-	return(states)
+	return(list(latent_dbh = Y_gen))
 }
 
 ## Function to compute the mean and sd of given variables in a data table
@@ -206,12 +182,13 @@ normalisation = function(dt, colnames = names(df), folder = "./", filename = "no
 
 #### Load data
 ## Paths
-mainFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
+# mainFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
+mainFolder = "Tilia_platyphyllos/" # Folder to use when running on local computer
 if (!dir.exists(mainFolder))
 	stop(paste0("Folder\n\t", mainFolder, "\ndoes not exist"))
 
-clim_folder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/climateData/Chelsa/yearlyAverage/"
-
+# clim_folder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/climateData/Chelsa/yearlyAverage/"
+clim_folder = mainFolder # Folder to use when running on local computer
 if (!dir.exists(clim_folder))
 	stop(paste0("Folder\n\t", clim_folder, "\ndoes not exist"))
 
@@ -288,7 +265,7 @@ climate_mu_sd = readRDS(paste0(savingPath, "climate_normalisation.rds"))
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 3e3
+maxIter = 1e3
 n_chains = 3
 
 # Initial value for states only
@@ -300,7 +277,7 @@ if (length(average_G) != n_indiv)
 
 initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_index, dbh],
  	years_indiv = nbYearsPerIndiv, average_G = average_G,
- 	n_hiddenState = indices[.N, index_gen], normalise = TRUE, mu_dbh = mean(treeData[, dbh]), sd_dbh = sd(treeData[, dbh]))
+ 	n_hiddenState = indices[.N, index_gen], normalise = TRUE, mu_dbh = 0, sd_dbh = sd(treeData[, dbh]))
 
 length(initVal_Y_gen)
 
@@ -340,145 +317,84 @@ stanData = list(
 	climate_mu = climate_mu_sd[variable == "pr", mu],
 	climate_sd = climate_mu_sd[variable == "pr", sd],
 
-	# Diffuse initialisation for the parents #! Need to think more about it, not used for now
-	# Y_generated_0 = rnorm(n = n_indiv, treeData[parents_index, dbh], sd = 1),
-	initialParents = initVal_Y_gen[[1]]$latentState[indices[type == "parent", index_gen]]
+	# Diffuse initialisation for the parents
+	initialParents = initVal_Y_gen[[1]]$latent_dbh[indices[type == "parent", index_gen]]
 
 	# Parameter for parallel calculus
 	# grainsize = 1
 )
 
 ## Compile model
-model = cmdstan_model("growth.stan")
+# model = cmdstan_model("growth.stan")
+model = cmdstan_model("./growth_2ndOption.stan")
 
 ## Run model
-results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 150, chains = n_chains,
+results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 100, chains = n_chains,
 	iter_warmup = maxIter/2, iter_sampling = maxIter/2, save_warmup = TRUE, init = initVal_Y_gen,
-	max_treedepth = 12, adapt_delta = 0.8)
+	max_treedepth = 12, adapt_delta = 0.9)
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-", format(Sys.time(), "%Y-%m-%d_%Hh%M"), ".rds"))
+results$save_object(file = paste0(savingPath, "growth-", time_ended, ".rds"))
 
 diagnose = results$cmdstan_diagnose()
 
 # stanfit <- rstan::read_stan_csv(fit$output_files())
-#### Few plots
-# Folder to save plots
-figurePath = paste0(savingPath, time_ended, "/")
-if (!dir.exists(figurePath))
-	dir.create(figurePath)
+#### FROM https://discourse.mc-stan.org/t/saving-reusing-adaptation-in-cmdstanr/19166/44
 
-# Intercept
-plot_title = ggplot2::ggtitle("Posterior distribution intercepts", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("intercepts"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "intercept-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for intercepts")
-temp_plot = mcmc_trace(results$draws("intercepts")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "intercept-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# Slopes_dbh
-plot_title = ggplot2::ggtitle("Posterior distribution slopes_dbh", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("slopes_dbh"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "slopes_dbh-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for slopes_dbh")
-temp_plot = mcmc_trace(results$draws("slopes_dbh")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "slopes_dbh-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# Slopes_precip
-plot_title = ggplot2::ggtitle("Posterior distribution slopes_precip", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("slopes_precip"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "slopes_precip-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for slopes_precip")
-temp_plot = mcmc_trace(results$draws("slopes_precip")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "slopes_precip-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# Quad_slopes_precip
-plot_title = ggplot2::ggtitle("Posterior distribution quad_slopes_precip", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("quad_slopes_precip"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "quad_slopes_precip-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for quad_slopes_precip")
-temp_plot = mcmc_trace(results$draws("quad_slopes_precip")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "quad_slopes_precip-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# processError
-plot_title = ggplot2::ggtitle("Posterior distribution processError", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "processError-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for processError")
-temp_plot = mcmc_trace(results$draws("processError")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "processError-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# measureError
-plot_title = ggplot2::ggtitle("Posterior distribution measureError", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "measureError-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for measureError")
-temp_plot = mcmc_trace(results$draws("measureError")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "measureError-traces.pdf"), plot = temp_plot, device = "pdf")
-
-for (i in c(1:3, 12:14))
-{
-	plot_title = ggplot2::ggtitle(paste0("Posterior distribution latentState[", i, "]"),
-		"with medians and 80% intervals")
-	temp_plot = mcmc_areas(results$draws(paste0("latentState[", i, "]")), prob = 0.8) + plot_title
-	ggplot2::ggsave(filename = paste0(figurePath, "latentState_", i, "-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-	plot_title = ggplot2::ggtitle(paste0("Traces for latentState[", i, "]"))
-	temp_plot = mcmc_trace(results$draws(paste0("latentState[", i, "]"), inc_warmup = TRUE)) + plot_title
-	ggplot2::ggsave(filename = paste0(figurePath, "latentState_", i, "-traces.pdf"), plot = temp_plot, device = "pdf")
+get_inits = function(chain_id){
+	warmup_draws = results$draws(inc_warmup = TRUE)
+	final_warmup_value = warmup_draws[maxIter/2, chain_id, 2:(dim(warmup_draws)[3])]
+	(
+		final_warmup_value
+		%>% tibble::as_tibble(.name_repair = function(names){
+				dimnames(final_warmup_value)$variable
+			})
+		%>% tidyr::pivot_longer(cols=dplyr::everything())
+		%>% tidyr::separate(name, into = c('variable','index'), sep = "\\[", fill = 'right')
+		%>% dplyr::group_split(variable)
+		%>% purrr::map(
+			.f = function(x){
+				(
+					x
+					%>% dplyr::mutate(
+						index = stringr::str_replace(index,']','')
+					)
+					%>% tidyr::separate(
+						index
+						, into = c('first','second')
+						, sep = ","
+						, fill = 'right'
+						, convert = T
+					)
+					%>% dplyr::arrange(first,second)
+					%>% (function(x){
+						out = list()
+						if(all(is.na(x$second))){
+							out[[1]] = x$value
+						}else{
+							out[[1]] = matrix(
+								x$value
+								, nrow = max(x$first)
+								, ncol = max(x$second)
+							)
+						}
+						names(out) = x$variable[1]
+						return(out)
+					})
+				)
+			}
+		)
+		%>% unlist(recursive = FALSE)
+		%>% return()
+	)
 }
 
-####! CRASH TEST ZONE
-## Create data
-# n = 1e4
-# intercept = 2
-# slope = 0.5
-# sigma = 2.3
+results2 = model$sample(data = stanData, parallel_chains = n_chains, refresh = 20, chains = n_chains,
+	iter_warmup = 0, iter_sampling = maxIter,
+	adapt_engaged = FALSE,
+	inv_metric = results$inv_metric(matrix = FALSE),
+	step_size = results$metadata()$step_size_adaptation,
+	init = get_inits)
 
-# x = runif(n, 0, 100)
-# x_norm = (x - mean(x))/sd(x)
-
-# y = rnorm(n, intercept + slope*x, sigma)
-# y_norm = (y - mean(y))/sd(y)
-
-# ## Run linear model, no normalisation
-# lin = lm(y ~ x)
-# mean(residuals(lin)) # Should be near 0
-# sd(residuals(lin))/sigma # Should be near 1
-# coefficients(lin)["(Intercept)"]/intercept # Should be near 1
-# coefficients(lin)["x"]/slope # Should be near 1
-
-# ## Run linear model, x is normalised
-# lin_norm = lm(y ~ x_norm)
-# mean(residuals(lin_norm)) # Should be near 0
-# sd(residuals(lin_norm))/sigma # Should be near 1
-# beta_0 = coefficients(lin_norm)["(Intercept)"]
-# beta_1 = coefficients(lin_norm)["x_norm"]
-# (beta_0 - beta_1*mean(x)/sd(x))/intercept # Should be near 1
-# beta_1/sd(x)/slope # Should be near 1
-
-# ## Run linear model, y is normalised
-# lin_norm2 = lm(y_norm ~ x)
-# mean(residuals(lin_norm2)) # Should be near 0
-# sd(residuals(lin_norm2))*sd(y)/sigma # Should be near 1
-# beta_0 = coefficients(lin_norm2)["(Intercept)"]
-# beta_1 = coefficients(lin_norm2)["x"]
-# (sd(y)*beta_0 + mean(y))/intercept # Should be near 1
-# beta_1*sd(y)/slope # Should be near 1
-
-## Run linear model, both x and y are normalised
-# lin_norm3 = lm(y_norm ~ x_norm)
-# mean(residuals(lin_norm3)) # Should be near 0
-# sd(residuals(lin_norm3))*sd(y)/sigma # Should be near 1
-# beta_0 = coefficients(lin_norm3)["(Intercept)"]
-# beta_1 = coefficients(lin_norm3)["x_norm"]
-# (sd(y)*beta_0 + mean(y) - mean(x)/sd(x)*sd(y)*beta_1)/intercept # Should be near 1
-# (sd(y)*beta_1)/sd(x)/slope # Should be near 1
-####! END CRASH TEST ZONE
+results2$cmdstan_diagnose()
