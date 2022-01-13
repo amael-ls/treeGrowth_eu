@@ -77,6 +77,25 @@ getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd
 	return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-")))
 }
 
+## Bayesplot is having troubles on my mac (Arial font not always found), so I create my own traces plot
+lazyTrace = function(draws)
+{
+	if (!all(class(draws) %in% c("draws_array", "draws", "array")))
+		stop("The class of draws should be ")
+	
+	n_chains = dim(draws)[2]
+	n_iter = dim(draws)[1]
+	cols = c("#d1e1ec", "#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b")
+
+	min_val = min(draws)
+	max_val = max(draws)
+	plot(0, pch = "", xlim = c(0, n_iter), ylim = c(min_val, max_val), axes = TRUE,
+		xlab = "", ylab = "", bg = "transparent")
+
+	for (chain in 1:n_chains)
+		lines(1:n_iter, draws[, chain,], type = "l", col = cols[chain])	
+}
+
 #### Read data
 ## Common variables
 species = "Tilia_platyphyllos"
@@ -105,14 +124,20 @@ if (isDBH_normalised)
 
 #### Get parameters
 paramsNames = c("potentialMaxGrowth", "power_dbh", "optimal_precip", "width_precip_niche", "processError")
+
+## Mean values
 meanParams = getParams(results, paramsNames)
-processError = meanParams[["processError"]]
+processError_mean = meanParams[["processError"]]
+
+## Median values
+medParams = getParams(results, paramsNames, type = "median")
+processError_med = medParams[["processError"]]
 
 #### Residuals
 ## Load data
 treeFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
 # treeData = readRDS(paste0(treeFolder, "trees_forest_reshaped.rds"))
-treeData = readRDS(paste0(path, "trees_forest_reshaped.rds"))
+treeData = readRDS(paste0(path, "trees_forest_reshaped.rds")) # Folder to use when running on local computer
 treeData = treeData[speciesName_sci == species]
 
 ## Get dbh and time
@@ -126,7 +151,7 @@ delta_t = t_end - t_start
 ## Climate
 climFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/climateData/Chelsa/yearlyAverage/"
 # climate = readRDS(paste0(climFolder, "FR_reshaped_climate.rds"))
-climate = readRDS(paste0(path, "FR_reshaped_climate.rds"))
+climate = readRDS(paste0(path, "FR_reshaped_climate.rds")) # Folder to use when running on local computer
 
 ## indices
 # indices = readRDS(paste0(treeFolder, species, "_indices.rds"))
@@ -135,35 +160,42 @@ indices_data = indices[, index_gen]
 indices = unique(indices[, .(tree_id, pointInventory_id, index_clim_start, index_clim_end)])
 
 ## Create simulations
-n_rep = 500
+n_rep = 250
 dt = data.table(rep_dbh_end = rep(dbh_end, each = n_rep), sampled = numeric(n_rep * length(dbh_end)))
+medPred = numeric(length(dbh_end))
+
 if (isDBH_normalised)
 	dt[, rep_dbh_end := rep_dbh_end/norm_dbh_dt[, sd]]
 
+i = 1
+yr = 1
 for (i in 1:length(dbh_end))
 {
 	currentDbh = dbh_start[i]/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
+	currentDbh_med = dbh_start[i]/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
 	currentClim_index = indices[i, index_clim_start]
 	for (yr in 1:delta_t[i])
 	{
 		precip = climate[currentClim_index, pr]
-		currentDbh = rnorm(n_rep, rnorm(n_rep, nextDBH(currentDbh, precip, meanParams, norm_clim_dt), processError), 0.006)
+		currentDbh = rnorm(n_rep, rnorm(n_rep, nextDBH(currentDbh, precip, meanParams, norm_clim_dt), processError_mean), 0.006)
+		currentDbh_med = nextDBH(currentDbh_med, precip, medParams, norm_clim_dt)
 		currentClim_index = currentClim_index + 1
 	}
 	dt[((i - 1)*n_rep + 1):(i*n_rep), sampled := currentDbh]
+	medPred[i] = currentDbh_med
 	if (i %% 100 == 0)
 		print(paste0(round(i*100/length(dbh_end), 2), "% done"))
 }
 
-saveRDS(dt, "testForResiduals.rds")
+# saveRDS(dt, "testForResiduals.rds")
 
 ## Reshape simulations into a matrix length(dbh) x n_rep
 sims = matrix(data = dt[, sampled], nrow = n_rep, ncol = length(dbh_end)) # each column is for one data point (the way I organised the dt)
 sims = t(sims) # Transpose the matrix for dharma
 
 forDharma = createDHARMa(simulatedResponse = sims,
-	observedResponse = dbh_end/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1))
-#, fittedPredictedResponse = avg(dbh, alpha0_ptw_med, alpha1_ptw_med))
+	observedResponse = dbh_end/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
+, fittedPredictedResponse = medPred)
 
 plot(forDharma)
 dev.off()
@@ -211,7 +243,7 @@ figurePath = paste0(path, time_ended, "/")
 if (!dir.exists(figurePath))
 	dir.create(figurePath)
 
-# Intercept
+# Potential maximal growth
 plot_title = ggplot2::ggtitle("Posterior distribution potentialMaxGrowth", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("potentialMaxGrowth"), prob = 0.8) + plot_title
 ggplot2::ggsave(filename = paste0(figurePath, "pmg-distrib.pdf"), plot = temp_plot, device = "pdf")
@@ -220,7 +252,7 @@ plot_title = ggplot2::ggtitle("Traces for potentialMaxGrowth")
 temp_plot = mcmc_trace(results$draws("potentialMaxGrowth")) + plot_title
 ggplot2::ggsave(filename = paste0(figurePath, "pmg-traces.pdf"), plot = temp_plot, device = "pdf")
 
-# Slopes_dbh
+# Power dbh
 plot_title = ggplot2::ggtitle("Posterior distribution power_dbh", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("power_dbh"), prob = 0.8) + plot_title
 ggplot2::ggsave(filename = paste0(figurePath, "power_dbh-distrib.pdf"), plot = temp_plot, device = "pdf")
@@ -229,7 +261,7 @@ plot_title = ggplot2::ggtitle("Traces for power_dbh")
 temp_plot = mcmc_trace(results$draws("power_dbh")) + plot_title
 ggplot2::ggsave(filename = paste0(figurePath, "power_dbh-traces.pdf"), plot = temp_plot, device = "pdf")
 
-# Slopes_precip
+# Optimal precipitation
 plot_title = ggplot2::ggtitle("Posterior distribution optimal_precip", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("optimal_precip"), prob = 0.8) + plot_title
 ggplot2::ggsave(filename = paste0(figurePath, "optimal_precip-distrib.pdf"), plot = temp_plot, device = "pdf")
@@ -238,7 +270,7 @@ plot_title = ggplot2::ggtitle("Traces for optimal_precip")
 temp_plot = mcmc_trace(results$draws("optimal_precip")) + plot_title
 ggplot2::ggsave(filename = paste0(figurePath, "optimal_precip-traces.pdf"), plot = temp_plot, device = "pdf")
 
-# Quad_slopes_precip
+# Width niche distribution (precipitation)
 plot_title = ggplot2::ggtitle("Posterior distribution width_precip_niche", "with medians and 80% intervals")
 temp_plot = mcmc_areas(results$draws("width_precip_niche"), prob = 0.8) + plot_title
 ggplot2::ggsave(filename = paste0(figurePath, "width_precip_niche-distrib.pdf"), plot = temp_plot, device = "pdf")
@@ -256,14 +288,18 @@ plot_title = ggplot2::ggtitle("Traces for processError")
 temp_plot = mcmc_trace(results$draws("processError")) + plot_title
 ggplot2::ggsave(filename = paste0(figurePath, "processError-traces.pdf"), plot = temp_plot, device = "pdf")
 
-# # measureError
-# plot_title = ggplot2::ggtitle("Posterior distribution measureError", "with medians and 80% intervals")
-# temp_plot = mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title
-# ggplot2::ggsave(filename = paste0(figurePath, "measureError-distrib.pdf"), plot = temp_plot, device = "pdf")
+# measureError
+plot_title = ggplot2::ggtitle("Posterior distribution measureError", "with medians and 80% intervals")
+temp_plot = mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "measureError-distrib.pdf"), plot = temp_plot, device = "pdf")
 
-# plot_title = ggplot2::ggtitle("Traces for measureError")
-# temp_plot = mcmc_trace(results$draws("measureError")) + plot_title
-# ggplot2::ggsave(filename = paste0(figurePath, "measureError-traces.pdf"), plot = temp_plot, device = "pdf")
+plot_title = ggplot2::ggtitle("Traces for measureError")
+temp_plot = mcmc_trace(results$draws("measureError")) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "measureError-traces.pdf"), plot = temp_plot, device = "pdf")
+
+lazyTrace(results$draws("measureError"))
+
+cor(results$draws("processError"), results$draws("measureError"))
 
 for (i in c(1:6, 12:14))
 {
@@ -291,25 +327,125 @@ dev.off()
 
 pdf("./growth_dbh.pdf", height = 7, width = 7)
 op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
-curve(growth(x, 0, params = meanParams, norm_clim_dt, isScaled = TRUE), from = 50, to = 1000,
-	lwd = 2, col = "#34568B", xlab = "dbh", ylab = "Growth (in mm/yr)")
+curve(norm_dbh_dt[, sd]^(1 - meanParams["power_dbh"]) * growth(x, 0, params = meanParams, norm_clim_dt, isScaled = TRUE),
+	from = 50, to = 1000, lwd = 2, col = "#34568B", xlab = "dbh", ylab = "Growth (in mm/yr)")
 dev.off()
 
-pdf("./growth_precip.pdf", height = 7, width = 7)
-op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
-curve(growth(250/norm_dbh_dt[, sd], x, params = meanParams, norm_clim_dt, isScaled = FALSE), from = 650, to = 1500,
-	lwd = 2, col = "#34568B", xlab = "Precipitation (mm/yr)", ylab = "Growth (in mm/yr)")
-dev.off()
+# pdf("./growth_precip.pdf", height = 7, width = 7)
+# op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
+# curve(growth(250/norm_dbh_dt[, sd], x, params = meanParams, norm_clim_dt, isScaled = FALSE), from = 650, to = 1500,
+# 	lwd = 2, col = "#34568B", xlab = "Precipitation (mm/yr)", ylab = "Growth (in mm/yr)")
+# dev.off()
+
+## Compute average climate for each tree during its time span
+indices[, avg_pr := mean(climate[index_clim_start:index_clim_end, pr]), by = .(tree_id, pointInventory_id)]
 
 # What follows works only for the French data that have a particular structure. For the general case, use indices
+treeData = treeData[indices[, .(tree_id, pointInventory_id, avg_pr)], on = c("tree_id", "pointInventory_id")]
 dbh0 = treeData[seq(1, .N - 1, by = 2), dbh]
 dbh1 = treeData[seq(2, .N, by = 2), dbh]
-g_5_years = (dbh1 - dbh0)/5
+yearly_avg_growth = (dbh1 - dbh0)/(treeData[seq(2, .N, by = 2), year] - treeData[seq(1, .N - 1, by = 2), year])
+
+mean(treeData[, avg_pr])
+split_clim = min(treeData[, avg_pr]) + 0:3*(max(treeData[, avg_pr]) - min(treeData[, avg_pr]))/3
+
+treeData[, class_pr := ""]
+treeData[(split_clim[1] <= avg_pr) & (avg_pr < split_clim[2]), class_pr := "low"]
+treeData[(split_clim[2] <= avg_pr) & (avg_pr < split_clim[3]), class_pr := "medium"]
+treeData[(split_clim[3] <= avg_pr) & (avg_pr <= split_clim[4]), class_pr := "high"]
+
+colours = c("#CD212A", "#DAAE29", "#094F9A")
+treeData[class_pr == "low", colour := colours[1]]
+treeData[class_pr == "medium", colour := colours[2]]
+treeData[class_pr == "high", colour := colours[3]]
 
 # jpeg("test.jpg", width = 1080, height = 1080, quality = 100)
 pdf("test.pdf", width = 7, height = 7)
 op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
-plot(dbh0, g_5_years, pch = 19, col = "#FA7A354A")
+plot(dbh0, yearly_avg_growth, pch = 19, col = treeData[seq(1, .N - 1, by = 2), colour],
+	xlab = "dbh (at time 0)", ylab = "yearly average growth", cex = 0.35)
 dev.off()
 
 ####! END CRASH TEST ZONE
+
+
+
+
+
+# ## Growth function (expected growth)
+# growth = function(dbh, precip, params, isClimScaled = FALSE, isDbhScaled = TRUE, ...)
+# {
+# 	# Get the normalising constantes and rescale if necessary
+# 	if (!isClimScaled)
+# 	{
+# 		providedArgs = list(...)
+# 		if (!("norm_clim_dt" %in% names(providedArgs)))
+# 			stop("You must provide norm_clim_dt")
+
+# 		norm_clim_dt = providedArgs[["norm_clim_dt"]]
+
+# 		mu_clim = norm_clim_dt[variable == "pr", mu]
+# 		sd_clim = norm_clim_dt[variable == "pr", sd]
+# 		clim = (precip - mu_clim)/sd_clim
+# 	}
+
+# 	if (!isDbhScaled) #! DBH was not centered, only divide by sd(dbh)!
+# 	{
+# 		providedArgs = list(...)
+# 		if (!("norm_dbh_dt" %in% names(providedArgs)))
+# 			stop("You must provide norm_dbh_dt")
+
+# 		norm_dbh_dt = providedArgs[["norm_dbh_dt"]]
+# 		sd_dbh = norm_dbh_dt[variable == "dbh", sd]
+# 		dbh = dbh/sd_dbh
+# 	}
+
+# 	if (isClimScaled)
+# 		clim = precip
+		
+
+# 	potentialMaxGrowth = params[["potentialMaxGrowth"]]
+# 	power_dbh = params[["power_dbh"]]
+# 	optimal_clim = params[["optimal_precip"]]
+# 	width_clim_niche = params[["width_precip_niche"]]
+# 	G = potentialMaxGrowth * dbh^power_dbh *
+# 		exp(-(clim - optimal_clim)^2/width_clim_niche^2)
+# 	return (G)
+# }
+
+# ## Dbh function (expected dbh at time t + 1 given climate and dbh at time t)
+# nextDBH = function(currentDBH, precip, params, isClimScaled = FALSE, isDbhScaled = TRUE, ...)
+# {
+# 	if (!isClimScaled & !isDbhScaled)
+# 	{
+# 		providedArgs = list(...)
+# 		if (!all(c("norm_clim_dt", "norm_dbh_dt") %in% names(providedArgs)))
+# 			stop("You must provide norm_clim_dt and norm_dbh_dt")
+
+# 		norm_clim_dt = providedArgs[["norm_clim_dt"]]
+# 		norm_dbh_dt = providedArgs[["norm_dbh_dt"]]
+# 		return (currentDBH + growth(currentDBH, precip, params, FALSE, FALSE, norm_clim_dt = norm_clim_dt, norm_dbh_dt = norm_dbh_dt))
+# 	}
+
+# 	if (!isClimScaled)
+# 	{
+# 		providedArgs = list(...)
+# 		if (!("norm_clim_dt" %in% names(providedArgs)))
+# 			stop("You must provide norm_clim_dt")
+
+# 		norm_clim_dt = providedArgs[["norm_clim_dt"]]
+# 		return (currentDBH + growth(currentDBH, precip, params, FALSE, TRUE, norm_clim_dt = norm_clim_dt))
+# 	}
+
+# 	if (!isDbhScaled)
+# 	{
+# 		providedArgs = list(...)
+# 		if (!("norm_dbh_dt" %in% names(providedArgs)))
+# 			stop("You must provide norm_dbh_dt")
+
+# 		norm_dbh_dt = providedArgs[["norm_dbh_dt"]]
+# 		return (currentDBH + growth(currentDBH, precip, params, TRUE, FALSE, norm_dbh_dt = norm_dbh_dt))
+# 	}
+
+# 	return (currentDBH + growth(currentDBH, precip, params, TRUE, TRUE))
+# }

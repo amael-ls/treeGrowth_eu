@@ -13,6 +13,8 @@
 			using mean and var: alpha = mean^2/var, beta = mean/var
 */
 
+// PROCESS ERROR ON GROWTH RATHER THAN DBH
+
 data {
 	// Number of data
 	int<lower = 1> n_indiv; // Number of individuals
@@ -51,8 +53,9 @@ parameters {
 	real optimal_precip; // Optimal precipitation niche value
 	real<lower = 0> width_precip_niche; // Width of the niche along the precipitation axis
 
-	real<lower = 0.000001, upper = 10> processError; // Constrained by default // CHANGE THE UPPER VALUE TO SOMETHING SMARTER
-	// real<lower = 0.000001> measureError; // Constrained by default
+	real<lower = 0.01, upper = 10> processError; // Constrained by default, realistically not too small
+	// real<lower = 0.0055, upper = 0.011> measureError; // Constrained by default, lower bound = 0.1/sqrt(12)*25.4/sd(dbh). See appendix D Eitzel for the calculus
+	real<lower = 0.0055> measureError; // TEST FRENCH DATA
 
 	vector[n_hiddenState] latent_dbh; // Real (and unobserved) dbh
 }
@@ -67,11 +70,12 @@ model {
 	// Priors
 	target += gamma_lpdf(potentialMaxGrowth | 1.0^2/10, 1.0/10);
 	target += normal_lpdf(power_dbh | 0, 5);
-	target += normal_lpdf(optimal_precip | 0, 10);
+	target += normal_lpdf(optimal_precip | 0, 20);
 	target += gamma_lpdf(width_precip_niche | 1.0^2/10000, 1.0/10000); // Gives a mean  of 1 and variance of 10000
 
-	target += gamma_lpdf(processError | 1.0^2/10000, 1.0/10000); // Gives a mean  of 1 and variance of 10000
-	// target += gamma_lpdf(measureError | 1.0^2/1000, 1.0/1000); // Gives a mean  of 10 and variance of 1000
+	target += gamma_lpdf(processError | 1.0^2/100, 1.0/100); // Gives a mean  of 1 and variance of 100
+	// target += uniform_lpdf(measureError | 0.0055, 0.011); // The upper bound means that there is at max an error of 23.35 mm on the circumference
+	target += gamma_lpdf(measureError | 0.07^2/0.1, 0.07/0.1); // TEST FRENCH DATA
 
 	// Model
 	for (i in 1:n_indiv)
@@ -96,11 +100,11 @@ model {
 	// --- Observation model
 	// Compare true (hidden/latent) parents with observed parents
 	// target += normal_lpdf(Yobs[parents_index] | latent_dbh[parentsObs_index], 0.795); // 2.5/pi
-	target += normal_lpdf(normalised_Yobs[parents_index] | latent_dbh[parentsObs_index], 0.006); // 2.5/pi/sd(dbh)
+	target += normal_lpdf(normalised_Yobs[parents_index] | latent_dbh[parentsObs_index], measureError); // 2.5/pi/sd(dbh)
 
 	// Compare true (hidden/latent) children with observed children
 	// target += normal_lpdf(Yobs[children_index] | latent_dbh[childrenObs_index], 0.795); // 2.5/pi
-	target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh[childrenObs_index], 0.006); // 2.5/pi/sd(dbh)
+	target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh[childrenObs_index], measureError); // 2.5/pi/sd(dbh)
 }
 
 // Model with stuff written by Florian
