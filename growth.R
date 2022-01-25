@@ -8,6 +8,11 @@
 #		goes by
 #
 # cd projects/def-dgravel/amael/postdoc/bayForDemo/growth/
+#
+#! NOTES
+# The file growth-2022-01-18_21h19.rds I HAVE NO IDEA WHAT WORKS. This model did not converge, but the algo is correctly tuned. So try to run it longer! What are the priors?
+# The file with measureError = 3.0/135.137 is growth-2022-01-19_20h26.rds. This model converged.
+# The file with measureError = 1.0/135.137 is growth-2022-01-23_21h01.rds. This model converged.
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -265,7 +270,7 @@ climate_mu_sd = readRDS(paste0(savingPath, "climate_normalisation.rds"))
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 1e3
+maxIter = 1.5e3
 n_chains = 3
 
 # Initial value for states only
@@ -312,10 +317,16 @@ stanData = list(
 	# Observations
 	Yobs = treeData[, dbh],
 
-	# Explanatory variable
-	precip = climate[, pr], # Precipitations
-	climate_mu = climate_mu_sd[variable == "pr", mu],
-	climate_sd = climate_mu_sd[variable == "pr", sd],
+	# Explanatory variables
+	precip = climate[, pr], # Annual precipitations (sum over 12 months)
+	pr_mu = climate_mu_sd[variable == "pr", mu],
+	pr_sd = climate_mu_sd[variable == "pr", sd],
+
+	# tas = climate[, tas], # Annual average temperature (average over 12 months)
+	# tas_mu = climate_mu_sd[variable == "tas", mu],
+	# tas_sd = climate_mu_sd[variable == "tas", sd],
+
+	totalTrunkArea = treeData[, totalTrunkArea],
 
 	# Diffuse initialisation for the parents
 	initialParents = initVal_Y_gen[[1]]$latent_dbh[indices[type == "parent", index_gen]]
@@ -390,7 +401,7 @@ get_inits = function(chain_id){
 	)
 }
 
-results2 = model$sample(data = stanData, parallel_chains = n_chains, refresh = 20, chains = n_chains,
+results2 = model$sample(data = stanData, parallel_chains = n_chains, refresh = 100, chains = n_chains,
 	iter_warmup = 0, iter_sampling = maxIter,
 	adapt_engaged = FALSE,
 	inv_metric = results$inv_metric(matrix = FALSE),
@@ -398,3 +409,95 @@ results2 = model$sample(data = stanData, parallel_chains = n_chains, refresh = 2
 	init = get_inits)
 
 results2$cmdstan_diagnose()
+
+latent_1_6 = getParams(results, paste0("latent_dbh[", 1:6, "]"))
+x = 2000:2005
+min_y = min(135.137*latent_1_6, treeData[1:2, dbh])
+max_y = max(135.137*latent_1_6, treeData[1:2, dbh])
+
+pdf("./latent_real_2ndOption.pdf", height = 7, width = 7)
+op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
+plot(2000:2005, 135.137*latent_1_6, pch = 19, col = "#34568B", cex = 4,
+	xlab = "Year", ylab = "Diameter at breast height (scaled)", ylim = c(min_y, max_y))
+points(x = 2000, y = treeData[1, dbh], pch = 19, col = "#FA7A35", cex = 2)
+points(x = 2005, y = treeData[2, dbh], pch = 19, col = "#CD212A", cex = 2)
+dev.off()
+
+lazyTrace(results$draws("latent_dbh[1]"))
+
+plot_title = ggplot2::ggtitle("latent_dbh[1]")
+bayesplot::mcmc_trace(135.137*results$draws("latent_dbh[1]")) + plot_title
+
+plot_title = ggplot2::ggtitle("Traces for measureError")
+bayesplot::mcmc_trace(results$draws("measureError")) + plot_title
+
+
+####! CRASH
+climate[, avg_pr := mean(pr), by = c("pointInventory_id")]
+climate[, avg_tas := mean(tas), by = c("pointInventory_id")]
+climate[, avg_tasmin := mean(tasmin), by = c("pointInventory_id")]
+climate[, avg_tasmax := mean(tasmax), by = c("pointInventory_id")]
+
+aa = climate[treeData, on = c("pointInventory_id", "year")]
+aa[seq(2, .N, by = 2), G := dbh - aa[seq(1, .N, by = 2), dbh]]
+aa = na.omit(aa)
+
+aa[, avg_pr_Z := (avg_pr - mean(avg_pr))/sd(avg_pr)]
+aa[, avg_tas_Z := (avg_tas - mean(avg_tas))/sd(avg_tas)]
+aa[, avg_tasmin_Z := (avg_tasmin - mean(avg_tasmin))/sd(avg_tasmin)]
+aa[, avg_tasmax_Z := (avg_tasmax - mean(avg_tasmax))/sd(avg_tasmax)]
+
+pr = lm(aa[, G] ~ aa[, avg_pr_Z] + aa[, avg_pr_Z^2])
+tas = lm(aa[, G] ~ aa[, avg_tas])
+tasmin = lm(aa[, G] ~ aa[, avg_tasmin])
+tasmax = lm(aa[, G] ~ aa[, avg_tasmax])
+
+
+
+allTogether = lm(aa[, G] ~ aa[, avg_pr_Z] + aa[, avg_tas_Z])
+
+pdf("avg_growth-versus-avg_precip.pdf", width = 6, height = 6)
+plot(aa[, avg_pr], aa[, G], pch = 19, cex = 0.5, xlab = "Average precip over 5 years", ylab = "5 years dbh increment")
+abline(pr, col = "orange", lwd = 2)
+dev.off()
+
+plot(aa[, avg_tas], aa[, G], pch = 19, cex = 0.5, xlab = "Average precip over 5 years", ylab = "5 years dbh increment")
+abline(tas, col = "orange", lwd = 2)
+
+plot(aa[, avg_tasmin], aa[, G], pch = 19, cex = 0.5, xlab = "Average precip over 5 years", ylab = "5 years dbh increment")
+abline(tasmin, col = "orange", lwd = 2)
+
+plot(aa[, avg_tasmax], aa[, G], pch = 19, cex = 0.5, xlab = "Average precip over 5 years", ylab = "5 years dbh increment")
+abline(tasmax, col = "orange", lwd = 2)
+
+library(mgcv)
+pr_gam = gam(G ~ s(avg_pr_Z, bs="cr"), data = aa)
+
+# Note that mod_gam2$model is the data that was used in the modeling process, 
+# so it will have NAs removed.
+testdata = data.frame(avg_pr_Z = seq(-2, 3, length = 300))
+fits = predict(pr_gam, newdata = testdata, type='response', se = TRUE)
+predicts = data.frame(testdata, fits) %>% 
+	dplyr::mutate(lower = fit - 1.96*se.fit, upper = fit + 1.96*se.fit)
+
+plot_mod_gam2_response = ggplot(aes(x=avg_pr_Z,y=fit), data=predicts) +
+	geom_ribbon(aes(ymin = lower, ymax=upper), fill='gray90') +
+	geom_line(color='#00aaff', lwd = 2) +
+	geom_point(aes(x=avg_pr_Z,y=G), data = aa, cex = 0.5) +
+	theme_classic()
+
+# TEMPERATURE
+tas_gam = gam(G ~ s(avg_tas_Z, bs="cr"), data = aa)
+
+# Note that mod_gam2$model is the data that was used in the modeling process, 
+# so it will have NAs removed.
+testdata = data.frame(avg_tas_Z = seq(-4, 4, length = 400))
+fits = predict(tas_gam, newdata = testdata, type='response', se = TRUE)
+predicts = data.frame(testdata, fits) %>% 
+	dplyr::mutate(lower = fit - 1.96*se.fit, upper = fit + 1.96*se.fit)
+
+plot_mod_gam2_response = ggplot(aes(x=avg_tas_Z,y=fit), data=predicts) +
+	geom_ribbon(aes(ymin = lower, ymax=upper), fill='gray90') +
+	geom_line(color='#00aaff', lwd = 2) +
+	geom_point(aes(x=avg_tas_Z,y=G), data = aa, cex = 0.5) +
+	theme_classic()
