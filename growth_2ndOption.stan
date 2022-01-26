@@ -41,8 +41,8 @@ data {
 
 	// Explanatory variables
 	vector<lower = 0>[n_precip] precip; // Precipitations
-	real pr_mu;
-	real<lower = 0> pr_sd;
+	real pr_mu; // To standardise the precipitations
+	real<lower = 0> pr_sd; // To standardise the precipitations
 
 	vector<lower = 0>[n_obs] totalTrunkArea;
 }
@@ -57,7 +57,6 @@ transformed data {
 
 parameters {
 	// Parameters
-	// real<lower = 0> potentialMaxGrowth;
 	real potentialMaxGrowth;
 	real power_dbh; // Coefficient showing how growth is a (hopefully!) decreasing function of dbh
 	
@@ -66,12 +65,8 @@ parameters {
 	real pr_slope;
 	real pr_slope2;
 
-	// real<lower = lowest_prec> optimal_precip; // Optimal precipitation niche value
-	// real<lower = 0> width_precip_niche; // Width of the niche along the precipitation axis
-
 	real<lower = 0, upper = 10> processError; // Constrained by default, realistically not too small
-	// real<lower = 0.0055, upper = 0.011> measureError; // Constrained by default, lower bound = 0.1/sqrt(12)*25.4/sd(dbh). See appendix D Eitzel for the calculus
-	real<lower = 0.0055> measureError; // TEST FRENCH DATA
+	real<lower = 0.0055> measureError; // Constrained by default, lower bound = 0.1/sqrt(12)*25.4/sd(dbh). See appendix D Eitzel for the calculus
 
 	vector[n_hiddenState] latent_dbh; // Real (and unobserved) dbh
 }
@@ -84,7 +79,6 @@ model {
 	int k = 0;
 
 	// Priors
-	// target += gamma_lpdf(potentialMaxGrowth | 1.0^2/10, 1.0/10);
 	target += normal_lpdf(potentialMaxGrowth | 0, 100);
 	target += normal_lpdf(power_dbh | 0, 5);
 	
@@ -93,12 +87,8 @@ model {
 	target += normal_lpdf(pr_slope | 0, 5);
 	target += normal_lpdf(pr_slope2 | 0, 5);
 
-	// target += normal_lpdf(optimal_precip | 0, 20);
-	// target += gamma_lpdf(width_precip_niche | 1.0^2/10000, 1.0/10000); // Gives a mean  of 1 and variance of 10000
-
 	target += gamma_lpdf(processError | 1.0^2/100, 1.0/100); // Gives a mean  of 1 and variance of 100
-	// target += uniform_lpdf(measureError | 0.0055, 0.011); // The upper bound means that there is at max an error of 23.35 mm on the circumference
-	target += normal_lpdf(measureError | 3.0/135.137, 0.25/135.137); // TEST FRENCH DATA: Correspond to a dbh measurement error of 3 mm, sd(dbh) = 135.137
+	target += normal_lpdf(measureError | 3.0/135.137, 0.25/135.137); // Correspond to a dbh measurement error of 3 mm, sd(dbh) = 135.137
 
 	// Model
 	for (i in 1:n_indiv)
@@ -125,12 +115,10 @@ model {
 	
 	// --- Observation model
 	// Compare true (hidden/latent) parents with observed parents
-	// target += normal_lpdf(Yobs[parents_index] | latent_dbh[parentsObs_index], 0.795); // 2.5/pi
-	target += normal_lpdf(normalised_Yobs[parents_index] | latent_dbh[parentsObs_index], measureError); // measureError, 2.5/pi/sd(dbh) (WHY THIS?)
+	target += normal_lpdf(normalised_Yobs[parents_index] | latent_dbh[parentsObs_index], measureError);
 
 	// Compare true (hidden/latent) children with observed children
-	// target += normal_lpdf(Yobs[children_index] | latent_dbh[childrenObs_index], 0.795); // 2.5/pi
-	target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh[childrenObs_index], measureError); // measureError, 2.5/pi/sd(dbh) (WHY THIS?)
+	target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh[childrenObs_index], measureError);
 }
 
 // Model with stuff written by Florian
