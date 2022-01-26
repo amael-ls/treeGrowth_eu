@@ -57,12 +57,19 @@ transformed data {
 
 parameters {
 	// Parameters
-	real<lower = 0> potentialMaxGrowth;
+	// real<lower = 0> potentialMaxGrowth;
+	real potentialMaxGrowth;
 	real power_dbh; // Coefficient showing how growth is a (hopefully!) decreasing function of dbh
-	real<lower = lowest_prec> optimal_precip; // Optimal precipitation niche value
-	real<lower = 0> width_precip_niche; // Width of the niche along the precipitation axis
+	
+	// real comp;
 
-	real<lower = 0.01, upper = 10> processError; // Constrained by default, realistically not too small
+	real pr_slope;
+	real pr_slope2;
+
+	// real<lower = lowest_prec> optimal_precip; // Optimal precipitation niche value
+	// real<lower = 0> width_precip_niche; // Width of the niche along the precipitation axis
+
+	real<lower = 0, upper = 10> processError; // Constrained by default, realistically not too small
 	// real<lower = 0.0055, upper = 0.011> measureError; // Constrained by default, lower bound = 0.1/sqrt(12)*25.4/sd(dbh). See appendix D Eitzel for the calculus
 	real<lower = 0.0055> measureError; // TEST FRENCH DATA
 
@@ -77,16 +84,21 @@ model {
 	int k = 0;
 
 	// Priors
-	target += gamma_lpdf(potentialMaxGrowth | 1.0^2/10, 1.0/10);
+	// target += gamma_lpdf(potentialMaxGrowth | 1.0^2/10, 1.0/10);
+	target += normal_lpdf(potentialMaxGrowth | 0, 100);
 	target += normal_lpdf(power_dbh | 0, 5);
-	target += normal_lpdf(optimal_precip | 0, 20);
+	
+	// target += normal_lpdf(comp | 0, 5);
+
+	target += normal_lpdf(pr_slope | 0, 5);
+	target += normal_lpdf(pr_slope2 | 0, 5);
+
+	// target += normal_lpdf(optimal_precip | 0, 20);
 	// target += gamma_lpdf(width_precip_niche | 1.0^2/10000, 1.0/10000); // Gives a mean  of 1 and variance of 10000
-	target += normal_lpdf(width_precip_niche | 1.0^2/10000, 1.0/10000); // Not the width anymore, it is the intercept!
 
 	target += gamma_lpdf(processError | 1.0^2/100, 1.0/100); // Gives a mean  of 1 and variance of 100
 	// target += uniform_lpdf(measureError | 0.0055, 0.011); // The upper bound means that there is at max an error of 23.35 mm on the circumference
-	// target += gamma_lpdf(measureError | 0.07^2/0.1, 0.07/0.1); // TEST FRENCH DATA
-	target += normal_lpdf(measureError | 3.0/135.137, 1.0/135.137); // TEST 2 FRENCH DATA: Correspond to a dbh measurement error of 3 mm, sd(dbh) = 135.137
+	target += normal_lpdf(measureError | 3.0/135.137, 0.25/135.137); // TEST FRENCH DATA: Correspond to a dbh measurement error of 3 mm, sd(dbh) = 135.137
 
 	// Model
 	for (i in 1:n_indiv)
@@ -94,16 +106,19 @@ model {
 		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
 			k = k + 1;
-			expected_latent_yearlyGrowth = potentialMaxGrowth *
-				latent_dbh[count + j - 1]^power_dbh *
-				exp(-(normalised_precip[climate_index[i] + j - 2] - optimal_precip)^2/width_precip_niche^2);
+
+			expected_latent_yearlyGrowth = exp(potentialMaxGrowth +
+				power_dbh*latent_dbh[count + j - 1] +
+				// comp*totalTrunkArea + // NOT READY YET, NEED TO BE UPDATED FOR EACH YEAR
+				pr_slope*normalised_precip[climate_index[i] + j - 2] +
+				pr_slope2*normalised_precip[climate_index[i] + j - 2]^2);
 
 			expected_latent_dbh[k] = latent_dbh[count + j - 1] + expected_latent_yearlyGrowth;
 		}
 		count += nbYearsPerIndiv[i];
 	}
 	// Prior on initial hidden state: This is a diffuse initialisation
-	target += normal_lpdf(latent_dbh[parentsObs_index] | 0, 1e6); // Diffuse initialisation
+	target += normal_lpdf(latent_dbh[parentsObs_index] | 0, 10); // Diffuse initialisation, dbh is standardised so that 10 is already big
 
 	// Process model
 	target += normal_lpdf(latent_dbh[not_parent_index] | expected_latent_dbh, processError);
