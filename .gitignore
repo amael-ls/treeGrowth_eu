@@ -5,3 +5,6 @@ notes/*
 *.pdf
 toyExample/test*
 eitzel2013/
+sutton_measurementError/*.csv
+sutton_measurementError/*.rds
+sutton_measurementError/measurementError
