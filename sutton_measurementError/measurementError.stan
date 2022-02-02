@@ -1,8 +1,19 @@
 
 /*
-	I am using the beta binomial distribution. If I have not done any mistake, for n > 1 fixed, the function relating mean and variance to
-		the parameters alpha and beta is bijective. That is to say, I can fix arbitrarily the integer n to a value at least 2 and I am still
-		sure that I cover the whole space which is 'the upper right square of the plan' (i.e., the product of positive reals).
+	I think it would have been more correct to use the beta binomial distribution for the data. Unfortunately, this distribution is
+		unstable when it is reparameterised with mean and variance (rather that its two shape parameters alpha and beta). For instance, with
+		the following parameters: N = 10 (the max), alpha = 600, and beta = 400, I get the anlytical mean and variance:
+			mean = 6
+			variance = 2.421578...
+
+		Now, if I sample 1e3 numbers from the beta bionomial, I get for instance the following mean and variance:
+			mean = 5.966
+			variance = 2.349193
+		Although not too far (we are talking about a difference of around 0.2%), this couple of mean and variance provides the following α
+			alpha = -225.3685,
+		which is really far from 600; it even makes stan to reject alpha as it must be positive.
+
+		Therefore, I switched to a normal distribution for now (continuous, despite the observations are discrete... Should be changed)
 */
 
 data {
@@ -33,50 +44,3 @@ model {
 		target += normal_lpdf(dbh2[i] | latent_dbh[i], error);
 	}
 }
-
-// generated quantities {
-// 	vector[n_trees] latent_dbh;
-// 	vector[n_trees] sigma;
-
-// 	for (i in 1:n_trees)
-// 	{
-// 		latent_dbh[i] = N*x/(alpha[i] + beta[i])
-// 		sigma[i] = N*alpha[i]*beta[i]*(alpha[i] + beta[i] + N)/((alpha[i] + beta[i])^2*(alpha[i] + beta[i] + 1))
-// 	}
-// }
-
-
-// parameters {
-// 	// Parameter error
-// 	real<lower = 0.5/sqrt(12)> error; // The error is at least the error of the tool. See appendix D Eitzel for the calculus
-	
-// 	// Latent states
-// 	vector<lower = 0, upper = N>[n_trees] latent_dbh; // The average dbh
-// }
-
-// model {
-// 	// Defines variables
-// 	real alpha;
-// 	real beta;
-
-// 	// Diffuse initialisation of the states
-// 	target += uniform_lpdf(latent_dbh | 0, N);
-
-// 	// Error prior
-// 	target += gamma_lpdf(error | 3.0^2/100, 3.0/100);
-
-// 	for (i in 1:n_trees)
-// 	{
-// 		alpha = (-latent_dbh[i]^3 + latent_dbh[i]^2*N - latent_dbh[i]*error)/(latent_dbh[i]^2 - latent_dbh[i]*N + error*N);
-// 		if (alpha < 0)
-// 		{
-// 			print("latent = ", latent_dbh[i]);
-// 			print("num = ", -latent_dbh[i]^3 + latent_dbh[i]^2*N - latent_dbh[i]*error);
-// 			print("denom = ", latent_dbh[i]^2 - latent_dbh[i]*N + error*N);
-// 		}
-// 		beta = (latent_dbh[i] - N)*(latent_dbh[i]^2 - latent_dbh[i]*N + error)/(latent_dbh[i]^2 - latent_dbh[i]*N + error*N);
-
-// 		target += beta_binomial_lpmf(dbh1[i] | N, alpha, beta);
-// 		target += beta_binomial_lpmf(dbh2[i] | N, alpha, beta);
-// 	}
-// }
