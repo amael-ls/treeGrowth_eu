@@ -1,19 +1,24 @@
 
 #### Aim of prog: Investigate on the measurement error
 ## Explanations
+# The data used in this script are from the lab Integrative Ecology (PI: Dominique GRAVEL, https://ielab.recherche.usherbrooke.ca)
+#
 # Around 950 trees have been measured by two people in Sutton Canada. It was done this way:
 #	1. The first person measure many trees (more than a hundred in a row) while the second person takes notes
 #	2. Then, the roles are reversed: person 2 measures and person 1 takes notes.
 # There should have enough measurements in a row to make sure that the second person is not influenced by the first
+# This was done the last week of May 2016
+# I also got data from previous campaign in Sutton from 2011 to 2013, and from 2011 to 2016
 # 
 ## Names column data:
 #	- Arbre = tree id number
 #	- Esp = species
 #	- Etat = state (V = alive, there are only living trees)
 #	- Multi = is it a multi-trunk or not. N for No
-#	- The last two columns are the values collected by the two measurers. Note that the names of the measurers appear in the data provided
+#	- The last two columns are the values collected by the two measurers. Note that the names of the measurers appeared in the data provided
 #		by the lab Gravel (Sherbrooke, Canada). To preserve the anonymity, these names were replaced by dbh1_in_mm, dbh2_in_mm
 #	- The two persons measured the diameters of trees in mm at the height 1.37m (breast height).
+#
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -27,7 +32,34 @@ library(cmdstanr)
 library(stringi)
 
 #### Tool functions
-## Initiate latend_dbh with reasonable value (by default, stan would generate them between 0 and 2---constraint latent_dbh > 0)
+## Related to checking/cleaning data
+# To check that each tree has only one species associated (i.e., individuals do not change species)
+checkSpecies = function(dt, usedKey = "Arbre", option = "simplify")
+{
+	if ("usedKey" %in% names(dt))
+		warning("Data table might be confused by the argument usedKey. It is both an argument of the function and a column name")
+
+	dt[, species_nb := length(unique(Esp)), by = usedKey]
+	if (dt[species_nb > 1, .N] != 0)
+	{
+		warning("Some trees have more than one species!")
+		if (option == "simplify")
+		{
+			warning("You chose the option to simplify, species will be rewritten as unknown")
+			dt[species_nb > 1, Esp := "unknown"]
+		}
+
+		if (option == "remove")
+		{
+			warning("You chose to remove, the concerned rows will be removed")
+			dt = dt[species_nb == 1]
+		}
+	}
+	dt[, species_nb := NULL]
+}
+
+## Related to Stan
+# Initiate latend_dbh with reasonable value (by default, stan would generate them between 0 and 2---constraint latent_dbh > 0)
 init_fun = function(...)
 {
 	providedArgs = list(...)
@@ -44,6 +76,7 @@ init_fun = function(...)
 	return(list(latent_dbh = abs(rnorm(length(dbh1), mean = (dbh1 + dbh2)/2, sd = 5))))
 }
 
+# To plot traces of mcmcs from cmdstan fit objects
 lazyTrace = function(draws, ...)
 {
 	if (!all(class(draws) %in% c("draws_array", "draws", "array")))
@@ -77,8 +110,60 @@ lazyTrace = function(draws, ...)
 	}
 }
 
-#### Load data
-treeData = readRDS("./trees_remeasured.rds")
+#### Loading and cleaning data
+## Load three dataset corresponding to trees measured twice the same day in May 2016, and measures before and after 2016
+treeData_remeasured = readRDS("./trees_remeasured.rds")
+
+treeData_campaign_1 = readRDS("./trees_campaign1.rds")
+setnames(treeData_campaign_1, "DHP_mm_", "dbh_in_mm")
+
+treeData_campaign_2 = readRDS("./trees_campaign2.rds")
+setnames(treeData_campaign_2, "DHP1.mm.", "dbh_in_mm")
+
+## Checking the data and correcting them
+# Error in the dates the 19th May 2016 for the dataset treeData_campaign_2
+treeData_campaign_2[Date == "206-05-19", Date := "2016-05-19"] # I know from the lab Gravel that 2016 is the only possible date
+treeData_campaign_2[Date == "20165-19", Date := "2016-05-19"]
+
+# Checking species
+checkSpecies(treeData_remeasured)
+checkSpecies(treeData_campaign_1)
+checkSpecies(treeData_campaign_2)
+
+# Checking uniqueness of the individuals
+
+
+## Few descriptions
+treeData_campaign_1[, range(Date)]
+treeData_campaign_2[, range(Date)]
+
+
+# Check the species
+
+
+treeData_remeasured[, nb := NULL]
+
+setkey(treeData_campaign_1, Arbre)
+
+setkey(treeData_campaign_2, Arbre)
+
+
+
+setkey(treeData_remeasured, Arbre)
+
+treeData_remeasured = unique(treeData_remeasured)
+treeData_remeasured[, nb := .N, by = Arbre]
+
+if (treeData_remeasured[, max(nb)] != 1)
+{
+	warning("The following trees have more than one measurement")
+	print(treeData_remeasured[nb > 1, .(Arbre, Esp, dbh1_in_mm, dbh2_in_mm)])
+	warning("Those trees have been removed")
+	treeData_remeasured = treeData_remeasured[nb == 1]
+}
+
+6493, 11817
+union = 
 
 treeData[, mean(dbh1_in_mm)]
 treeData[, sd(dbh1_in_mm)]
