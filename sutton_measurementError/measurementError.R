@@ -58,6 +58,46 @@ checkSpecies = function(dt, usedKey = "Arbre", option = "simplify")
 	dt[, species_nb := NULL]
 }
 
+# To check that each tree id is unique (not that multi-trunk trees can have more than one row. Use the ... argument with toKeep)
+checkIndividuals = function(dt, usedKey = "Arbre", option = "remove", ...)
+{
+	providedArgs = list(...)
+	toKeep_boolean = FALSE
+
+	if (length(providedArgs) != 0)
+	{
+		message("Ellipsis is not empty")
+		ls_names = names(providedArgs)
+		if ("toKeep" %in% ls_names)
+		{
+			message(paste0("You decided to keep some `", usedKey, "'"))
+			toKeep = providedArgs[["toKeep"]]
+			toKeep_boolean = TRUE
+		}
+	}
+	setkeyv(dt, usedKey)
+	dt[, nb_indiv := .N, by = usedKey]
+	if (dt[, max(nb_indiv) != 1])
+	{
+		warning("Some individuals have more than one row of data. First simplification with function `unique'")
+		dt = unique(dt)
+		dt[, nb_indiv := .N, by = usedKey]
+		if (toKeep_boolean)
+			dt[.(toKeep), nb_indiv := 1] # To force keeping the rows concerned
+		
+		if (dt[, max(nb_indiv) != 1])
+		{
+			warning("Despite applying unique, there are still some individuals with at least two rows of data")
+			if (option == "remove")
+			{
+				warning("You chose the option to remove the concerned rows (except those that are to kept, set-up by the key)")
+				dt = dt[nb_indiv == 1]
+			}
+		}
+	}
+	dt[, nb_indiv := NULL]
+}
+
 ## Related to Stan
 # Initiate latend_dbh with reasonable value (by default, stan would generate them between 0 and 2---constraint latent_dbh > 0)
 init_fun = function(...)
@@ -131,7 +171,10 @@ checkSpecies(treeData_campaign_1)
 checkSpecies(treeData_campaign_2)
 
 # Checking uniqueness of the individuals
-
+dt = copy(treeData_campaign_1)
+checkIndividuals(dt, toKeep = toKeep)
+# ls_indiv = dt[nb_indiv > 1, unique(Arbre)]
+# toKeep = treeData_remeasured[Arbre %in% ls_indiv & Multi == "O", Arbre]
 
 ## Few descriptions
 treeData_campaign_1[, range(Date)]
