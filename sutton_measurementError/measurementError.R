@@ -24,8 +24,9 @@ options(max.print = 500)
 library(data.table)
 library(bayesplot)
 library(cmdstanr)
+library(stringi)
 
-#### Tool function
+#### Tool functions
 ## Initiate latend_dbh with reasonable value (by default, stan would generate them between 0 and 2---constraint latent_dbh > 0)
 init_fun = function(...)
 {
@@ -43,6 +44,39 @@ init_fun = function(...)
 	return(list(latent_dbh = abs(rnorm(length(dbh1), mean = (dbh1 + dbh2)/2, sd = 5))))
 }
 
+lazyTrace = function(draws, ...)
+{
+	if (!all(class(draws) %in% c("draws_array", "draws", "array")))
+		stop("The class of draws should be compatible with stan (draws_array, draws, array)")
+	
+	n_chains = dim(draws)[2]
+	n_iter = dim(draws)[1]
+	cols = c("#d1e1ec", "#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b")
+
+	min_val = min(draws)
+	max_val = max(draws)
+	plot(0, pch = "", xlim = c(0, n_iter), ylim = c(min_val, max_val), axes = TRUE,
+		xlab = "", ylab = "", bg = "transparent")
+
+	for (chain in 1:n_chains)
+		lines(1:n_iter, draws[, chain,], type = "l", col = cols[chain])	
+	
+	providedArgs = list(...)
+	nbArgs = length(providedArgs)
+
+	if (nbArgs != 0)
+	{
+		ls_names = names(providedArgs)
+		val_ind = stri_detect(str = ls_names, regex = "val")
+
+		if (any(val_ind))
+		{
+			for (val in ls_names[val_ind])
+				abline(h = providedArgs[[val]], col = "#CD212A")
+		}
+	}
+}
+
 #### Load data
 treeData = readRDS("./trees_remeasured.rds")
 
@@ -57,7 +91,7 @@ plot(treeData[, dbh1_in_mm], treeData[, dbh2_in_mm])
 #### Estimate parameters
 ## Prepare stan data
 # Common variables
-maxIter = 2400
+maxIter = 3000
 n_chains = 3
 
 # Initialialisation
@@ -77,7 +111,7 @@ stanData = list(
 	# Data
 	dbh1 = treeData[, dbh1_in_mm],
 	dbh2 = treeData[, dbh2_in_mm]
-	# N = max(max(treeData[, dbh1_in_mm]), max(treeData[, dbh2_in_mm]), maxLatent_dbh) + 5 # The +5 is to add some 'security'
+	# maxDBH_allowed = max(max(treeData[, dbh1_in_mm]), max(treeData[, dbh2_in_mm]), maxLatent_dbh) + 5 # The +5 is to make it 'loose'
 )
 
 ## Compile model
@@ -86,7 +120,7 @@ model = cmdstan_model("./measurementError.stan")
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 100, chains = n_chains,
 	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE,
-	max_treedepth = 13, adapt_delta = 0.9)
+	max_treedepth = 10, adapt_delta = 0.8)
 
 ## Check-up
 results$cmdstan_diagnose()
@@ -96,11 +130,13 @@ time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = "./", basename = paste0("sutton-", time_ended), timestamp = FALSE, random = TRUE)
 results$save_object(file = paste0("./", "sutton-", time_ended, ".rds"))
 
-#### Get latent_dbh and error from alpha and beta parameters
-# alphaVec = results$draws("alpha")
-
-mcmc_trace(results$draws("error"))
+#### Get latent_dbh and error
+mcmc_trace(results$draws("latent_dbh[1]"))
+lazyTrace(results$draws("latent_dbh[2]"), val1 = treeData[2, dbh1_in_mm], val2 = treeData[2, dbh2_in_mm])
 results$print()
+results$print(variables = "latent_dbh")
+
+error = results$draws("error")
 
 ####! CRASH TEST ZONE
 dbetabinom = function(x, size, shape1, shape2, log = FALSE)
@@ -133,7 +169,7 @@ shape1Compute = function(n, mean, var)
 shape2Compute = function(n, mean, var)
 	return ((mean - n)*(mean^2 - mean*n + var)/(mean^2 - mean*n + var*n));
 
-aa = rbetabinom(1e5, 10, 600, 400)
+aa = rbetabinom(1e3, 10, 600, 400)
 
 mean(aa)
 var(aa)
@@ -141,6 +177,9 @@ meanCompute(10, 600, 400)
 varCompute(10, 600, 400)
 
 shape1Compute(10, mean(aa), var(aa)) # Should be 600
+shape1Compute(10, 6, 2.421578) # Should be 600
+shape1Compute(10, 5.966, 2.349193) # -225.3685, really far from 600! This is based on a sample of 1e3
+shape1Compute(10, 5.98846, 2.418951) # 776.7303, really far from 600, but positive! This is based on a sample of 1e5!
 shape2Compute(10, mean(aa), var(aa)) # Should be 400
 
 meanCompute(10, shape1Compute(10, mean(aa), var(aa)), shape2Compute(10, mean(aa), var(aa)))
@@ -151,7 +190,6 @@ curve(meanCompute(x, 30000, 0.8), 0, 300, col = "blue", add = TRUE)
 curve(varCompute(x, 30000, 0.8), 0, 30)
 curve(varCompute(x, 30000, 0.8), 0, 30, col = "red", add = TRUE)
 
-# Despite shape1 and shape2 are highly sensitive to mean and var, it seems the opposite is not true: i.e., shape1 = 993 and shape2 = 662 are
-# ok, although the real solutions are 600 and 400 respectively! So it should be fine
+# The two parameters shape1 and shape2 are highly sensitive to mean and var. This prevent me to use the beta binomial distribution
 
 ####! END CRASH TEST ZONE
