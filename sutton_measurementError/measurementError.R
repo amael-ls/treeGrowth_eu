@@ -3,7 +3,7 @@
 ## Explanations
 # The data used in this script are from the lab Integrative Ecology (PI: Dominique GRAVEL, https://ielab.recherche.usherbrooke.ca)
 #
-# Around 950 trees have been measured by two people in Sutton Canada. It was done this way:
+# 945 trees have been measured by two people in Sutton Canada. It was done this way:
 #	1. The first person measure many trees (more than a hundred in a row) while the second person takes notes
 #	2. Then, the roles are reversed: person 2 measures and person 1 takes notes.
 # There should have enough measurements in a row to make sure that the second person is not influenced by the first
@@ -48,12 +48,6 @@ checkSpecies = function(dt, usedKey = "Arbre", option = "simplify")
 			warning("You chose the option to simplify, species will be rewritten as unknown")
 			dt[species_nb > 1, Esp := "unknown"]
 		}
-
-		if (option == "remove")
-		{
-			warning("You chose to remove, the concerned rows will be removed")
-			dt = dt[species_nb == 1]
-		}
 	}
 	dt[, species_nb := NULL]
 }
@@ -61,29 +55,15 @@ checkSpecies = function(dt, usedKey = "Arbre", option = "simplify")
 # To check that each tree id is unique (not that multi-trunk trees can have more than one row. Use the ... argument with toKeep)
 checkIndividuals = function(dt, usedKey = "Arbre", option = "remove", ...)
 {
-	providedArgs = list(...)
-	toKeep_boolean = FALSE
-
-	if (length(providedArgs) != 0)
-	{
-		message("Ellipsis is not empty")
-		ls_names = names(providedArgs)
-		if ("toKeep" %in% ls_names)
-		{
-			message(paste0("You decided to keep some `", usedKey, "'"))
-			toKeep = providedArgs[["toKeep"]]
-			toKeep_boolean = TRUE
-		}
-	}
-	setkeyv(dt, usedKey)
+	if ("usedKey" %in% names(dt))
+		warning("Data table might be confused by the argument usedKey. It is both an argument of the function and a column name")
+	
 	dt[, nb_indiv := .N, by = usedKey]
 	if (dt[, max(nb_indiv) != 1])
 	{
 		warning("Some individuals have more than one row of data. First simplification with function `unique'")
 		dt = unique(dt)
 		dt[, nb_indiv := .N, by = usedKey]
-		if (toKeep_boolean)
-			dt[.(toKeep), nb_indiv := 1] # To force keeping the rows concerned
 		
 		if (dt[, max(nb_indiv) != 1])
 		{
@@ -96,6 +76,7 @@ checkIndividuals = function(dt, usedKey = "Arbre", option = "remove", ...)
 		}
 	}
 	dt[, nb_indiv := NULL]
+	return (dt) # No other choice than returning because I am removing some data. Not possible to do it by reference
 }
 
 ## Related to Stan
@@ -170,43 +151,65 @@ checkSpecies(treeData_remeasured)
 checkSpecies(treeData_campaign_1)
 checkSpecies(treeData_campaign_2)
 
-# Checking uniqueness of the individuals
-dt = copy(treeData_campaign_1)
-checkIndividuals(dt, toKeep = toKeep)
-# ls_indiv = dt[nb_indiv > 1, unique(Arbre)]
-# toKeep = treeData_remeasured[Arbre %in% ls_indiv & Multi == "O", Arbre]
+# Checking uniqueness of the individuals (see crash test zone to keep few more data). I will remove the multi-trunk trees
+multiTrunk = treeData_remeasured[Multi == "O", Arbre] # List the trees that have multi-trunk! Those trees for sure have more than one line
+
+treeData_remeasured = treeData_remeasured[!(Arbre %in% multiTrunk)]
+treeData_campaign_1 = treeData_campaign_1[!(Arbre %in% multiTrunk)]
+treeData_campaign_2 = treeData_campaign_2[!(Arbre %in% multiTrunk)]
+
+treeData_remeasured = checkIndividuals(treeData_remeasured, usedKey = "Arbre")
+treeData_campaign_1 = checkIndividuals(treeData_campaign_1, usedKey = "Arbre")
+treeData_campaign_2 = checkIndividuals(treeData_campaign_2, usedKey = "Arbre")
+
+## Keep only living trees
+treeData_remeasured = treeData_remeasured[Etat == "V"]
+treeData_campaign_1 = treeData_campaign_1[Etat == "V"]
+treeData_campaign_2 = treeData_campaign_2[Etat == "V"]
+
+## Remove rows containing empty fields for treeData_campaign_2
+treeData_campaign_2[, dbh_in_mm := as.integer(dbh_in_mm)]
+treeData_campaign_2 = na.omit(treeData_campaign_2)
+
+## Last check-up
+if (treeData_remeasured[, length(unique(Arbre))] != treeData_remeasured[, .N])
+	warning("Check the uniqueness of the data again!")
+
+if (treeData_campaign_1[, length(unique(Arbre))] != treeData_campaign_1[, .N])
+	warning("Check the uniqueness of the data again!")
+
+if (treeData_campaign_2[, length(unique(Arbre))] != treeData_campaign_2[, .N])
+	warning("Check the uniqueness of the data again!")
 
 ## Few descriptions
 treeData_campaign_1[, range(Date)]
 treeData_campaign_2[, range(Date)]
 
+## Keep only the years for the dates
+# Add a date to treeData_remeasured (done the last week of May 2016). I chose the 25th May 2016 (middle of the week)
+treeData_remeasured[, Date := as.Date("2016-05-25", format = "%Y-%m-%d")]
+treeData_campaign_1[, Date := as.Date(Date, format = "%Y-%m-%d")]
+treeData_campaign_2[, Date := as.Date(Date, format = "%Y-%m-%d")]
 
-# Check the species
+#### Merging the dataset
+## Set key "Arbre" for merging. This key is unique since I removed the multi-trunk trees
+setkey(treeData_remeasured, "Arbre")
+setkey(treeData_campaign_1, "Arbre")
+setkey(treeData_campaign_2, "Arbre")
 
+## Keep only the column of interest
+treeData_remeasured = treeData_remeasured[, .(Arbre, dbh1_in_mm, dbh2_in_mm, Date)]
+treeData_campaign_1 = treeData_campaign_1[, .(Arbre, dbh_in_mm, Date)]
+treeData_campaign_2 = treeData_campaign_2[, .(Arbre, dbh_in_mm, Date)]
 
-treeData_remeasured[, nb := NULL]
+## Merging data sets
+# Actually, I just discovered that the second dataset is useless... The interesting trees are the same as in the first dataset!
+treeData = treeData_campaign_1[treeData_remeasured, on = "Arbre"] 
 
-setkey(treeData_campaign_1, Arbre)
+## Remove NA
+treeData = na.omit(treeData)
 
-setkey(treeData_campaign_2, Arbre)
-
-
-
-setkey(treeData_remeasured, Arbre)
-
-treeData_remeasured = unique(treeData_remeasured)
-treeData_remeasured[, nb := .N, by = Arbre]
-
-if (treeData_remeasured[, max(nb)] != 1)
-{
-	warning("The following trees have more than one measurement")
-	print(treeData_remeasured[nb > 1, .(Arbre, Esp, dbh1_in_mm, dbh2_in_mm)])
-	warning("Those trees have been removed")
-	treeData_remeasured = treeData_remeasured[nb == 1]
-}
-
-6493, 11817
-union = 
+print(paste0("In total, ", treeData[, .N], " individuals are available for the analysis"))
 
 treeData[, mean(dbh1_in_mm)]
 treeData[, sd(dbh1_in_mm)]
@@ -215,6 +218,18 @@ treeData[, mean(dbh2_in_mm)]
 treeData[, sd(dbh2_in_mm)]
 
 plot(treeData[, dbh1_in_mm], treeData[, dbh2_in_mm])
+
+#### Compute the days beween the first measure and the remeasurements
+## Change colnames
+setnames(treeData, c("Arbre", "dbh_in_mm", "Date", "i.Date"), c("tree_id", "dbh0_in_mm", "date_begin", "date_end"))
+
+## Compute diff
+treeData[, years := as.numeric(date_end - date_begin)/365.25]
+
+## Estimate 
+treeData[, growth := (dbh1_in_mm - dbh0_in_mm)/years]
+
+print(paste("the average growth is", round(treeData[, mean(growth)], digits = 2), "mm/year"))
 
 #### Estimate parameters
 ## Prepare stan data
@@ -319,5 +334,29 @@ curve(varCompute(x, 30000, 0.8), 0, 30)
 curve(varCompute(x, 30000, 0.8), 0, 30, col = "red", add = TRUE)
 
 # The two parameters shape1 and shape2 are highly sensitive to mean and var. This prevent me to use the beta binomial distribution
+
+##? To keep more data (see the cleaining part of the data)
+
+# multiTrunk = treeData_remeasured[Multi == "O", Arbre] # Keep the trees that have multi-trunk! Those trees for sure have more than one line
+# treeData_remeasured[, unique_id := as.character(Arbre)]
+# treeData_remeasured[Arbre %in% multiTrunk, unique_id := paste0(unique_id, "_", 1:.N), by = Arbre]
+
+# treeData_campaign_1[, unique_id := as.character(Arbre)]
+# treeData_campaign_1[Arbre %in% multiTrunk, unique_id := paste0(unique_id, "_", 1:.N), by = Arbre]
+
+# treeData_campaign_2[, unique_id := as.character(Arbre)]
+# treeData_campaign_2[Arbre %in% multiTrunk, unique_id := paste0(unique_id, "_", 1:.N), by = Arbre]
+
+# treeData_remeasured = checkIndividuals(treeData_remeasured, usedKey = "unique_id")
+# treeData_campaign_1 = checkIndividuals(treeData_campaign_1, usedKey = "unique_id")
+# treeData_campaign_2 = checkIndividuals(treeData_campaign_2, usedKey = "unique_id")
+
+# idToKeep = treeData_campaign_1[Arbre %in% multiTrunk]
+# idToKeep = treeData_remeasured[idToKeep, on = "Arbre", nomatch = 0]
+# idToKeep[, diff := mean(c(dbh1_in_mm, dbh2_in_mm)) - dbh_in_mm, by = i.unique_id]
+
+# union = ?? # Should do it manually since there is not that much trees in idToKeep
+
+#treeData_campaign_1[treeData_campaign_2, on = "Arbre", nomatch = 0]
 
 ####! END CRASH TEST ZONE
