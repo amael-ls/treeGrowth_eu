@@ -23,6 +23,8 @@ data {
 	// Data
 	int<lower = 0> dbh1[n_trees]; // dbh measured by person 1
 	int<lower = 0> dbh2[n_trees]; // dbh measured by person 2
+	vector<lower = 0>[n_trees] expected_dbh_2016; // Expected dbh
+	vector<lower = 0>[n_trees] sd_growth;
 }
 
 parameters {
@@ -39,7 +41,7 @@ model {
 
 	for (i in 1:n_trees)
 	{
-		target += normal_lpdf(latent_dbh[i] | dbh1[i], 5);
+		target += normal_lpdf(latent_dbh[i] | expected_dbh_2016[i], sd_growth[i]);
 		target += normal_lpdf(dbh1[i] | latent_dbh[i], error);
 		target += normal_lpdf(dbh2[i] | latent_dbh[i], error);
 	}
