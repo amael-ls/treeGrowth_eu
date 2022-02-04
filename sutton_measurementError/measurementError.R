@@ -198,7 +198,7 @@ setkey(treeData_campaign_1, "Arbre")
 setkey(treeData_campaign_2, "Arbre")
 
 ## Keep only the column of interest
-treeData_remeasured = treeData_remeasured[, .(Arbre, dbh1_in_mm, dbh2_in_mm, Date)]
+treeData_remeasured = treeData_remeasured[, .(Arbre, Esp, dbh1_in_mm, dbh2_in_mm, Date)]
 treeData_campaign_1 = treeData_campaign_1[, .(Arbre, dbh_in_mm, Date)]
 treeData_campaign_2 = treeData_campaign_2[, .(Arbre, dbh_in_mm, Date)]
 
@@ -209,8 +209,6 @@ treeData = treeData_campaign_1[treeData_remeasured, on = "Arbre"]
 ## Remove NA
 treeData = na.omit(treeData)
 
-print(paste0("In total, ", treeData[, .N], " individuals are available for the analysis"))
-
 treeData[, mean(dbh1_in_mm)]
 treeData[, sd(dbh1_in_mm)]
 
@@ -219,17 +217,59 @@ treeData[, sd(dbh2_in_mm)]
 
 plot(treeData[, dbh1_in_mm], treeData[, dbh2_in_mm])
 
-#### Compute the days beween the first measure and the remeasurements
+#### Compute the growth beween the first measure and the remeasurements
 ## Change colnames
 setnames(treeData, c("Arbre", "dbh_in_mm", "Date", "i.Date"), c("tree_id", "dbh0_in_mm", "date_begin", "date_end"))
 
-## Compute diff
+## Compute time diff
 treeData[, years := as.numeric(date_end - date_begin)/365.25]
 
-## Estimate 
-treeData[, growth := (dbh1_in_mm - dbh0_in_mm)/years]
+## Data yearly growth
+treeData[, growth := ((dbh1_in_mm + dbh2_in_mm)/2 - dbh0_in_mm)/years]
+
+## Keep only reliable growth. (This is because the French data I am studying have been corrected)
+treeData = treeData[(growth > 0) & (growth <= 10)]
+print(paste0("In total, ", treeData[, .N], " individuals are available for the analysis"))
+
+## Estimate the average yearly growth, assuming growth is gamma-distributed
+# Common variables
+maxIter = 3000
+n_chains = 3
+
+# Data
+stanData = list(
+	# Number of data
+	n_trees = treeData[, .N], # Number of trees
+
+	# Data
+	growth = treeData[, growth]
+)
+
+# Compile model
+model_G = cmdstan_model("./estimateGrowth.stan")
+
+# Run model
+results = model_G$sample(data = stanData, parallel_chains = n_chains, refresh = 100, chains = n_chains,
+	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE,
+	max_treedepth = 14, adapt_delta = 0.8)
+
+# Check results
+results$cmdstan_diagnose()
+
+# Get a pointwise value
+mu_G = mean(results$draws("mu"))
+sigma_G = mean(results$draws("sigma"))
+
+# Plot results
+hist(treeData[, growth], probability = TRUE, ylim = c(0, 0.3))
+curve(dgamma(x, mu_G^2/sigma_G, mu_G/sigma_G), add = TRUE, col = "#CD212A", lwd = 2)
+
+## Compute the expected dbh if trees grow at average growth
+treeData[, expected_dbh_2016 := dbh0_in_mm + years*mu_G]
 
 print(paste("the average growth is", round(treeData[, mean(growth)], digits = 2), "mm/year"))
+print(paste("the sd in growth is", round(treeData[, sd(growth)], digits = 2), "mm/year"))
+print(paste("the range Δt is", round(treeData[, min(years)], digits = 2), "-", round(treeData[, max(years)], digits = 2)))
 
 #### Estimate parameters
 ## Prepare stan data
@@ -239,7 +279,6 @@ n_chains = 3
 
 # Initialialisation
 latent_dbh_gen = lapply(1:n_chains, init_fun, dbh1 = treeData[, dbh1_in_mm], dbh2 = treeData[, dbh2_in_mm])
-maxLatent_dbh = ceiling(max(unlist(latent_dbh_gen)))
 
 length(latent_dbh_gen)
 
@@ -253,8 +292,9 @@ stanData = list(
 
 	# Data
 	dbh1 = treeData[, dbh1_in_mm],
-	dbh2 = treeData[, dbh2_in_mm]
-	# maxDBH_allowed = max(max(treeData[, dbh1_in_mm]), max(treeData[, dbh2_in_mm]), maxLatent_dbh) + 5 # The +5 is to make it 'loose'
+	dbh2 = treeData[, dbh2_in_mm],
+	expected_dbh_2016 = treeData[, expected_dbh_2016],
+	sd_growth = treeData[, years*sqrt(sigma_G)] # Reminder var[aX] = a^2 var[X], so that sd[aX] = a sd[X]
 )
 
 ## Compile model
@@ -263,7 +303,7 @@ model = cmdstan_model("./measurementError.stan")
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 100, chains = n_chains,
 	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE,
-	max_treedepth = 10, adapt_delta = 0.8)
+	max_treedepth = 14, adapt_delta = 0.8)
 
 ## Check-up
 results$cmdstan_diagnose()
@@ -274,65 +314,17 @@ results$save_output_files(dir = "./", basename = paste0("sutton-", time_ended), 
 results$save_object(file = paste0("./", "sutton-", time_ended, ".rds"))
 
 #### Get latent_dbh and error
-mcmc_trace(results$draws("latent_dbh[1]"))
-lazyTrace(results$draws("latent_dbh[2]"), val1 = treeData[2, dbh1_in_mm], val2 = treeData[2, dbh2_in_mm])
+lazyTrace(results$draws("latent_dbh[1]"), val1 = treeData[1, dbh1_in_mm], val2 = treeData[1, dbh2_in_mm], val3 = treeData[1, expected_dbh_2016])
+lazyTrace(results$draws("latent_dbh[2]"), val1 = treeData[2, dbh1_in_mm], val2 = treeData[2, dbh2_in_mm], val3 = treeData[2, expected_dbh_2016])
 results$print()
 results$print(variables = "latent_dbh")
 
 error = results$draws("error")
+mcmc_trace(results$draws("error"))
+
+print(paste("The average of the estimated measurement error is", round(mean(error), 2), "mm"))
 
 ####! CRASH TEST ZONE
-dbetabinom = function(x, size, shape1, shape2, log = FALSE)
-{
-	lpmf = lchoose(size, x) +
-		lbeta(x + shape1, size - x + shape2) -
-		lbeta(shape1, shape2)
-	if (log)
-		return (lpmf);
-		
-	return (exp(lpmf));
-}
-
-rbetabinom = function(n, size, shape1, shape2)
-	rbinom(n, size = size, prob = rbeta(n, shape1 = shape1, shape2 = shape2))
-
-y = dbetabinom(x = 1:10, size = 5, shape1 = 600, shape2 = 400)
-plot(1:10, y, type = "l", lwd = 2, col = "blue")
-points(1:10, y, pch = 19)
-
-meanCompute = function(n, shape1, shape2)
-	return (n * shape1/(shape1 + shape2))
-
-varCompute = function(n, shape1, shape2)
-	return (n*shape1*shape2*(shape1 + shape2 + n)/((shape1 + shape2)^2*(shape1 + shape2 + 1)));
-
-shape1Compute = function(n, mean, var)
-	return ((-mean^3 + mean^2*n - mean*var)/(mean^2 - mean*n + var*n));
-
-shape2Compute = function(n, mean, var)
-	return ((mean - n)*(mean^2 - mean*n + var)/(mean^2 - mean*n + var*n));
-
-aa = rbetabinom(1e3, 10, 600, 400)
-
-mean(aa)
-var(aa)
-meanCompute(10, 600, 400)
-varCompute(10, 600, 400)
-
-shape1Compute(10, mean(aa), var(aa)) # Should be 600
-shape1Compute(10, 6, 2.421578) # Should be 600
-shape1Compute(10, 5.966, 2.349193) # -225.3685, really far from 600! This is based on a sample of 1e3
-shape1Compute(10, 5.98846, 2.418951) # 776.7303, really far from 600, but positive! This is based on a sample of 1e5!
-shape2Compute(10, mean(aa), var(aa)) # Should be 400
-
-meanCompute(10, shape1Compute(10, mean(aa), var(aa)), shape2Compute(10, mean(aa), var(aa)))
-varCompute(10, shape1Compute(10, mean(aa), var(aa)), shape2Compute(10, mean(aa), var(aa)))
-
-curve(meanCompute(x, 600, 400), 0, 300)
-curve(meanCompute(x, 30000, 0.8), 0, 300, col = "blue", add = TRUE)
-curve(varCompute(x, 30000, 0.8), 0, 30)
-curve(varCompute(x, 30000, 0.8), 0, 30, col = "red", add = TRUE)
-
 # The two parameters shape1 and shape2 are highly sensitive to mean and var. This prevent me to use the beta binomial distribution
 
 ##? To keep more data (see the cleaining part of the data)
@@ -358,5 +350,36 @@ curve(varCompute(x, 30000, 0.8), 0, 30, col = "red", add = TRUE)
 # union = ?? # Should do it manually since there is not that much trees in idToKeep
 
 #treeData_campaign_1[treeData_campaign_2, on = "Arbre", nomatch = 0]
+
+## Stupid question about rules on probabilities...
+aa = runif(n = 1000, min = 0, max = 200)
+mu = 2
+sigma = 3
+
+dt = data.table(c0 = aa, c1 = numeric(length(aa)), c2 = numeric(length(aa)), c3 = numeric(length(aa)),
+	c4 = numeric(length(aa)), c5 = numeric(length(aa)))
+
+for (i in 1:5)
+{
+	current = paste0("c", i)
+	prev = paste0("c", i - 1)
+
+	dt[, (current) := get(prev) + rgamma(.N, shape = mu^2/sigma, rate = mu/sigma)]
+}
+
+hist(dt[, c5], probability = TRUE)
+bb = rgamma(1e5, (5*mu + aa)^2/(25*sigma), (5*mu + aa)/(25*sigma))
+dd = density(bb)
+lines(dd)
+
+mean(dt[, c5])
+mean(bb)
+
+var(dt[, c5])
+var(bb)
+
+# So it seems that my intuition is good. After n iteration of the Markov Chain, the moments are:
+#		mean(dbh_n) = n*mu + dbh0
+#		sd(dbh_n) = n^2*sigma
 
 ####! END CRASH TEST ZONE
