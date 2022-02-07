@@ -29,7 +29,9 @@ options(max.print = 500)
 library(data.table)
 library(bayesplot)
 library(cmdstanr)
+library(MetBrewer)
 library(stringi)
+library(DHARMa)
 
 #### Tool functions
 ## Related to checking/cleaning data
@@ -134,6 +136,8 @@ lazyTrace = function(draws, ...)
 #### Loading and cleaning data
 ## Load three dataset corresponding to trees measured twice the same day in May 2016, and measures before and after 2016
 treeData_remeasured = readRDS("./trees_remeasured.rds")
+print(paste("The data set contains", treeData_remeasured[, .N], "measures"))
+print(paste("The data set contains", length(treeData_remeasured[, unique(Arbre)]), "individuals"))
 
 treeData_campaign_1 = readRDS("./trees_campaign1.rds")
 setnames(treeData_campaign_1, "DHP_mm_", "dbh_in_mm")
@@ -227,22 +231,24 @@ treeData[, years := as.numeric(date_end - date_begin)/365.25]
 ## Data yearly growth
 treeData[, growth := ((dbh1_in_mm + dbh2_in_mm)/2 - dbh0_in_mm)/years]
 
-## Keep only reliable growth. (This is because the French data I am studying have been corrected)
-treeData = treeData[(growth > 0) & (growth <= 10)]
-print(paste0("In total, ", treeData[, .N], " individuals are available for the analysis"))
+## Keep only reliable growth, that is to say positive growth but
+treeData_growth = treeData[(growth > 0) & (growth <= 10)]
+print(paste0("In total, ", treeData_growth[, .N], " individuals are available for the estimation of growth"))
 
 ## Estimate the average yearly growth, assuming growth is gamma-distributed
 # Common variables
+set.seed(1969-08-18) # Woodstock seed
 maxIter = 3000
 n_chains = 3
 
 # Data
 stanData = list(
 	# Number of data
-	n_trees = treeData[, .N], # Number of trees
+	n_trees = treeData_growth[, .N], # Number of trees
 
 	# Data
-	growth = treeData[, growth]
+	growth = treeData_growth[, growth],
+	dbh0 = treeData_growth[, dbh0_in_mm]
 )
 
 # Compile model
@@ -253,23 +259,121 @@ results = model_G$sample(data = stanData, parallel_chains = n_chains, refresh = 
 	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE,
 	max_treedepth = 14, adapt_delta = 0.8)
 
-# Check results
+## Check results
+# Is there any stan flags
 results$cmdstan_diagnose()
 
-# Get a pointwise value
-mu_G = mean(results$draws("mu"))
-sigma_G = mean(results$draws("sigma"))
+# Check residuals, ptw = pointwise estimation, mean in our case
+a_ptw = mean(results$draws("a"))
+b_ptw = mean(results$draws("b"))
+c_ptw = mean(results$draws("c"))
+sigma_ptw = mean(results$draws("sigma"))
 
-# Plot results
-hist(treeData[, growth], probability = TRUE, ylim = c(0, 0.3))
-curve(dgamma(x, mu_G^2/sigma_G, mu_G/sigma_G), add = TRUE, col = "#CD212A", lwd = 2)
+n_rep = 2000
+dt_dharma = data.table(rep_dbh = rep(treeData_growth[, dbh0_in_mm/sd(dbh0_in_mm)], each = n_rep),
+	sampled = numeric(n_rep * treeData_growth[, .N]))
+
+dt_dharma[, sampled := rgamma(.N,
+	shape = (exp(a_ptw*rep_dbh^2 + b_ptw*rep_dbh + c_ptw))^2/sigma_ptw,
+	rate = (exp(a_ptw*rep_dbh^2 + b_ptw*rep_dbh + c_ptw))/sigma_ptw)]
+
+sims = matrix(data = dt_dharma[, sampled], nrow = n_rep, ncol = treeData_growth[, .N]) # each column is for one data point
+sims = t(sims) # Transpose the matrix for dharma
+
+forDharma = createDHARMa(simulatedResponse = sims,
+	observedResponse = treeData_growth[, growth])
+
+pdf("suttonGrowth_residuals.pdf", height = 6, width = 9)
+plot(forDharma)
+dev.off()
+
+# Plot growth in function of diameter
+mu_G = function(x, a, b, c, scaling_sd)
+	return(exp(a*(x/scaling_sd)^2 + b*x/scaling_sd + c))
+
+plot(treeData_growth[, dbh0_in_mm], treeData_growth[, growth], xlab = "dbh (in mm)", ylab = "Growth (in mm/yr)",
+	pch = 19)
+curve(mu_G(x, a = a_ptw, b = b_ptw, c = c_ptw, scaling_sd = treeData_growth[, sd(dbh0_in_mm)]), add = TRUE, col = "#E8731E", lwd = 4)
 
 ## Compute the expected dbh if trees grow at average growth
-treeData[, expected_dbh_2016 := dbh0_in_mm + years*mu_G]
+treeData[, expected_dbh_2016 := dbh0_in_mm + years*mu_G(dbh0_in_mm, a_ptw, b_ptw, c_ptw, sd(dbh0_in_mm))]
 
 print(paste("the average growth is", round(treeData[, mean(growth)], digits = 2), "mm/year"))
 print(paste("the sd in growth is", round(treeData[, sd(growth)], digits = 2), "mm/year"))
 print(paste("the range Δt is", round(treeData[, min(years)], digits = 2), "-", round(treeData[, max(years)], digits = 2)))
+
+#? #######################################################################################################
+#* ##################      ESTIMATION OF THE MEASUREMENT ERROR FOR THE FRENCH DATA      ##################
+#? #######################################################################################################
+#### Explanation:
+# The French data have been corrected (by the agency in charge of measuring the trees). Therefore, the measurement error correspond to how the
+# tape is placed, and which tension is put into the tape. The obvious errors (such as typos that create insane growth) have been corrected.
+# Therefore, we filter the data from Sutton to remove insane growth and estimate the remaining variability in the measurements.
+
+treeData_french = treeData[(growth > 0) & (growth <= 10)]
+
+#### Estimate parameters
+## Prepare stan data
+# Common variables
+maxIter = 3000
+n_chains = 3
+
+# Initialialisation
+latent_dbh_gen = lapply(1:n_chains, init_fun, dbh1 = treeData_french[, dbh1_in_mm], dbh2 = treeData_french[, dbh2_in_mm])
+
+length(latent_dbh_gen)
+
+for (i in 1:n_chains)
+	print(range(latent_dbh_gen[[i]]))
+
+# Data top provide
+stanData = list(
+	# Number of data
+	n_trees = treeData_french[, .N], # Number of trees
+
+	# Data
+	dbh1 = treeData_french[, dbh1_in_mm],
+	dbh2 = treeData_french[, dbh2_in_mm],
+	expected_dbh_2016 = treeData_french[, expected_dbh_2016],
+	sd_growth = treeData_french[, years*sqrt(sigma_ptw)] # Reminder var[aX] = a^2 var[X], so that sd[aX] = a sd[X]
+)
+
+## Compile model
+model = cmdstan_model("./measurementError.stan")
+
+## Run model
+results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 100, chains = n_chains,
+	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE,
+	max_treedepth = 14, adapt_delta = 0.8)
+
+## Check-up
+results$cmdstan_diagnose()
+
+## Saving
+time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
+results$save_output_files(dir = "./", basename = paste0("sutton_french-", time_ended), timestamp = FALSE, random = TRUE)
+results$save_object(file = paste0("./", "sutton_french-", time_ended, ".rds"))
+
+#### Get latent_dbh and error
+lazyTrace(results$draws("latent_dbh[1]"), val1 = treeData_french[1, dbh1_in_mm], val2 = treeData_french[1, dbh2_in_mm],
+	val3 = treeData_french[1, expected_dbh_2016])
+lazyTrace(results$draws("latent_dbh[2]"), val1 = treeData_french[2, dbh1_in_mm], val2 = treeData_french[2, dbh2_in_mm],
+	val3 = treeData_french[2, expected_dbh_2016])
+results$print()
+results$print(variables = "latent_dbh")
+
+error = results$draws("error")
+mcmc_trace(results$draws("error"))
+# lazyTrace(results$draws("error"))
+
+print(paste("The average of the estimated measurement error (expressed as an sd) is", round(mean(error), 2), "mm"))
+print(paste("The average of the estimated measurement error (expressed as a var) is", round(mean(error)^2, 2), "mm"))
+
+#? ##########################################################################################################
+#* ##################      ESTIMATION OF THE MEASUREMENT ERROR FOR NON CORRECTED DATA      ##################
+#? ##########################################################################################################
+#### Explanation:
+# This is for non corrected data, that is to say: I keep 'insane' growth
 
 #### Estimate parameters
 ## Prepare stan data
@@ -297,9 +401,6 @@ stanData = list(
 	sd_growth = treeData[, years*sqrt(sigma_G)] # Reminder var[aX] = a^2 var[X], so that sd[aX] = a sd[X]
 )
 
-## Compile model
-model = cmdstan_model("./measurementError.stan")
-
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 100, chains = n_chains,
 	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE,
@@ -321,8 +422,15 @@ results$print(variables = "latent_dbh")
 
 error = results$draws("error")
 mcmc_trace(results$draws("error"))
+lazyTrace(results$draws("error"))
 
-print(paste("The average of the estimated measurement error is", round(mean(error), 2), "mm"))
+print(paste("The average of the estimated measurement error (expressed as an sd) is", round(mean(error), 2), "mm"))
+print(paste("The average of the estimated measurement error (expressed as a var) is", round(mean(error)^2, 2), "mm"))
+
+
+
+
+
 
 ####! CRASH TEST ZONE
 # The two parameters shape1 and shape2 are highly sensitive to mean and var. This prevent me to use the beta binomial distribution
