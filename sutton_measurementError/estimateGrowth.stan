@@ -19,26 +19,32 @@ transformed data {
 }
 
 parameters {
-	// real<lower = 0> mu; // mean
-	real a; // mean = a dbh^2 + b^dbh + c
-	real b; // mean = a dbh^2 + b^dbh + c
-	real c; // mean = a dbh^2 + b^dbh + c
-	real<lower = 0> sigma; // variance (and not sd!)
+	real a;
+	real b;
+	real c;
+
+	real<lower = 0> g;
+	real h;
+	real i;
 }
 
 model {
 	// Defines variables
 	vector[n_trees] mu;
-
-	mu = exp(a*dbh_standardised^2 + b*dbh_standardised + c);
+	vector[n_trees] sigma;
+	mu = g*exp(-exp(h - i*dbh_standardised));
+	sigma = exp(a*dbh_standardised^2 + b*dbh_standardised + c);
 
 	// Priors
-	target += normal_lpdf(b | 0, 10); // variance of 10 is huge, given that dbh is std and that mu is on exponential!
-	target += normal_lpdf(a | 0, 10); // variance of 10 is huge, given that dbh is std and that mu is on exponential!
-	target += normal_lpdf(c | 0, 10); // variance of 10 is huge, given that dbh is std and that mu is on exponential!
-	target += gamma_lpdf(sigma | 5.0^2/100.0, 5.0/100.0);
+	target += normal_lpdf(a | 0, 10);
+	target += normal_lpdf(b | 0, 10);
+	target += normal_lpdf(c | 0, 10);
 
+	target += gamma_lpdf(g | 3.0^2/10, 3.0/10);
+	target += normal_lpdf(h | 0, 100);
+	target += normal_lpdf(i | 0, 100);
+	
 	// Model
-	// target += gamma_lpdf(mu | 3.0^2/5.0, 3.0/5.0);
-	target += gamma_lpdf(growth | mu^2/sigma, mu/sigma);
+	for (ind in 1:n_trees)
+		target += gamma_lpdf(growth[ind] | mu[ind]^2/sigma[ind], mu[ind]/sigma[ind]);
 }
