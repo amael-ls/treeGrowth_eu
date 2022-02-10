@@ -78,7 +78,8 @@ model {
 		for (ind in (index_parents[indiv] + 1):(index_children[indiv])) // The first being the parent is accounted for later.
 		{
 			target += gamma_lpdf(latent_dbh[ind] | (expected_dbh)^2/var_growth, expected_dbh/var_growth);
-			expected_dbh = expected_dbh + mu_G(expected_dbh, g, h, i, scaling);
+			expected_dbh = latent_dbh[ind] + mu_G(latent_dbh[ind], g, h, i, scaling);
+			var_growth = var_G(latent_dbh[ind], a, b, c, scaling);
 		}
 	// End EM algo
 		// Likelihood parents
