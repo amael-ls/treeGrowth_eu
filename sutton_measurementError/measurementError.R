@@ -136,6 +136,16 @@ init_fun = function(...)
 	return(list(latent_dbh = latent_dbh))
 }
 
+# To compute the residuals (latent state)
+myPredictObs = function(results, id_latent)
+{
+	id_latent = unique(id_latent)
+	if (length(id_latent) != 1)
+		stop("One id should be provided")
+	extract = results$draws(paste0("latent_dbh[", id_latent, "]"))
+	return (c(extract[,1,], extract[,2,], extract[,3,]))
+}
+
 # To plot traces of mcmcs from cmdstan fit objects
 lazyTrace = function(draws, ...)
 {
@@ -438,7 +448,7 @@ time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = "./", basename = paste0("model_error_correctedData-", time_ended), timestamp = FALSE, random = TRUE)
 results$save_object(file = paste0("./", "model_error_correctedData-", time_ended, ".rds"))
 
-#### Get latent_dbh and error
+#### Get few latent states (dbh) and error
 lazyTrace(results$draws("latent_dbh[1]"), val1 = treeData_french[1, dbh0_in_mm])
 lazyTrace(results$draws("latent_dbh[6]"), val1 = treeData_french[1, dbh1_in_mm], val2 = treeData_french[1, dbh2_in_mm])
 
@@ -447,6 +457,26 @@ lazyTrace(results$draws("error"))
 
 print(paste("The average of the estimated measurement error (expressed as an sd) is", round(mean(error), 2), "mm"))
 print(paste("The average of the estimated measurement error (expressed as a var) is", round(mean(error)^2, 2), "mm"))
+
+#### Compute residuals: compare data versus latent states with obs error
+n_rep = 3000
+
+dt_dharma = data.table(rep_id = rep(treeData_french[, dbh2016_ind], each = n_rep),
+	rep_dbh1 = rep(treeData_french[, dbh1_in_mm], each = n_rep),
+	sampled = numeric(n_rep * treeData_french[, .N]))
+
+dt_dharma[, sampled := myPredictObs(results, rep_id), by = rep_id]
+
+sims = matrix(data = dt_dharma[, sampled], nrow = n_rep, ncol = treeData_growth[, .N]) # each column is for one data point
+sims = t(sims) # Transpose the matrix for dharma
+
+forDharma = createDHARMa(simulatedResponse = sims,
+	observedResponse = treeData_french[, dbh1_in_mm])
+
+pdf("suttonError_residuals.pdf", height = 6, width = 9)
+plot(forDharma)
+dev.off()
+
 
 ####! CRASH TEST ZONE, WHAT FOLLOW IS NOT YET READY
 #? ##########################################################################################################
