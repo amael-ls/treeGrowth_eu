@@ -19,6 +19,37 @@
 
 // PROCESS ERROR ON GROWTH RATHER THAN DBH
 
+functions {
+	// Function for growth. This returns the expected growth in mm, for 1 year.
+	real growth(real dbh0, real precip, /* real temp, real total_TA, */
+		real potentialGrowth, real dbh_slope, real pr_slope, real pr_slope2 /*, real temp_slope, real temp_slope2, real trunkArea_slope*/)
+	{
+		/*
+			It takes the following variables:
+				- dbh0: The diameter
+				- precip: The precipitations
+				- temp: The temperature
+				- total_TA: The total trunk area
+			
+			It takes the following parameters:
+				- potentialGrowth: The basic growth, when all the explanatory variables are set to zero
+				- dbh_slope: The slope for dbh
+				- pr_slope: The slope for precipitation
+				- pr_slope2: The slope for precipitation (squared term)
+				- temp_slope: The slope for precipitation
+				- temp_slope2: The slope for precipitation (squared term)
+				- trunkArea_slope: The slope for competition
+		*/
+
+		return (exp(potentialGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2));
+	}
+
+	// real processError_fct(real dbh, real alpha, real beta)
+	// {
+	// 	return (exp(alpha + beta*dbh));
+	// }
+}
+
 data {
 	// Number of data
 	int<lower = 1> n_indiv; // Number of individuals
@@ -49,69 +80,64 @@ data {
 
 transformed data {
 	vector[n_obs] normalised_Yobs = Yobs/sd(Yobs); // Normalised but NOT centred dbh
-	vector[n_precip] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised precipitations
-	
-	// Constraints
-	real lowest_prec = (0.0 - pr_mu)/pr_sd; // Lowest precipitation on the normalised scale
+	vector[n_precip] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centered precipitations
 }
 
 parameters {
 	// Parameters
-	real potentialMaxGrowth;
-	real power_dbh; // Coefficient showing how growth is a (hopefully!) decreasing function of dbh
+	real potentialGrowth; // Growth when all the explanatory variables are set to 0
+	real dbh_slope;
 	
 	// real comp;
 
 	real pr_slope;
 	real pr_slope2;
 
-	real<lower = 0, upper = 10> processError; // Constrained by default, realistically not too small
-	real<lower = 0.0055> measureError; // Constrained by default, lower bound = 0.1/sqrt(12)*25.4/sd(dbh). See appendix D Eitzel for the calculus
+	// real<lower = 0> processError; // Constrained by default, realistically not too small
+	// real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
 
-	vector[n_hiddenState] latent_dbh; // Real (and unobserved) dbh
+	vector<lower = 0>[n_hiddenState] latent_dbh; // Real (and unobserved) dbh
 }
 
 model {
 	// Declare variables
-	int count = 0;
 	real expected_latent_dbh[n_hiddenState - n_indiv];
-	real expected_latent_yearlyGrowth;
+	real measureError = 3.0/sd(Yobs); // measureError is a standard deviation
+	real processError = 5.68/sd(Yobs)^2; // processError is a variance
+	int count = 0;
 	int k = 0;
 
 	// Priors
-	target += normal_lpdf(potentialMaxGrowth | 0, 100);
-	target += normal_lpdf(power_dbh | 0, 5);
+	target += normal_lpdf(potentialGrowth | 0, 100);
+	target += normal_lpdf(dbh_slope | 0, 5);
 	
 	// target += normal_lpdf(comp | 0, 5);
 
 	target += normal_lpdf(pr_slope | 0, 5);
 	target += normal_lpdf(pr_slope2 | 0, 5);
 
-	target += gamma_lpdf(processError | 1.0^2/100, 1.0/100); // Gives a mean  of 1 and variance of 100
-	target += normal_lpdf(measureError | 3.0/135.137, 0.25/135.137); // Correspond to a dbh measurement error of 3 mm, sd(dbh) = 135.137
+	// target += gamma_lpdf(processError | 1.0^2/10000, 1.0/10000); // Gives a mean  of 1 and variance of 10000
+	// target += normal_lpdf(measureError | 3.0/sd(Yobs), 0.25/sd(Yobs)); // Correspond to a dbh measurement error of 3 mm, standardised
 
 	// Model
-	for (i in 1:n_indiv)
+	for (i in 1:n_indiv) // Loop over all the individuals
 	{
 		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
 			k = k + 1;
-
-			expected_latent_yearlyGrowth = exp(potentialMaxGrowth +
-				power_dbh*latent_dbh[count + j - 1] +
-				// comp*totalTrunkArea + // NOT READY YET, NEED TO BE UPDATED FOR EACH YEAR
-				pr_slope*normalised_precip[climate_index[i] + j - 2] +
-				pr_slope2*normalised_precip[climate_index[i] + j - 2]^2);
-
-			expected_latent_dbh[k] = latent_dbh[count + j - 1] + expected_latent_yearlyGrowth;
+			expected_latent_dbh[k] = latent_dbh[count + j - 1] + growth(latent_dbh[count + j - 1], normalised_precip[climate_index[i] + j - 2],
+				potentialGrowth, dbh_slope, pr_slope, pr_slope2);
+			// j - 2 comes from (j - 1) - 1. The first '-1' is to compensate that j starts at 2, the second '-1' is to match the latent_dbh
 		}
 		count += nbYearsPerIndiv[i];
 	}
 	// Prior on initial hidden state: This is a diffuse initialisation
-	target += normal_lpdf(latent_dbh[parentsObs_index] | 0, 10); // Diffuse initialisation, dbh is standardised so that 10 is already big
+	target += gamma_lpdf(latent_dbh[parentsObs_index] | 1.582318^2/10.0, 1.582318/10.0); // Remember that the dbh is standardised
 
 	// Process model
-	target += normal_lpdf(latent_dbh[not_parent_index] | expected_latent_dbh, processError);
+	// target += normal_lpdf(latent_dbh[not_parent_index] | expected_latent_dbh, processError);
+	for (i in 1:(n_hiddenState - n_indiv))
+		target += gamma_lpdf(latent_dbh[not_parent_index[i]] | expected_latent_dbh[i]^2/processError, expected_latent_dbh[i]/processError);
 	
 	// --- Observation model
 	// Compare true (hidden/latent) parents with observed parents
