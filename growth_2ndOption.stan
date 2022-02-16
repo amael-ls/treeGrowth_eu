@@ -69,6 +69,7 @@ data {
 
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
+	vector<lower = 0>[n_hiddenState] latent_dbh; // The answer is provided
 
 	// Explanatory variables
 	vector<lower = 0>[n_precip] precip; // Precipitations
@@ -96,7 +97,7 @@ parameters {
 	// real<lower = 0> processError; // Constrained by default, realistically not too small
 	// real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
 
-	vector<lower = 0>[n_hiddenState] latent_dbh; // Real (and unobserved) dbh
+	// vector<lower = 0>[n_hiddenState] latent_dbh; // Real (and unobserved) dbh
 }
 
 model {
@@ -132,7 +133,7 @@ model {
 		count += nbYearsPerIndiv[i];
 	}
 	// Prior on initial hidden state: This is a diffuse initialisation
-	target += gamma_lpdf(latent_dbh[parentsObs_index] | 1.582318^2/10.0, 1.582318/10.0); // Remember that the dbh is standardised
+	// target += gamma_lpdf(latent_dbh[parentsObs_index] | 1.582318^2/10.0, 1.582318/10.0); // Remember that the dbh is standardised
 
 	// Process model
 	// target += normal_lpdf(latent_dbh[not_parent_index] | expected_latent_dbh, processError);
@@ -141,10 +142,10 @@ model {
 	
 	// --- Observation model
 	// Compare true (hidden/latent) parents with observed parents
-	target += normal_lpdf(normalised_Yobs[parents_index] | latent_dbh[parentsObs_index], measureError);
+	// target += normal_lpdf(normalised_Yobs[parents_index] | latent_dbh[parentsObs_index], measureError);
 
 	// Compare true (hidden/latent) children with observed children
-	target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh[childrenObs_index], measureError);
+	// target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh[childrenObs_index], measureError);
 }
 
 // Model with stuff written by Florian
