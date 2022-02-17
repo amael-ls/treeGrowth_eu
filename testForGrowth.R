@@ -53,6 +53,26 @@ init_fun = function(...)
 	return(list(latent_dbh = Y_gen))
 }
 
+## Log-likelihood function for test 2 (the latent states are known)
+loglik = function(the_answer, n_indiv, n_hiddenState, nbYearsPerIndiv, climate_index, normalised_precip, params, processError)
+{
+	expected_latent_dbh = numeric(length = n_hiddenState - n_indiv)
+	k = 0
+	count = 0
+	for (i in 1:n_indiv) # Loop over all the individuals
+	{
+		for (j in 2:nbYearsPerIndiv[i]) # Loop for all years but the first (which is the parent of indiv i)
+		{
+			k = k + 1;
+			expected_latent_dbh[k] = the_answer[count + j - 1] +
+				growth_fct(the_answer[count + j - 1], normalised_precip[climate_index[i] + j - 2], params);
+		}
+		count = count + nbYearsPerIndiv[i];
+	}
+	return (sum(dgamma(x = the_answer[not_parent_index],
+		shape = expected_latent_dbh^2/processError, rate = expected_latent_dbh/processError, log = TRUE)))
+}
+
 ## Function to compute the residuals (latent state)
 myPredictObs = function(draws_array, id_latent, regex = "latent_dbh")
 {
@@ -326,6 +346,42 @@ lazyTrace(results$draws("pr_slope2"), val1 = pr_slope2)
 
 lazyTrace(sd_dbh^2*results$draws("processError")) # processError is a variance, so should be multiplied by sd(dbh)^2
 lazyTrace(sd_dbh*results$draws("measureError")) # measureError is a standard deviation, so should be multiplied by sd(dbh)
+
+#### Check likelihood (for second test, see notebook)
+vec_pG = seq(potentialGrowth - 0.1, potentialGrowth + 0.1, length.out = 30)
+vec_dbhSlope = seq(dbh_slope - 0.008, dbh_slope + 0.012, length.out = 30)
+
+ll = matrix(data = 0, nrow = length(vec_pG), ncol = length(vec_dbhSlope))
+
+dim(ll)
+r = 1
+for (pG in vec_pG)
+{
+	c = 1
+	for (dbhSlope in vec_dbhSlope)
+	{
+		currentParams = c(potentialGrowth = pG, dbh_slope = dbhSlope, pr_slope = pr_slope, pr_slope2 = pr_slope2)
+		ll[r, c] = loglik(the_answer = the_answer/treeData[, sd(dbh)], n_indiv = n_indiv, n_hiddenState = indices[.N, index_gen], nbYearsPerIndiv = nbYearsPerIndiv,
+			climate_index = indices[type == "parent", index_clim_start],
+			normalised_precip = (climate[, pr] - climate_mu_sd[1, mu])/climate_mu_sd[1, sd],
+			params = currentParams, processError = processError/treeData[, var(dbh)])
+		c = c + 1
+	}
+	if (r %% 5 == 0)
+		print(r)
+	r = r + 1
+}
+
+filled.contour(x = vec_dbhSlope, y = vec_pG, z = ll, xlab = "dbh slope", ylab = "potential growth")
+x_sol = mean(results$draws("dbh_slope"))
+y_sol = mean(results$draws("potentialGrowth"))
+points(x_sol, y_sol, col = "#1D1F54", pch = 19, cex = 2)
+text(x_sol, y_sol, pos = 3, labels = "Estimated")
+
+x_real = params["dbh_slope"]
+y_real = params["potentialGrowth"]
+points(x_real, y_real, col = "#1D1F54", pch = 19, cex = 2)
+text(x_real, y_real, pos = 3, labels = "Real solution")
 
 #### Compute residuals: compare data versus latent states with obs error
 n_rep = results$metadata()$iter_sampling * results$num_chains()
