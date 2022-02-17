@@ -193,8 +193,8 @@ pr_slope2 = 0.0078;
 
 params = c(potentialGrowth = potentialGrowth, dbh_slope = dbh_slope, pr_slope = pr_slope, pr_slope2 = pr_slope2)
 
-processError = 5.68
-measurementError = 2.8
+processError = 5.68 # This is a variance: var /!\
+measurementError = 2.8 # This is a standard deviation: sd /!\
 
 ## Simulate dbh
 set.seed(1969-08-18) # Woodstock seed
@@ -225,12 +225,16 @@ aa = rgamma(1e4, shape = (123 + sd_dbh*growth_fct(123/sd_dbh, 1.22, params))^2/p
 
 mean(aa)
 var(aa)
-
 var(latent_dbh[, dbh5])
 
+the_answer = numeric(length = indices[.N, index_gen])
+
+for (i in 1:latent_dbh[, .N])
+	the_answer[(6*(i - 1) + 1):(6*i)] = unlist(latent_dbh[i,])
+
 ## Replace the observations by the simulated dummy data; do not forget the measurement error!
-treeData[parents_index, dbh := rnorm(.N, mean = latent_dbh[, dbh0], measurementError)]
-treeData[children_index, dbh := rnorm(.N, mean = latent_dbh[, dbh5], measurementError)]
+treeData[parents_index, dbh := rnorm(.N, mean = latent_dbh[, dbh0], sd = measurementError)]
+treeData[children_index, dbh := rnorm(.N, mean = latent_dbh[, dbh5], sd = measurementError)]
 
 sd_dbh = treeData[, sd(dbh)] # Do not forget to update it since half the data set is now dummy!
 
@@ -284,8 +288,8 @@ stanData = list(
 
 	totalTrunkArea = treeData[, totalTrunkArea],
 
-	# Diffuse initialisation for the parents
-	initialParents = initVal_Y_gen[[1]]$latent_dbh[indices[type == "parent", index_gen]]
+	# Providing the latent dbh
+	latent_dbh = the_answer/treeData[, sd(dbh)]
 )
 
 ## Compile model
@@ -294,12 +298,25 @@ model = cmdstan_model("./growth_2ndOption.stan")
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
-	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE, init = initVal_Y_gen,
+	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE, # init = initVal_Y_gen,
 	max_treedepth = 13, adapt_delta = 0.9)
 
 results$cmdstan_diagnose()
 
-results$print()
+results$print(names(params))
+
+cor(results$draws("potentialGrowth"), results$draws("dbh_slope"))
+cor(results$draws("potentialGrowth"), results$draws("pr_slope"))
+cor(results$draws("potentialGrowth"), results$draws("pr_slope2"))
+
+cor(results$draws("dbh_slope"), results$draws("pr_slope"))
+cor(results$draws("dbh_slope"), results$draws("pr_slope2"))
+
+cor(results$draws("pr_slope"), results$draws("pr_slope2"))
+
+results$save_output_files(dir = paste0("./", species, "/"), basename = "test_errorsFixed_latentGiven_noIntercept",
+	timestamp = FALSE, random = FALSE)
+results$save_object(file = paste0("./", species, "/test_errorsFixed_latentGiven_noIntercept.rds"))
 
 ## Few trace plots
 lazyTrace(results$draws("potentialGrowth"), val1 = potentialGrowth)
@@ -307,11 +324,11 @@ lazyTrace(results$draws("dbh_slope"), val1 = dbh_slope)
 lazyTrace(results$draws("pr_slope"), val1 = pr_slope)
 lazyTrace(results$draws("pr_slope2"), val1 = pr_slope2)
 
-lazyTrace(sd_dbh^2*results$draws("processError"))
-lazyTrace(sd_dbh^2*results$draws("measureError"))
+lazyTrace(sd_dbh^2*results$draws("processError")) # processError is a variance, so should be multiplied by sd(dbh)^2
+lazyTrace(sd_dbh*results$draws("measureError")) # measureError is a standard deviation, so should be multiplied by sd(dbh)
 
 #### Compute residuals: compare data versus latent states with obs error
-n_rep = results$metadata()$iter_sampling  * results$num_chains()
+n_rep = results$metadata()$iter_sampling * results$num_chains()
 
 dt_dharma = data.table(
 	rep_latent_id = c(rep(indices[type == "parent", index_gen], each = n_rep), rep(indices[type == "child", index_gen], each = n_rep)),
@@ -331,7 +348,7 @@ dt_dharma = data.table(
 latent_dbh_array = results$draws("latent_dbh") # dimension: iter_sampling * n_chains * number latent states
 dt_dharma[, sampled := myPredictObs(latent_dbh_array, rep_latent_id), by = rep_latent_id]
 
-sims = matrix(data = dt_dharma[, sampled], nrow = n_rep, ncol = treeData[, .N]) # each column is for one data point
+sims = matrix(data = dt_dharma[, sampled], nrow = n_rep, ncol = treeData[, .N]/2) # each column is for one data point
 sims = t(sims) # Transpose the matrix for dharma
 dim(sims)
 
@@ -342,13 +359,17 @@ plot(forDharma)
 dev.off()
 
 par(mfrow = c(2,1))
-lazyTrace(latent_dbh_array[, , "latent_dbh[1]"], val1 = treeData[1, dbh]/sd(treeData[, dbh]), main = "tree 1, t0", scaling = sd(treeData$dbh))
-lazyTrace(latent_dbh_array[, , "latent_dbh[6]"], val1 = treeData[2, dbh]/sd(treeData[, dbh]), main = "tree 1, t1", scaling = sd(treeData$dbh))
+lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="parent"][1, index_gen], "]")],
+	val1 = treeData[1, dbh]/sd(treeData[, dbh]), main = "tree 1, t0", scaling = sd(treeData$dbh))
+lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="child"][1, index_gen], "]")],
+	val1 = treeData[2, dbh]/sd(treeData[, dbh]), main = "tree 1, t1", scaling = sd(treeData$dbh))
 dev.off()
 
 par(mfrow = c(2,1))
-lazyTrace(latent_dbh_array[, , "latent_dbh[7]"], val1 = treeData[3, dbh]/sd(treeData[, dbh]), main = "tree 2, t0", scaling = sd(treeData$dbh))
-lazyTrace(latent_dbh_array[, , "latent_dbh[12]"], val1 = treeData[4, dbh]/sd(treeData[, dbh]), val2 = latent_dbh[2, dbh5]/sd(treeData[, dbh]),
+lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="parent"][2, index_gen], "]")],
+	val1 = treeData[3, dbh]/sd(treeData[, dbh]), main = "tree 2, t0", scaling = sd(treeData$dbh))
+lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="child"][2, index_gen], "]")],
+	val1 = treeData[4, dbh]/sd(treeData[, dbh]), val2 = latent_dbh[2, dbh5]/sd(treeData[, dbh]),
 	main = "tree 2, t1", scaling = sd(treeData$dbh))
 dev.off()
 
@@ -361,7 +382,7 @@ lazyTrace(results$draws("slope_dbh"))
 
 latent_1_6 = results$draws(paste0("latent_dbh[", 1:6, "]"))
 latent_1_6 = apply(latent_1_6, 3, mean)
-real_1_6 = latent_dbh[1,]
+real_1_6 = unlist(latent_dbh[1,])
 measured_1_6 = c(treeData[1, dbh], treeData[2, dbh])
 x = 2000:2005
 
@@ -371,6 +392,8 @@ ymax = max(sd_dbh*latent_1_6, real_1_6, measured_1_6)
 op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
 plot(2000:2005, sd_dbh*latent_1_6, pch = 19, col = "#34568B", cex = 4,
 	xlab = "Year", ylab = "Diameter at breast height (scaled)", ylim = c(ymin, ymax))
-points(x = c(2000, 2005, y = measured_1_6, pch = 19, col = c("#FA7A35", "#CD212A"), cex = 2)
-points(x, real_1_6, pch = 19, col = "#D8C29D")
+points(x = c(2000, 2005), y = measured_1_6, pch = 19, col = "#FA7A35", cex = 2)
+points(x, real_1_6, pch = 19, col = "#CD212A", cex = 1.5)
+legend(x = "topleft", legend = c("Estimated", "Measured", "Real"), fill = c("#34568B", "#FA7A35", "#CD212A"),
+	box.lwd = 0)
 dev.off()
