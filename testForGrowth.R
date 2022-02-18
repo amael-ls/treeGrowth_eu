@@ -60,23 +60,20 @@ loglik = function(the_answer, n_indiv, n_hiddenState, nbYearsPerIndiv, climate_i
 	k = 0
 	count = 0
 
-	control_index = numeric(length = n_hiddenState - n_indiv)
-
 	for (i in 1:n_indiv) # Loop over all the individuals
 	{
 		for (j in 2:nbYearsPerIndiv[i]) # Loop for all years but the first (which is the parent of indiv i)
 		{
 			k = k + 1;
-			control_index[k] = climate_index[i] + j - 2 # Can also be count + j - 1 or k to check these two indices
 			expected_latent_dbh[k] = the_answer[count + j - 1] +
 				growth_fct(the_answer[count + j - 1], normalised_precip[climate_index[i] + j - 2], params);
 		}
 		count = count + nbYearsPerIndiv[i];
 	}
-	return (
-		list(ll = sum(dgamma(x = the_answer[not_parent_index], shape = expected_latent_dbh^2/processError,
-				rate = expected_latent_dbh/processError, log = TRUE)),
-			control_index = control_index))
+	ll = sum(dgamma(x = the_answer[not_parent_index], shape = expected_latent_dbh^2/processError,
+		rate = expected_latent_dbh/processError, log = TRUE))
+	ll = ll + dnorm(params["potentialGrowth"], mean = 0, sd = 100, log = TRUE) + dnorm(params["dbh_slope"], mean = 0, sd = 100, log = TRUE) 
+	return (ll)
 }
 
 ## Function to compute the residuals (latent state)
@@ -354,7 +351,7 @@ lazyTrace(sd_dbh^2*results$draws("processError")) # processError is a variance, 
 lazyTrace(sd_dbh*results$draws("measureError")) # measureError is a standard deviation, so should be multiplied by sd(dbh)
 
 #### Check likelihood (for second test, see notebook)
-vec_pG = seq(potentialGrowth - 0.1, potentialGrowth + 0.1, length.out = 30)
+vec_pG = seq(potentialGrowth - 0.1, potentialGrowth + 0.1, length.out = 32)
 vec_dbhSlope = seq(dbh_slope - 0.008, dbh_slope + 0.012, length.out = 30)
 
 ll = matrix(data = 0, nrow = length(vec_pG), ncol = length(vec_dbhSlope))
@@ -369,13 +366,11 @@ for (pG in vec_pG)
 	for (dbhSlope in vec_dbhSlope)
 	{
 		currentParams = c(potentialGrowth = pG, dbh_slope = dbhSlope, pr_slope = pr_slope, pr_slope2 = pr_slope2)
-		aa = loglik(the_answer = the_answer/treeData[, sd(dbh)], n_indiv = n_indiv, n_hiddenState = indices[.N, index_gen],
+		ll[r, c] = loglik(the_answer = the_answer/treeData[, sd(dbh)], n_indiv = n_indiv, n_hiddenState = indices[.N, index_gen],
 			nbYearsPerIndiv = nbYearsPerIndiv,
 			climate_index = indices[type == "parent", index_clim_start],
 			normalised_precip = (climate[, pr] - climate_mu_sd[1, mu])/climate_mu_sd[1, sd],
 			params = currentParams, processError = processError/treeData[, var(dbh)])
-		ll[r, c] = aa[["ll"]]
-		control[[paste0("iter_", (r - 1)*length(vec_dbhSlope) + c)]] = aa[["control_index"]]
 		c = c + 1
 	}
 	if (r %% 5 == 0)
@@ -383,29 +378,19 @@ for (pG in vec_pG)
 	r = r + 1
 }
 
-for (i in 1:899)
-	if (!all.equal(control[[paste0("iter_", i)]], control[[paste0("iter_", i + 1)]]))
-		stop(paste("Error at", i))
+results$print("lp__")
 
-all.equal(control[["iter_1"]], kk)
-kk = numeric(length = 14155)
-cc = 1
-for (i in seq(1, (indices[, .N]), by = 2))
-{
-	kk[((cc - 1)*5 + 1):(5*cc)] = indices[i, index_clim_start]:indices[i, index_clim_end - 1]
-	cc = cc + 1
-}
-
-filled.contour(x = vec_dbhSlope, y = vec_pG, z = ll, xlab = "dbh slope", ylab = "potential growth")
 x_sol = mean(results$draws("dbh_slope"))
 y_sol = mean(results$draws("potentialGrowth"))
-points(x_sol, y_sol, col = "#1D1F54", pch = 19, cex = 2)
-text(x_sol, y_sol, pos = 3, labels = "Estimated")
-
 x_real = params["dbh_slope"]
 y_real = params["potentialGrowth"]
-points(x_real, y_real, col = "#1D1F54", pch = 19, cex = 2)
-text(x_real, y_real, pos = 3, labels = "Real solution")
+
+filled.contour(x = vec_dbhSlope, y = vec_pG, z = t(ll), xlab = "dbh slope", ylab = "potential growth",
+	plot.axes = {
+		axis(1); axis(2);
+		points(x_sol, y_sol, col = "#1D1F54", pch = 19, cex = 2); text(x_sol, y_sol, pos = 3, labels = "Estimated")
+		points(x_real, y_real, col = "#1D7FDF", pch = 19, cex = 2); text(x_real, y_real, pos = 1, labels = "Real solution")
+	})
 
 #### Compute residuals: compare data versus latent states with obs error
 n_rep = results$metadata()$iter_sampling * results$num_chains()
