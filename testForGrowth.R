@@ -316,7 +316,6 @@ stanData = list(
 )
 
 ## Compile model
-# model = cmdstan_model("growth.stan")
 model = cmdstan_model("./growth_2ndOption.stan")
 
 ## Run model
@@ -325,6 +324,21 @@ results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50
 	max_treedepth = 13, adapt_delta = 0.9)
 
 results$cmdstan_diagnose()
+
+index_indiv_check = as.vector(results$draws("index_indiv")[1,1,])
+all.equal(index_indiv_check, not_parent_index - 1)
+
+index_clim_check = as.vector(results$draws("index_clim")[1,1,])
+ss = numeric(length(index_clim_check))
+count = 1
+
+for (i in parents_index)
+{
+	ss[((count - 1)*5 + 1):(count*5)] = indices[i, index_clim_start]:indices[i, index_clim_end - 1]
+	count = count + 1
+}
+
+all.equal(index_clim_check, ss)
 
 results$print(names(params))
 
