@@ -44,7 +44,8 @@ lp = function(data, slope, sigma)
 
 # Remark: Why is there a + log(sigma) in the lp function? This is to compensate the transformation (change of variable) that occurs in the
 #	back stage of Stan. Indeed, sigma is a constrained variable (sigma > 0), so that a change of variable is used to have it from -Inf to +Inf
-#	This implies to multiply by the determinant of the jacobian (or add the log since it is loglik!)
+#	This implies to multiply by the determinant of the jacobian (or add the log since it is loglik!).
+#	See https://vasishth.github.io/bayescogsci/book/sec-firststan.html for more informations
 
 ## Compute the average of lp
 compute_lp_mean = function(results, data)
