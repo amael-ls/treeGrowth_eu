@@ -8,6 +8,8 @@ graphics.off()
 library(data.table)
 library(cmdstanr)
 
+options(max.print = 500)
+
 #### Simulate data
 ## Common variables
 set.seed(1969-08-18) # Woodstock seed
@@ -38,7 +40,34 @@ loglik = function(data, slope, sigma)
 
 ## Log probability lp__, WATCH OUT: the minus signs are in the priors and loglik functions already
 lp = function(data, slope, sigma)
-	return (loglik(data, slope, sigma) + prior_slope(slope) + prior_sigma(sigma));
+	return (loglik(data, slope, sigma) + prior_slope(slope) + prior_sigma(sigma) + log(sigma));
+
+# Remark: Why is there a + log(sigma) in the lp function? This is to compensate the transformation (change of variable) that occurs in the
+#	back stage of Stan. Indeed, sigma is a constrained variable (sigma > 0), so that a change of variable is used to have it from -Inf to +Inf
+#	This implies to multiply by the determinant of the jacobian (or add the log since it is loglik!)
+
+## Compute the average of lp
+compute_lp_mean = function(results, data)
+{
+	n_chains = results$num_chains()
+	n_sample = results$metadata()[["iter_sampling"]]
+
+	slope_draws = results$draws("slope")
+	sigma_draws = results$draws("sigma")
+
+	lp_vec = numeric(n_chains * n_sample)
+	count = 0
+
+	for (col in 1:n_chains)
+	{
+		for (row in 1:n_sample)
+		{
+			count = count + 1
+			lp_vec[count] = lp(data = data, slope = as.numeric(slope_draws[row, col, 1]), sigma = as.numeric(sigma_draws[row, col, 1]))
+		}
+	}
+	return (mean(lp_vec));
+}
 
 #### Fit data with stan model
 ## Create stan data
@@ -58,14 +87,15 @@ model = cmdstan_model("./model.stan")
 
 ## Fit data
 n_chains = 4
-results = model$sample(data = stanData, parallel_chains = n_chains, chains = n_chains)
+results = model$sample(data = stanData, parallel_chains = n_chains, chains = n_chains,
+	iter_warmup = 1000, iter_sampling = 1000, seed = 1969-08-18)
 
 results$print()
 
 #### Log-likelihood
 ## Check likelihood from function versus from model
-lp(data = data, slope = mean(results$draws("slope")), sigma = mean(results$draws("sigma")))
 mean(results$draws("lp__"))
+compute_lp_mean(results, data)
 
 ## Plot log-likelihood and log probability
 vec_slope = seq(slope - 0.02, slope + 0.02, length.out = 50)
