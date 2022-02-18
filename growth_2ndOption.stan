@@ -148,24 +148,6 @@ model {
 	// target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh[childrenObs_index], measureError);
 }
 
-generated quantities {
-	int index_indiv[n_hiddenState - n_indiv]; // Should be not_parent_index - 1
-	int index_clim[n_hiddenState - n_indiv]; // Should be the climate_index with filled gaps
-	int count = 0;
-	int k = 0;
-
-	for (i in 1:n_indiv) // Loop over all the individuals
-	{
-		for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
-		{
-			k = k + 1;
-			index_indiv[k] = count + j - 1;
-			index_clim[k] = climate_index[i] + j - 2;
-		}
-		count += nbYearsPerIndiv[i];
-	}
-}
-
 // Model with stuff written by Florian
 // model {
 // 	// Declare variables

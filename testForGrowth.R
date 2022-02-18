@@ -220,7 +220,8 @@ processError = 5.68 # This is a variance: var /!\
 measurementError = 2.8 # This is a standard deviation: sd /!\
 
 ## Simulate dbh
-set.seed(1969-08-18) # Woodstock seed
+set.seed(123)
+# set.seed(1969-08-18) # Woodstock seed
 n = treeData[, .N]/2
 if (n != length(children_index))
 	stop("Length mismatch between n and children_index")
@@ -325,21 +326,6 @@ results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50
 
 results$cmdstan_diagnose()
 
-index_indiv_check = as.vector(results$draws("index_indiv")[1,1,])
-all.equal(index_indiv_check, not_parent_index - 1)
-
-index_clim_check = as.vector(results$draws("index_clim")[1,1,])
-ss = numeric(length(index_clim_check))
-count = 1
-
-for (i in parents_index)
-{
-	ss[((count - 1)*5 + 1):(count*5)] = indices[i, index_clim_start]:indices[i, index_clim_end - 1]
-	count = count + 1
-}
-
-all.equal(index_clim_check, ss)
-
 results$print(names(params))
 
 cor(results$draws("potentialGrowth"), results$draws("dbh_slope"))
@@ -351,9 +337,9 @@ cor(results$draws("dbh_slope"), results$draws("pr_slope2"))
 
 cor(results$draws("pr_slope"), results$draws("pr_slope2"))
 
-results$save_output_files(dir = paste0("./", species, "/"), basename = "test_errorsFixed_latentGiven_noIntercept",
+results$save_output_files(dir = paste0("./", species, "/"), basename = "test_errorsFixed_latentGiven_seed=123",
 	timestamp = FALSE, random = FALSE)
-results$save_object(file = paste0("./", species, "/test_errorsFixed_latentGiven_noIntercept.rds"))
+results$save_object(file = paste0("./", species, "/test_errorsFixed_latentGiven_seed=123.rds"))
 
 ## Few trace plots
 lazyTrace(results$draws("potentialGrowth"), val1 = potentialGrowth)
@@ -365,8 +351,8 @@ lazyTrace(sd_dbh^2*results$draws("processError")) # processError is a variance, 
 lazyTrace(sd_dbh*results$draws("measureError")) # measureError is a standard deviation, so should be multiplied by sd(dbh)
 
 #### Check likelihood (for second test, see notebook)
-vec_pG = seq(potentialGrowth - 0.1, potentialGrowth + 0.1, length.out = 32)
-vec_dbhSlope = seq(dbh_slope - 0.008, dbh_slope + 0.012, length.out = 30)
+vec_pG = seq(potentialGrowth - 0.1, potentialGrowth + 0.1, length.out = 40)
+vec_dbhSlope = seq(dbh_slope - 0.008, dbh_slope + 0.012, length.out = 40)
 
 ll = matrix(data = 0, nrow = length(vec_pG), ncol = length(vec_dbhSlope))
 control = vector(mode = "list", length = ncol(ll)*nrow(ll))
@@ -392,8 +378,6 @@ for (pG in vec_pG)
 	r = r + 1
 }
 
-results$print("lp__")
-
 x_sol = mean(results$draws("dbh_slope"))
 y_sol = mean(results$draws("potentialGrowth"))
 x_real = params["dbh_slope"]
@@ -402,8 +386,8 @@ y_real = params["potentialGrowth"]
 filled.contour(x = vec_dbhSlope, y = vec_pG, z = t(ll), xlab = "dbh slope", ylab = "potential growth",
 	plot.axes = {
 		axis(1); axis(2);
-		points(x_sol, y_sol, col = "#1D1F54", pch = 19, cex = 2); text(x_sol, y_sol, pos = 3, labels = "Estimated")
-		points(x_real, y_real, col = "#1D7FDF", pch = 19, cex = 2); text(x_real, y_real, pos = 1, labels = "Real solution")
+		points(x_sol, y_sol, col = "#1D1F54", pch = 19, cex = 2); text(x_sol, y_sol, pos = 4, labels = "Estimated")
+		points(x_real, y_real, col = "#1D7FDF", pch = 19, cex = 2); text(x_real, y_real, pos = 4, labels = "Real solution")
 	})
 
 #### Compute residuals: compare data versus latent states with obs error
