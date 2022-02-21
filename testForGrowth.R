@@ -211,13 +211,13 @@ if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
 potentialGrowth = -2.27;
 dbh_slope = 0.11;
 
-pr_slope = -0.34;
-pr_slope2 = 0.0078;
+pr_slope = 0 # -0.34;
+pr_slope2 = 0 # 0.0078;
 
 params = c(potentialGrowth = potentialGrowth, dbh_slope = dbh_slope, pr_slope = pr_slope, pr_slope2 = pr_slope2)
 
 processError = 5.68 # This is a variance: var /!\
-measurementError = 2.8 # This is a standard deviation: sd /!\
+measurementError = sqrt(3) # This is a standard deviation: sd /!\ i.e., the variance is 3
 
 ## Simulate dbh
 set.seed(123)
@@ -260,12 +260,12 @@ for (i in 1:latent_dbh[, .N])
 treeData[parents_index, dbh := rnorm(.N, mean = latent_dbh[, dbh0], sd = measurementError)]
 treeData[children_index, dbh := rnorm(.N, mean = latent_dbh[, dbh5], sd = measurementError)]
 
-sd_dbh = treeData[, sd(dbh)] # Do not forget to update it since half the data set is now dummy!
+sd_dbh = treeData[, sd(dbh)] # Do not forget to update it to the dummy data!
 
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 900
+maxIter = 1800
 n_chains = 3
 
 # Initial value for states only
@@ -310,18 +310,18 @@ stanData = list(
 	pr_mu = climate_mu_sd[variable == "pr", mu],
 	pr_sd = climate_mu_sd[variable == "pr", sd],
 
-	totalTrunkArea = treeData[, totalTrunkArea],
+	totalTrunkArea = treeData[, totalTrunkArea]
 
 	# Providing the latent dbh
-	latent_dbh = the_answer/treeData[, sd(dbh)]
+	# latent_dbh = the_answer/treeData[, sd(dbh)]
 )
 
 ## Compile model
 model = cmdstan_model("./growth_2ndOption.stan")
 
 ## Run model
-results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
-	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE, # init = initVal_Y_gen,
+results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 100, chains = n_chains,
+	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE, init = initVal_Y_gen,
 	max_treedepth = 13, adapt_delta = 0.9)
 
 results$cmdstan_diagnose()
@@ -337,9 +337,9 @@ cor(results$draws("dbh_slope"), results$draws("pr_slope2"))
 
 cor(results$draws("pr_slope"), results$draws("pr_slope2"))
 
-results$save_output_files(dir = paste0("./", species, "/"), basename = "test_errorsFixed_latentGiven_seed=123",
+results$save_output_files(dir = paste0("./", species, "/"), basename = "test_errorsFixed_prSlopesNull_seed=123",
 	timestamp = FALSE, random = FALSE)
-results$save_object(file = paste0("./", species, "/test_errorsFixed_latentGiven_seed=123.rds"))
+results$save_object(file = paste0("./", species, "/test_errorsFixed_prSlopesNull_seed=123.rds"))
 
 ## Few trace plots
 lazyTrace(results$draws("potentialGrowth"), val1 = potentialGrowth)
@@ -383,12 +383,14 @@ y_sol = mean(results$draws("potentialGrowth"))
 x_real = params["dbh_slope"]
 y_real = params["potentialGrowth"]
 
+pdf("./Tilia_platyphyllos/test_errorsFixed_latentGiven_prSlopesNull_seed=123.pdf")
 filled.contour(x = vec_dbhSlope, y = vec_pG, z = t(ll), xlab = "dbh slope", ylab = "potential growth",
 	plot.axes = {
 		axis(1); axis(2);
 		points(x_sol, y_sol, col = "#1D1F54", pch = 19, cex = 2); text(x_sol, y_sol, pos = 4, labels = "Estimated")
 		points(x_real, y_real, col = "#1D7FDF", pch = 19, cex = 2); text(x_real, y_real, pos = 4, labels = "Real solution")
 	})
+dev.off()
 
 #### Compute residuals: compare data versus latent states with obs error
 n_rep = results$metadata()$iter_sampling * results$num_chains()
@@ -415,25 +417,33 @@ sims = matrix(data = dt_dharma[, sampled], nrow = n_rep, ncol = treeData[, .N]/2
 sims = t(sims) # Transpose the matrix for dharma
 dim(sims)
 
+dt_dharma[, diff := rep_dbh/sd_dbh - sampled]
+meanDiff = dt_dharma[, mean(diff), by = rep_latent_id]
+print(paste0("The mean is ", round(meanDiff[, mean(V1)], digits = 4)))
+plot(meanDiff[, rep_latent_id], meanDiff[, V1], xlab = "Latent tree id", ylab = "Average difference: measured - simulated")
+plot(1:meanDiff[, .N], meanDiff[, V1], pch = 19, xlab = "Index", ylab = "Average difference: measured - simulated")
+abline(v = meanDiff[, .N]/2, col = "#CD212A", lwd = 2) # This plot shows that parents and children residuals should be separated!!
+
+hist(meanDiff[, V1])
+hist(dt_dharma[, diff])
+
+# jpeg("lala.jpg")
+# plot(1:dt_dharma[,.N], dt_dharma[, diff])
+# dev.off()
+
 forDharma = createDHARMa(simulatedResponse = sims,
 	observedResponse = dt_dharma[seq(1, .N, by = n_rep), rep_dbh/sd(treeData$dbh)]) # treeData[, dbh/sd(dbh)]
 
 plot(forDharma)
 dev.off()
 
-par(mfrow = c(2,1))
-lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="parent"][1, index_gen], "]")],
-	val1 = treeData[1, dbh]/sd(treeData[, dbh]), main = "tree 1, t0", scaling = sd(treeData$dbh))
-lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="child"][1, index_gen], "]")],
-	val1 = treeData[2, dbh]/sd(treeData[, dbh]), main = "tree 1, t1", scaling = sd(treeData$dbh))
-dev.off()
+row = 2
 
 par(mfrow = c(2,1))
-lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="parent"][2, index_gen], "]")],
-	val1 = treeData[3, dbh]/sd(treeData[, dbh]), main = "tree 2, t0", scaling = sd(treeData$dbh))
-lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="child"][2, index_gen], "]")],
-	val1 = treeData[4, dbh]/sd(treeData[, dbh]), val2 = latent_dbh[2, dbh5]/sd(treeData[, dbh]),
-	main = "tree 2, t1", scaling = sd(treeData$dbh))
+lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="parent"][row, index_gen], "]")],
+	val1 = treeData[parents_index[row], dbh]/sd(treeData[, dbh]), main = paste0("tree ", row, " at t0"), scaling = sd(treeData$dbh))
+lazyTrace(latent_dbh_array[, , paste0("latent_dbh[", indices[type =="child"][row, index_gen], "]")],
+	val1 = treeData[children_index[row], dbh]/sd(treeData[, dbh]), main = paste0("tree ", row, " at t1"), scaling = sd(treeData$dbh))
 dev.off()
 
 
@@ -443,20 +453,25 @@ curve(growth_fct(x, params, 0, sd_dbh), col = "#178F92", lwd = 3, from = 0, to =
 lazyTrace(results$draws("potentialGrowth"))
 lazyTrace(results$draws("slope_dbh"))
 
-latent_1_6 = results$draws(paste0("latent_dbh[", 1:6, "]"))
-latent_1_6 = apply(latent_1_6, 3, mean)
-real_1_6 = unlist(latent_dbh[1,])
-measured_1_6 = c(treeData[1, dbh], treeData[2, dbh])
+latent = results$draws(paste0("latent_dbh[",
+	indices[type =="parent"][row, index_gen]:indices[type =="child"][row, index_gen],
+	"]"))
+latent = apply(latent, 3, mean)
+real = unlist(latent_dbh[row,])
+measured = c(treeData[parents_index[row], dbh], treeData[children_index[row], dbh])
 x = 2000:2005
 
-ymin = min(sd_dbh*latent_1_6, real_1_6, measured_1_6)
-ymax = max(sd_dbh*latent_1_6, real_1_6, measured_1_6)
+ymin = min(sd_dbh*latent, real, measured)
+ymax = max(sd_dbh*latent, real, measured)
 
 op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
-plot(2000:2005, sd_dbh*latent_1_6, pch = 19, col = "#34568B", cex = 4,
+plot(2000:2005, sd_dbh*latent, pch = 19, col = "#34568B", cex = 4,
 	xlab = "Year", ylab = "Diameter at breast height (scaled)", ylim = c(ymin, ymax))
-points(x = c(2000, 2005), y = measured_1_6, pch = 19, col = "#FA7A35", cex = 2)
-points(x, real_1_6, pch = 19, col = "#CD212A", cex = 1.5)
+points(x = c(2000, 2005), y = measured, pch = 19, col = "#FA7A35", cex = 2)
+points(x, real, pch = 19, col = "#CD212A", cex = 1.5)
 legend(x = "topleft", legend = c("Estimated", "Measured", "Real"), fill = c("#34568B", "#FA7A35", "#CD212A"),
 	box.lwd = 0)
 dev.off()
+
+#### Residuals when the states are known
+## Too lazy... For this one, I should compare latent[t + 1] versus latent[t] + growth(latent[t], params) to see if that works
