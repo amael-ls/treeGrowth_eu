@@ -64,7 +64,26 @@ sqrt(3) = 1.732051 # The observation error
 ```
 
 # Test 2: as test 1 + climate
-This test is done to check that there is no mistake with climate indexing
+This test is done to check that there is no mistake with climate indexing. To do this test, I just use the set 1 of parameters from+@tbl:sets, where the precipitation slopes are non-zero. Note that this add two parameters to estimate; now $\theta_G$ contains: `potentialGrowth` (the average growth), `dbh_slope`, `precip_slope`, and `precip_slope2`. As in test 1, I am able to find the parameters back (including for precipitations): See set 1 in +@tbl:sets for the real values of parameters, and see +@fig:loglik_test2 for the log likelihood.
+
+```r
+> pr_slope
+[1] -0.34
+> (pr_slope_stan = mean(results$draws("pr_slope")))
+[1] -0.3438846
+> pr_slope2
+[1] 0.0078
+> (pr_slope2_stan = mean(results$draws("pr_slope2")))
+[1] 0.007230233
+```
+
+![Log-likelihood for test 2. Note that I had to transform the estimated parameters provided by Stan, using +@eq:transform](./Tilia_platyphyllos/test_noProcError_measureErrorFixed.pdf "Log-likelihood for test 1"){#fig:loglik_test2}
+
+See +@fig:residuals_parent_test2 for the residuals of the `parents' (pa), and +@fig:residuals_child_test2 for the distribution of the residuals of the children. As we can see, the latent states of both parents and children match with the observations. This conclude the second test.
+
+![Residuals of the parent for test 2](./residuals_parent_test2.pdf "Residuals for test 2 (parents)"){#fig:residuals_parent_test2}
+
+![Residuals of the children for test 2](./residuals_child_test2.pdf "Residuals for test 2 (children)"){#fig:residuals_child_test2}
 
 # Test 3: as test 1 + observation error to estimate
 This test is done to check that I can estimate the observation error correctly, in absence of process error
