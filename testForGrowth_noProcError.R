@@ -66,10 +66,10 @@ myPredictObs = function(draws_array, id_latent, regex = "latent_dbh")
 ## Compute next dbh
 growth_fct = function(dbh0, precip, params)
 {
-	potentialGrowth = params["potentialGrowth"]
-	dbh_slope = params["dbh_slope"]
-	pr_slope = params["pr_slope"]
-	pr_slope2 = params["pr_slope2"]
+	potentialGrowth = params[["potentialGrowth"]]
+	dbh_slope = params[["dbh_slope"]]
+	pr_slope = params[["pr_slope"]]
+	pr_slope2 = params[["pr_slope2"]]
 	return (exp(potentialGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2))
 }
 
@@ -176,8 +176,8 @@ if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
 potentialGrowth = log(2.47); # i.e., in average a tree grows 2.47 cm
 dbh_slope = 0.11/135;
 
-pr_slope = 0 # -0.34;
-pr_slope2 = 0 # 0.0078;
+pr_slope = -0.34;
+pr_slope2 = 0.0078;
 
 params = c(potentialGrowth = potentialGrowth, dbh_slope = dbh_slope, pr_slope = pr_slope, pr_slope2 = pr_slope2)
 
@@ -262,9 +262,9 @@ results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 10
 	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE, init = initVal_Y_gen,
 	max_treedepth = 13, adapt_delta = 0.9)
 
-results$save_output_files(dir = paste0("./", species, "/"), basename = "test_noProcError_measureErrorFixed_prSlopesNull",
+results$save_output_files(dir = paste0("./", species, "/"), basename = "test_noProcError",
 	timestamp = FALSE, random = FALSE)
-results$save_object(file = paste0("./", species, "/test_noProcError_measureErrorFixed_prSlopesNull.rds"))
+results$save_object(file = paste0("./", species, "/test_noProcError.rds"))
 
 #### Check-up
 ## Flags
@@ -320,15 +320,16 @@ hist(dt_dharma[, diff])
 forDharma = createDHARMa(simulatedResponse = sims,
 	observedResponse = dt_dharma[seq(1, .N, by = n_rep), rep_dbh/sd(treeData$dbh)]) # treeData[, dbh/sd(dbh)]
 
-pdf("residuals_parent_test1.pdf")
+pdf("residuals_parent_test2.pdf")
 plot(forDharma)
 dev.off()
 
 #### Retrieve the parameters back
-# If there is no mistake (see notebook), then the relation between the stan parameters and the parameters for non standardised dbh is:
+# If there is no mistake (see notebook), then the relation between some stan parameters and the parameters for non standardised dbh is:
 #	potentialGrowth_stan = potentialGrowth_R - log(sd(dbh))
 #	slope_dbh_stan = sd(dbh)*slope_dbh_R,
 # Where *_stan are for the stan estimates, while *_R are for the real values in R
+# Note that there is no transformation required for the climate parameters, only the dbh_slope and the intercept are influenced
 
 (potentialGrowth_stan = mean(results$draws("potentialGrowth")))
 potentialGrowth - log(sd(treeData[, dbh]))
@@ -336,31 +337,41 @@ potentialGrowth - log(sd(treeData[, dbh]))
 (dbh_slope_stan = mean(results$draws("dbh_slope")))
 sd(treeData[, dbh])*dbh_slope
 
+(pr_slope_stan = mean(results$draws("pr_slope")))
+pr_slope
+
+(pr_slope2_stan = mean(results$draws("pr_slope2")))
+pr_slope2
+
 lazyTrace(results$draws("potentialGrowth"), val1 = potentialGrowth - log(sd(treeData[, dbh])))
 lazyTrace(results$draws("dbh_slope"), val1 = sd(treeData[, dbh])*dbh_slope)
+lazyTrace(results$draws("pr_slope"), val1 = pr_slope)
+lazyTrace(results$draws("pr_slope2"), val1 = pr_slope2)
 
 ## Log-likelihood function for test 1
-loglik = function(data, latent_dbh_parents, parents_index, children_index, nbYearsPerIndiv, params)
+loglik = function(data, latent_dbh_parents, parents_index, children_index, nbYearsPerIndiv, params, normalised_precip, climate_index)
 {
 	n_indiv = length(parents_index)
 	computed_latent_child = numeric(length = n_indiv)
 
-	potentialGrowth = params["potentialGrowth"]
-	dbh_slope = params["dbh_slope"]
+	potentialGrowth = params[["potentialGrowth"]]
+	dbh_slope = params[["dbh_slope"]]
+	pr_slope = params[["pr_slope"]]
+	pr_slope2 = params[["pr_slope2"]]
 
 	for (i in 1:n_indiv)
 	{
 		next_dbh = latent_dbh_parents[i];
 		for (j in 2:nbYearsPerIndiv[i])
-		{
-			next_dbh = next_dbh + growth_fct(next_dbh, 0, params);
-		}
+			next_dbh = next_dbh + growth_fct(next_dbh, normalised_precip[climate_index[i] + j - 2], params);
+		
 		computed_latent_child[i] = next_dbh;
 	}
 	
 	ll = sum(dnorm(data[parents_index, dbh], mean = latent_dbh_parents, sd = sqrt(3), log = TRUE)) +
 		sum(dnorm(data[children_index, dbh], mean = computed_latent_child, sd = sqrt(3), log = TRUE)) +
-		dnorm(params["potentialGrowth"], mean = 0, sd = 100, log = TRUE) + dnorm(params["dbh_slope"], mean = 0, sd = 5, log = TRUE)
+		dnorm(params["potentialGrowth"], mean = 0, sd = 100, log = TRUE) + dnorm(params["dbh_slope"], mean = 0, sd = 5, log = TRUE) +
+		sum(dnorm(pr_slope, mean = 0, sd = 5, log = TRUE)) + sum(dnorm(pr_slope2, mean = 0, sd = 5, log = TRUE))
 	return (ll)
 }
 
@@ -382,7 +393,8 @@ for (pG in vec_pG)
 		currentParams = c(potentialGrowth = pG, dbh_slope = dbhSlope, pr_slope = pr_slope, pr_slope2 = pr_slope2)
 		ll[r, c] = loglik(data = treeData, latent_dbh_parents = sd_dbh*estimated_parents, parents_index = parents_index,
 		children_index = children_index, nbYearsPerIndiv = nbYearsPerIndiv,
-		params = c(potentialGrowth = pG, dbh_slope = dbhSlope, pr_slope = 0, pr_slope2 = 0))
+		params = c(potentialGrowth = pG, dbh_slope = dbhSlope, pr_slope = pr_slope_stan, pr_slope2 = pr_slope2_stan),
+		normalised_precip = (climate[, pr] - mu_pr)/sd_pr, climate_index = indices[type == "parent", index_clim_start])
 		c = c + 1
 	}
 	if (r %% 5 == 0)
@@ -395,7 +407,7 @@ y_sol = potentialGrowth_stan + log(sd_dbh)
 x_real = params["dbh_slope"]
 y_real = params["potentialGrowth"]
 
-pdf(paste0("./", species, "/test_noProcError_measureErrorFixed_prSlopesNull.pdf"))
+pdf(paste0("./", species, "/test_noProcError.pdf"))
 filled.contour(x = vec_dbhSlope, y = vec_pG, z = t(ll), xlab = "dbh slope", ylab = "potential growth",
 	plot.axes = {
 		axis(1); axis(2);
@@ -453,8 +465,8 @@ gq_script = write_stan_file(
 		real potentialGrowth; // Growth when all the explanatory variables are set to 0
 		real dbh_slope;
 		
-		// real pr_slope;
-		// real pr_slope2;
+		real pr_slope;
+		real pr_slope2;
 
 		// real<lower = 0> processError; // Constrained by default, realistically not too small
 		// real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
@@ -465,8 +477,6 @@ gq_script = write_stan_file(
 	generated quantities {
 		real computed_latent[n_hiddenState];
 		{ // Variables declared in nested blocks are local variables, not generated quantities, and thus won't be printed.
-			real pr_slope2 = 0;
-			real pr_slope = 0;
 			int count = 0;
 			
 			for (i in 1:n_indiv) // Loop over all the individuals
@@ -510,7 +520,7 @@ dt[, res_obs := sampled - observed]
 dt[, res_lat := latent - observed]
 
 
-pdf("residuals_hist_test1.pdf")
+pdf("residuals_hist_test2.pdf")
 hist(dt[, res_obs])
 dev.off()
 
@@ -527,7 +537,7 @@ if (ncol(sims) != n_rep)
 forDharma = createDHARMa(simulatedResponse = sims,
 	observedResponse = dt[seq(1, .N, by = n_rep), observed]) # treeData[, dbh/sd(dbh)]
 
-pdf("residuals_child_test1.pdf")
+pdf("residuals_child_test2.pdf")
 plot(forDharma)
 dev.off()
 

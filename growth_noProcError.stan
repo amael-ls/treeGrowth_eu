@@ -80,8 +80,8 @@ parameters {
 	real potentialGrowth; // Growth when all the explanatory variables are set to 0
 	real dbh_slope;
 	
-	// real pr_slope;
-	// real pr_slope2;
+	real pr_slope;
+	real pr_slope2;
 
 	// real<lower = 0> processError; // Constrained by default, realistically not too small
 	// real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
@@ -94,8 +94,6 @@ model {
 	real computed_latent_child[n_indiv];
 	real measureError = sqrt(3.0)/sd(Yobs); // measureError is a standard deviation
 	real next_dbh;
-	real pr_slope = 0;
-	real pr_slope2 = 0;
 
 	// Priors
 	target += normal_lpdf(potentialGrowth | 0, 100);
@@ -103,8 +101,8 @@ model {
 	
 	// target += normal_lpdf(comp | 0, 5);
 
-	// target += normal_lpdf(pr_slope | 0, 5);
-	// target += normal_lpdf(pr_slope2 | 0, 5);
+	target += normal_lpdf(pr_slope | 0, 5);
+	target += normal_lpdf(pr_slope2 | 0, 5);
 
 	// target += gamma_lpdf(processError | 1.0^2/10000, 1.0/10000); // Gives a mean  of 1 and variance of 10000
 	// target += normal_lpdf(measureError | sqrt(3.0)/sd(Yobs), 0.25/sd(Yobs)); // Correspond to a dbh measurement error of 3 mm, standardised
