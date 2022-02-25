@@ -320,6 +320,7 @@ hist(dt_dharma[, diff])
 forDharma = createDHARMa(simulatedResponse = sims,
 	observedResponse = dt_dharma[seq(1, .N, by = n_rep), rep_dbh/sd(treeData$dbh)]) # treeData[, dbh/sd(dbh)]
 
+pdf("residuals_parent_test1.pdf")
 plot(forDharma)
 dev.off()
 
@@ -401,5 +402,132 @@ filled.contour(x = vec_dbhSlope, y = vec_pG, z = t(ll), xlab = "dbh slope", ylab
 		points(x_sol, y_sol, col = "#1D1F54", pch = 19, cex = 2); text(x_sol, y_sol, pos = 2, labels = "Estimated")
 		points(x_real, y_real, col = "#1D7FDF", pch = 19, cex = 2); text(x_real, y_real, pos = 4, labels = "Real solution")
 	})
+dev.off()
+
+#### Check if the stan program can generate correctly the children latent states using the block generated_quantities
+# More information can be found at https://mc-stan.org/cmdstanr/reference/model-method-generate-quantities.html
+
+## Define the script to generate the latent states. Note that model is actually an unnecessary block here. gq stands for generated quantities
+gq_script = write_stan_file(
+"	
+	functions {
+		// Function for growth. This returns the expected growth in mm, for 1 year.
+		real growth(real dbh0, real precip, real potentialGrowth, real dbh_slope, real pr_slope, real pr_slope2)
+		{
+			return (exp(potentialGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2));
+		}
+	}
+
+	data {
+		// Number of data
+		int<lower = 1> n_indiv; // Number of individuals
+		int<lower = 1> n_precip; // Dimension of the climate vector
+		int<lower = 1> n_obs; // Number of trees observations
+		int<lower = 2> n_hiddenState; // Dimension of the state space vector
+		int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children trees observations = n_obs - n_indiv
+		int<lower = 2, upper = n_obs> nbYearsPerIndiv[n_indiv]; // Number of years for each individual
+
+		// Indices
+		int<lower = 1, upper = n_obs - 1> parents_index[n_indiv]; // Index of each parent in the observed data
+		int<lower = 2, upper = n_obs> children_index[n_children]; // Index of children in the observed data
+		int<lower = 1, upper = n_precip - 1> climate_index[n_indiv]; // Index of the climate associated to each parent
+
+		// Observations
+		vector<lower = 0>[n_obs] Yobs;
+
+		// Explanatory variables
+		vector<lower = 0>[n_precip] precip; // Precipitations
+		real pr_mu; // To standardise the precipitations
+		real<lower = 0> pr_sd; // To standardise the precipitations
+
+		vector<lower = 0>[n_obs] totalTrunkArea;
+	}
+
+	transformed data {
+		vector[n_obs] normalised_Yobs = Yobs/sd(Yobs); // Normalised but NOT centred dbh
+		vector[n_precip] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centered precipitations
+	}
+
+	parameters {
+		// Parameters
+		real potentialGrowth; // Growth when all the explanatory variables are set to 0
+		real dbh_slope;
+		
+		// real pr_slope;
+		// real pr_slope2;
+
+		// real<lower = 0> processError; // Constrained by default, realistically not too small
+		// real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
+
+		vector<lower = 0, upper = 10>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
+	}
+
+	generated quantities {
+		real computed_latent[n_hiddenState];
+		{ // Variables declared in nested blocks are local variables, not generated quantities, and thus won't be printed.
+			real pr_slope2 = 0;
+			real pr_slope = 0;
+			int count = 0;
+			
+			for (i in 1:n_indiv) // Loop over all the individuals
+			{
+				count = count + 1;
+				computed_latent[count] = latent_dbh_parents[i];
+				for (j in 2:nbYearsPerIndiv[i]) // Loop for all years but the first (which is the parent of indiv i)
+				{
+					count = count + 1;
+					computed_latent[count] = computed_latent[count - 1] + growth(computed_latent[count - 1],
+						normalised_precip[climate_index[i] + j - 2], potentialGrowth, dbh_slope, pr_slope, pr_slope2);
+				}
+			}
+		}
+	}
+	"
+)
+
+gq_model = cmdstan_model(gq_script)
+
+generate_quantities = gq_model$generate_quantities(results, data = stanData, parallel_chains = n_chains)
+
+dim(generate_quantities$draws()) # maxIter * n_chains * n_hiddenStates
+
+sampling_start = results$metadata()$iter_warmup + 1
+n_iter = sampling_start + results$metadata()$iter_sampling - 1
+gq_dbh5 = generate_quantities$draws()[sampling_start:n_iter, , indices[type == "child", index_gen]]
+dim(gq_dbh5) # iter_sampling * n_chains * n_indiv
+
+n_rep = results$metadata()$iter_sampling * results$num_chains()
+
+dt = data.table(rep_id_latent = rep(indices[type == "child", index_gen], each = n_rep),
+	observed = rep(treeData[children_index, dbh], each = n_rep),
+	latent = rep(latent_dbh[, dbh5], each = n_rep),
+	sampled = numeric(n_indiv*n_rep))
+
+dt[, sampled := myPredictObs(draws_array = gq_dbh5, id_latent = rep_id_latent, regex = "computed_latent"), by = rep_id_latent]
+dt[, sampled := sampled*sd_dbh]
+
+dt[, res_obs := sampled - observed]
+dt[, res_lat := latent - observed]
+
+
+pdf("residuals_hist_test1.pdf")
+hist(dt[, res_obs])
+dev.off()
+
+sd(dt[, res_obs])
+sqrt(3)
+
+sims = matrix(data = dt[, sampled], nrow = n_rep, ncol = treeData[, .N]/2) # each column is for one data point
+sims = t(sims) # Transpose the matrix for dharma
+dim(sims)
+
+if (ncol(sims) != n_rep)
+	stop("Dimensions mismatch")
+
+forDharma = createDHARMa(simulatedResponse = sims,
+	observedResponse = dt[seq(1, .N, by = n_rep), observed]) # treeData[, dbh/sd(dbh)]
+
+pdf("residuals_child_test1.pdf")
+plot(forDharma)
 dev.off()
 
