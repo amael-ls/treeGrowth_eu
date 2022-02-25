@@ -97,8 +97,6 @@ model {
 	target += normal_lpdf(potentialGrowth | 0, 100);
 	target += normal_lpdf(dbh_slope | 0, 5);
 	
-	// target += normal_lpdf(comp | 0, 5);
-
 	target += normal_lpdf(pr_slope | 0, 5);
 	target += normal_lpdf(pr_slope2 | 0, 5);
 
