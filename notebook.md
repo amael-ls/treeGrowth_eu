@@ -86,7 +86,32 @@ See +@fig:residuals_parent_test2 for the residuals of the `parents' (pa), and +@
 ![Residuals of the children for test 2](./residuals_child_test2.pdf "Residuals for test 2 (children)"){#fig:residuals_child_test2}
 
 # Test 3: as test 1 + observation error to estimate
-This test is done to check that I can estimate the observation error correctly, in absence of process error
+This test is done to check that I can estimate the observation error correctly, in absence of process error. As shown below it works:
+
+```r
+  potentialGrowth - log(sd(treeData[, dbh]))
+[1] -4.000456
+> (potentialGrowth_stan = mean(results$draws("potentialGrowth")))
+[1] -4.00084
+> sd(treeData[, dbh])*dbh_slope
+[1] 0.1099339
+> (dbh_slope_stan = mean(results$draws("dbh_slope")))
+[1] 0.1087753
+> pr_slope
+[1] -0.34
+> (pr_slope_stan = mean(results$draws("pr_slope")))
+[1] -0.3438429
+> pr_slope2
+[1] 0.0078
+> (pr_slope2_stan = mean(results$draws("pr_slope2")))
+[1] 0.007209228
+> measurementError/sd(treeData[, dbh])
+[1] 0.01283772
+> (measureError_stan = mean(results$draws("measureError")))
+[1] 0.01265391
+```
+
+This concludes test 3.
 
 # Test 4: as test 3 + process error given
 This test is done to check that I can estimate the observation error correctly, in presence of process error (provided)

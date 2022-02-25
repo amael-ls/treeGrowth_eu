@@ -320,7 +320,7 @@ hist(dt_dharma[, diff])
 forDharma = createDHARMa(simulatedResponse = sims,
 	observedResponse = dt_dharma[seq(1, .N, by = n_rep), rep_dbh/sd(treeData$dbh)]) # treeData[, dbh/sd(dbh)]
 
-pdf("residuals_parent_test2.pdf")
+pdf("residuals_parent_test3.pdf")
 plot(forDharma)
 dev.off()
 
@@ -331,25 +331,30 @@ dev.off()
 # Where *_stan are for the stan estimates, while *_R are for the real values in R
 # Note that there is no transformation required for the climate parameters, only the dbh_slope and the intercept are influenced
 
-(potentialGrowth_stan = mean(results$draws("potentialGrowth")))
 potentialGrowth - log(sd(treeData[, dbh]))
+(potentialGrowth_stan = mean(results$draws("potentialGrowth")))
 
-(dbh_slope_stan = mean(results$draws("dbh_slope")))
 sd(treeData[, dbh])*dbh_slope
+(dbh_slope_stan = mean(results$draws("dbh_slope")))
 
-(pr_slope_stan = mean(results$draws("pr_slope")))
 pr_slope
+(pr_slope_stan = mean(results$draws("pr_slope")))
 
-(pr_slope2_stan = mean(results$draws("pr_slope2")))
 pr_slope2
+(pr_slope2_stan = mean(results$draws("pr_slope2")))
+
+measurementError/sd(treeData[, dbh])
+(measureError_stan = mean(results$draws("measureError")))
 
 lazyTrace(results$draws("potentialGrowth"), val1 = potentialGrowth - log(sd(treeData[, dbh])))
 lazyTrace(results$draws("dbh_slope"), val1 = sd(treeData[, dbh])*dbh_slope)
 lazyTrace(results$draws("pr_slope"), val1 = pr_slope)
 lazyTrace(results$draws("pr_slope2"), val1 = pr_slope2)
+lazyTrace(results$draws("measureError"), val1 = measureError_stan)
 
 ## Log-likelihood function for test 1
-loglik = function(data, latent_dbh_parents, parents_index, children_index, nbYearsPerIndiv, params, normalised_precip, climate_index)
+loglik = function(data, latent_dbh_parents, parents_index, children_index, nbYearsPerIndiv, params, normalised_precip,
+	climate_index, measureError)
 {
 	n_indiv = length(parents_index)
 	computed_latent_child = numeric(length = n_indiv)
@@ -368,10 +373,11 @@ loglik = function(data, latent_dbh_parents, parents_index, children_index, nbYea
 		computed_latent_child[i] = next_dbh;
 	}
 	
-	ll = sum(dnorm(data[parents_index, dbh], mean = latent_dbh_parents, sd = sqrt(3), log = TRUE)) +
-		sum(dnorm(data[children_index, dbh], mean = computed_latent_child, sd = sqrt(3), log = TRUE)) +
+	ll = sum(dnorm(data[parents_index, dbh], mean = latent_dbh_parents, sd = measureError, log = TRUE)) +
+		sum(dnorm(data[children_index, dbh], mean = computed_latent_child, sd = measureError, log = TRUE)) +
 		dnorm(params["potentialGrowth"], mean = 0, sd = 100, log = TRUE) + dnorm(params["dbh_slope"], mean = 0, sd = 5, log = TRUE) +
-		sum(dnorm(pr_slope, mean = 0, sd = 5, log = TRUE)) + sum(dnorm(pr_slope2, mean = 0, sd = 5, log = TRUE))
+		sum(dnorm(pr_slope, mean = 0, sd = 5, log = TRUE)) + sum(dnorm(pr_slope2, mean = 0, sd = 5, log = TRUE)) +
+		sum(dnorm(measureError, mean = 3, sd = 0.25, log = TRUE))
 	return (ll)
 }
 
@@ -394,7 +400,8 @@ for (pG in vec_pG)
 		ll[r, c] = loglik(data = treeData, latent_dbh_parents = sd_dbh*estimated_parents, parents_index = parents_index,
 		children_index = children_index, nbYearsPerIndiv = nbYearsPerIndiv,
 		params = c(potentialGrowth = pG, dbh_slope = dbhSlope, pr_slope = pr_slope_stan, pr_slope2 = pr_slope2_stan),
-		normalised_precip = (climate[, pr] - mu_pr)/sd_pr, climate_index = indices[type == "parent", index_clim_start])
+		normalised_precip = (climate[, pr] - mu_pr)/sd_pr, climate_index = indices[type == "parent", index_clim_start],
+		measureError = sd_dbh*measureError_stan)
 		c = c + 1
 	}
 	if (r %% 5 == 0)
@@ -468,8 +475,7 @@ gq_script = write_stan_file(
 		real pr_slope;
 		real pr_slope2;
 
-		// real<lower = 0> processError; // Constrained by default, realistically not too small
-		// real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
+		real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
 
 		vector<lower = 0, upper = 10>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
 	}
@@ -520,7 +526,7 @@ dt[, res_obs := sampled - observed]
 dt[, res_lat := latent - observed]
 
 
-pdf("residuals_hist_test2.pdf")
+pdf("residuals_hist_test3.pdf")
 hist(dt[, res_obs])
 dev.off()
 
@@ -537,7 +543,7 @@ if (ncol(sims) != n_rep)
 forDharma = createDHARMa(simulatedResponse = sims,
 	observedResponse = dt[seq(1, .N, by = n_rep), observed]) # treeData[, dbh/sd(dbh)]
 
-pdf("residuals_child_test2.pdf")
+pdf("residuals_child_test3.pdf")
 plot(forDharma)
 dev.off()
 
