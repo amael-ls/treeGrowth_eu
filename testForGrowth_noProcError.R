@@ -43,6 +43,35 @@ init_fun = function(...)
 	return(list(latent_dbh = Y_gen))
 }
 
+## Log-likelihood function for test 3
+loglik = function(data, latent_dbh_parents, parents_index, children_index, nbYearsPerIndiv, params, normalised_precip,
+	climate_index, measureError)
+{
+	n_indiv = length(parents_index)
+	computed_latent_child = numeric(length = n_indiv)
+
+	potentialGrowth = params[["potentialGrowth"]]
+	dbh_slope = params[["dbh_slope"]]
+	pr_slope = params[["pr_slope"]]
+	pr_slope2 = params[["pr_slope2"]]
+
+	for (i in 1:n_indiv)
+	{
+		next_dbh = latent_dbh_parents[i];
+		for (j in 2:nbYearsPerIndiv[i])
+			next_dbh = next_dbh + growth_fct(next_dbh, normalised_precip[climate_index[i] + j - 2], params);
+		
+		computed_latent_child[i] = next_dbh;
+	}
+	
+	ll = sum(dnorm(data[parents_index, dbh], mean = latent_dbh_parents, sd = measureError, log = TRUE)) +
+		sum(dnorm(data[children_index, dbh], mean = computed_latent_child, sd = measureError, log = TRUE)) +
+		dnorm(params["potentialGrowth"], mean = 0, sd = 100, log = TRUE) + dnorm(params["dbh_slope"], mean = 0, sd = 5, log = TRUE) +
+		sum(dnorm(pr_slope, mean = 0, sd = 5, log = TRUE)) + sum(dnorm(pr_slope2, mean = 0, sd = 5, log = TRUE)) +
+		sum(dnorm(measureError, mean = 3, sd = 0.25, log = TRUE))
+	return (ll)
+}
+
 ## Function to compute the residuals (latent state)
 myPredictObs = function(draws_array, id_latent, regex = "latent_dbh")
 {
@@ -351,35 +380,6 @@ lazyTrace(results$draws("dbh_slope"), val1 = sd(treeData[, dbh])*dbh_slope)
 lazyTrace(results$draws("pr_slope"), val1 = pr_slope)
 lazyTrace(results$draws("pr_slope2"), val1 = pr_slope2)
 lazyTrace(results$draws("measureError"), val1 = measureError_stan)
-
-## Log-likelihood function for test 1
-loglik = function(data, latent_dbh_parents, parents_index, children_index, nbYearsPerIndiv, params, normalised_precip,
-	climate_index, measureError)
-{
-	n_indiv = length(parents_index)
-	computed_latent_child = numeric(length = n_indiv)
-
-	potentialGrowth = params[["potentialGrowth"]]
-	dbh_slope = params[["dbh_slope"]]
-	pr_slope = params[["pr_slope"]]
-	pr_slope2 = params[["pr_slope2"]]
-
-	for (i in 1:n_indiv)
-	{
-		next_dbh = latent_dbh_parents[i];
-		for (j in 2:nbYearsPerIndiv[i])
-			next_dbh = next_dbh + growth_fct(next_dbh, normalised_precip[climate_index[i] + j - 2], params);
-		
-		computed_latent_child[i] = next_dbh;
-	}
-	
-	ll = sum(dnorm(data[parents_index, dbh], mean = latent_dbh_parents, sd = measureError, log = TRUE)) +
-		sum(dnorm(data[children_index, dbh], mean = computed_latent_child, sd = measureError, log = TRUE)) +
-		dnorm(params["potentialGrowth"], mean = 0, sd = 100, log = TRUE) + dnorm(params["dbh_slope"], mean = 0, sd = 5, log = TRUE) +
-		sum(dnorm(pr_slope, mean = 0, sd = 5, log = TRUE)) + sum(dnorm(pr_slope2, mean = 0, sd = 5, log = TRUE)) +
-		sum(dnorm(measureError, mean = 3, sd = 0.25, log = TRUE))
-	return (ll)
-}
 
 estimated_parents = results$draws("latent_dbh_parents")
 estimated_parents = apply(estimated_parents, 3, mean)
