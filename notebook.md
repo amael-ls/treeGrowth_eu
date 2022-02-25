@@ -1,5 +1,5 @@
 ---
-title: "Notes"
+title: "Few notes to understand some problems on estimating growth"
 author: ALS
 geometry: "left = 3cm, right = 3cm, top = 2cm, bottom = 2cm"
 output: pdf_document
@@ -9,7 +9,7 @@ header-includes:
 	- \usepackage{cleveref}
 ---
 
-# Few notes to understand some problems on estimating growth
+# Description of the problem 
 When running the script **growth.R** to fit the growth data, the model does not converge (at least the two error terms). Therefore, I create and analyse dummy data using the script **testForGrowth.R** to see what could be the problem. Surprisingly, even if the model does not converge for the error terms, it is able to find the other parameters, including the latent states, back. That being said, two parameters (potential growth and dbh slope) are biased. Moreover, I systematically overestimate the first measurement, and underestimate the second measurement for each tree. Obviously the residuals (computed with DHARMa) which compute the differences between the dbh data and the corresponding latent states are not good. To investigate I ran few tests described below. I give here the real values of the parameters:
 
 | Variable                | Set 1               | Set 2               |
@@ -21,7 +21,7 @@ When running the script **growth.R** to fit the growth data, the model does not 
 | Measurement error (std) | $\sqrt{3}$          | $\sqrt{3}$          |
 | Process error (var)     | 5.68                | 5.68                |
 
-Table: Sets of parameters. We specified in each test if the parameter is to be estimated or if it is given {#tbl:sets}
+Table: Sets of parameters. We specify in each test whether a parameter should be estimated or is provided {#tbl:sets}
 
 Note that the parameters are given for a non-standardised dbh. This implies that some parameters returned by Stan models must be transformed. This is the case for instance for `potentialGrowth` (the average growth) and `dbh_slope`:
 $$
@@ -40,17 +40,38 @@ $$
 	& [\varphi_{\text{pa}}] \cdot [\sigma_{\text{obs}}] \cdot [\sigma_{\text{proc}}],
 \end{aligned}
 $$ {#eq:fullModel}
-and will be simplified during the following tests. In equation (@eq:fullModel), the first line is the likelihood, the second line is the Markov process, and the third line contains the priors. Note that $\varphi_{\text{pa}}$ corresponds to the diffuse initialisation of the first measurement states.
+and will be simplified during the following tests. In equation (@eq:fullModel), the first line is the likelihood, in which the first measurement `parent' (pa) of each tree is compared to the corresponding latent state, and similarly with the following measurements (children, ch). The second line is the Markov process, relating a state to its previous state and the expected growth, and the third line contains the priors. Note that $\varphi_{\text{pa}}$ corresponds to the diffuse initialisation of the first measurement states.
 
-## Test 1: Simple model with no process error
+# Test 1: Simple model with no process error
 In this test, I removed the process error, and fixed the measurement error and the precipitation slopes (see file `growth_noProcError.stan`). Therefore, the likelihood is defined as follow:
 $$
 	[\theta_G, \varphi | \phi, \sigma_{\text{obs}}] \propto [\phi_{\text{pa}} | \varphi_{\text{pa}}, \sigma_{\text{obs}}] \cdot [\phi_{\text{ch}} | \varphi_{\text{ch}}, \sigma_{\text{obs}}] \times
 		[\varphi_{\text{pa}}] \cdot [\theta_G],
-$$
-where $\theta_G$ contains `potentialGrowth` (the average growth) and `dbh_slope`, which are the only two parameters to estimate in addition to the states. See set 2 in +@tbl:sets for the parameters. See +@fig:test
+$$ {#eq:modelTest1}
+where $\theta_G$ contains `potentialGrowth` (the average growth) and `dbh_slope`, which are the only two parameters to estimate in addition to the states. See set 2 in +@tbl:sets for the parameters. See +@fig:loglik_test1 for the log likelihood.
 
-![Log-likelihood for test 1. Note that I had to transform the estimated parameters provided by Stan, using equation +@eq:transform](./Tilia_platyphyllos/test_noProcError_measureErrorFixed_prSlopesNull.pdf "Log-likelihood for test 1"){#fig:test}
+![Log-likelihood for test 1. Note that I had to transform the estimated parameters provided by Stan, using +@eq:transform](./Tilia_platyphyllos/test_noProcError_measureErrorFixed_prSlopesNull.pdf "Log-likelihood for test 1"){#fig:loglik_test1}
+
+See +@fig:residuals_parent_test1 for the residuals of the `parents' (pa), and +@fig:residuals_child_test1 for the distribution of the residuals of the children.
+
+![Residuals of the parent, using model @eq:modelTest1](./residuals_parent_test1.pdf "Residuals for test 1 (parents)"){#fig:residuals_parent_test1}
+
+![Residuals of the children, using model @eq:modelTest1](./residuals_child_test1.pdf "Residuals for test 1 (children)"){#fig:residuals_child_test1}
+
+
+```r
+sd(residuals) = 1.719633
+sqrt(3) = 1.732051 # The observation error
+```
+
+# Test 2: as test 1 + climate
+This test is done to check that there is no mistake with climate indexing
+
+# Test 3: as test 1 + observation error to estimate
+This test is done to check that I can estimate the observation error correctly, in absence of process error
+
+# Test 4: as test 3 + process error given
+This test is done to check that I can estimate the observation error correctly, in presence of process error (provided)
 
 <!-- ## Test 1: Fix both error terms
 1. I fix both error terms in Stan to their corresponding values from R (see +@tbl:set1).
