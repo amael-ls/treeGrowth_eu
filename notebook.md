@@ -52,12 +52,11 @@ where $\theta_G$ contains `potentialGrowth` (the average growth) and `dbh_slope`
 
 ![Log-likelihood for test 1. Note that I had to transform the estimated parameters provided by Stan, using +@eq:transform](./Tilia_platyphyllos/test_noProcError_measureErrorFixed_prSlopesNull.pdf "Log-likelihood for test 1"){#fig:loglik_test1}
 
-See +@fig:residuals_parent_test1 for the residuals of the `parents' (pa), and +@fig:residuals_child_test1 for the distribution of the residuals of the children.
+See +@fig:residuals_parent_test1 for the residuals of the `parents' (pa), and +@fig:residuals_child_test1 for the distribution of the residuals of the children. As we can see, the latent states of both parents and children match with the observations. This conclude the first test.
 
 ![Residuals of the parent, using model @eq:modelTest1](./residuals_parent_test1.pdf "Residuals for test 1 (parents)"){#fig:residuals_parent_test1}
 
 ![Residuals of the children, using model @eq:modelTest1](./residuals_child_test1.pdf "Residuals for test 1 (children)"){#fig:residuals_child_test1}
-
 
 ```r
 sd(residuals) = 1.719633
@@ -73,51 +72,16 @@ This test is done to check that I can estimate the observation error correctly, 
 # Test 4: as test 3 + process error given
 This test is done to check that I can estimate the observation error correctly, in presence of process error (provided)
 
-<!-- ## Test 1: Fix both error terms
-1. I fix both error terms in Stan to their corresponding values from R (see +@tbl:set1).
-2. I got biased values for potential growth and dbh slope. The slopes for precipitation are found back, and the latent states have reasonable values although biased.
-3. I saved the results under the name 'test_errorFixed.rds'
-
-Added remark after I made test 2: The seed used in this test is the woodstock seed `1969-08-18` (which incidentally equals 1943).
-
-## Test 2: Same as 1 + provide the latent states
-Both error terms are fixed, and the 'latent' states are known (so it is not latent any more by definition). The likelihood is therefore:
-$$
-[\theta_G | \varphi, \sigma_p] \propto \prod_i \prod_j [\varphi_{j + 1}^i | \varphi_j^i, \sigma_p, \theta_G] \times [\theta_G]
-$$
-where $\theta_G$ is the vector of parameters for growth, $\sigma_p$ the process error (fixed), and $\varphi$ is the vector of latent states (known). The complex index game were checked for the expected_latent_dbh: `count + j - 1` and `climate_index[i] + j - 2`.
-
-## Test 3: Same as 2, with only two parameters to estimate
-To test for regression dilution, I fixed the precipitation slopes to 0 and fit the data (generated with `set.seed(123)`). In this case, it worked, I could find back the two remaining parameters to estimate, which are `potentialGrowth` and `dbh_slope`. The likelihood is the same as in test 2, except that $\theta_G$ contains only two parameters.
-
-![Log-likelihood for test 3](./Tilia_platyphyllos/test_errorsFixed_latentGiven_prSlopesNull_seed=123.pdf "Log-likelihood for test 3")
-
-## Test 4: Same as 3, but the latent states are not provided
-So this test is like the third one, but the states are not given and must be estimated. Although I am able to estimate the parameters back, there is still a problem in the residuals. Here are the estimated parameters (Tab. @tbl:values_test3), which can be compared to the real values in Tab. @tbl:set1. 
-
-| Variable		   | mean      | sd
-|------------------|-----------|---
-| lp__  	       |  56446.97 | 90.73
-| potential growth | -2.26     | 0.00
-| dbh slope  	   |  0.11 	   | 0.00
-
-Table: Values of the estimated parameters for test 3. {#tbl:values_test3}
-
-Plotting the difference in Fig  between measured and simulated (from the chains) shows that the first measurement (parent) and the last measurement (child) should be separated in the analysis of the residuals. Here, each point represent the average residuals over 3000 draws (from Stan). As can be seen, many trees are biased! Ideally, the average would be 0 for each tree.
-
-![Average difference of sampled states versus measured states for the parents (left to the red line) and children (right to the red line)](./meanDiff.pdf "Average difference of simulated versus measured"){#fig:avg_residuals3 width=65%}
- -->
-
 ## To do list
 What I should do (list not necessarily ordered):
 
 - [x] Check the indices
-- [ ] create the DHARMa data using stan rather than R
+- [x] create the DHARMa data using stan rather than R
 - [ ] Check how the residuals are computed (maybe an error there?)
 - [x] Plot the likelihood surface (heat map) in the plan (potentialGrowth x dbh_slope)
 - [ ] Plot few trees and there states all in the same plot (one tree after each other, create fake years for that)
 - [ ] https://esdac.jrc.ec.europa.eu/content/european-soil-database-v20-vector-and-attribute-data
 - [ ] Change prior target += gamma_lpdf(latent_dbh[parentsObs_index] | 1.582318^2/10.0, 1.582318/10.0); Make it wring too small. Second option: Make it uniform 0, 2000
-- [ ] Remove process error: does the latent states (from Stan) match with the latent states recorded in R?
-- [ ] Check this: https://mc-stan.org/cmdstanr/reference/model-method-generate-quantities.html
+- [x] Remove process error: does the latent states (from Stan) match with the latent states recorded in R?
+- [x] Check this: https://mc-stan.org/cmdstanr/reference/model-method-generate-quantities.html
 
