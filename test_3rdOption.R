@@ -329,16 +329,6 @@ dt_dharma = data.table(
 	rep_dbh = c(rep(treeData[parents_index, dbh], each = n_rep), rep(treeData[children_index, dbh], each = n_rep)),
 	sampled = numeric(n_rep * treeData[, .N]))
 
-dt_dharma = data.table(
-	rep_latent_id = rep(indices[type == "child", index_gen], each = n_rep),
-	rep_dbh = rep(treeData[children_index, dbh], each = n_rep),
-	sampled = numeric(n_rep * treeData[, .N]/2))
-
-dt_dharma = data.table(
-	rep_latent_id = rep(indices[type == "parent", index_gen], each = n_rep),
-	rep_dbh = rep(treeData[parents_index, dbh], each = n_rep),
-	sampled = numeric(n_rep * treeData[, .N]/2))
-
 latent_dbh_parents_array = results$draws("latent_dbh_parents") # dimension: iter_sampling * n_chains * n_indiv
 latent_growth_array = results$draws("latent_growth") # dimension: iter_sampling * n_chains * (n_hiddenState - n_indiv)
 
