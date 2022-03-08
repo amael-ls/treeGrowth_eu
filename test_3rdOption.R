@@ -354,3 +354,102 @@ points(x, real, pch = 19, col = "#CD212A", cex = 1.5)
 legend(x = "topleft", legend = c("Estimated", "Measured", "Real"), fill = c("#34568B", "#FA7A35", "#CD212A"),
 	box.lwd = 0)
 dev.off()
+
+#### Posterior predictive checking: Can the model give rise to new observations that properly resemble the original data?
+## Script to generate new data. Note that 'model' is an unnecessary block here as restart from results. gq stands for generated quantities
+# The new observations are simulated as follow:
+#	1. Draw the vector of parameters theta (which includes the latent states!)
+#	2. Generate the parent observation from the corresponding latent dbh according to the model
+#	3. Generate the children observation according to the model (i.e., after n years of yearly latent growth)
+
+gq_script = write_stan_file(
+"
+functions {
+	// Function for growth. This returns the expected growth in mm, for 1 year.
+	real growth(real dbh0, real precip, real potentialGrowth, real dbh_slope, real pr_slope, real pr_slope2)
+	{
+		return (exp(potentialGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2));
+	}
+}
+
+data {
+	// Number of data
+	int<lower = 1> n_indiv; // Number of individuals
+	int<lower = 1> n_precip; // Dimension of the climate vector
+	int<lower = 1> n_obs; // Number of trees observations
+	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth
+	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children trees observations = n_obs - n_indiv
+	array [n_indiv] int<lower = 2, upper = n_obs> nbYearsGrowth; // Number of years of growth for each individual
+
+	// Indices
+	array [n_indiv] int<lower = 1, upper = n_obs - 1> parents_index; // Index of each parent in the observed data
+	array [n_children] int<lower = 2, upper = n_obs> children_index; // Index of children in the observed data
+	array [n_indiv] int<lower = 1, upper = n_precip - 1> climate_index; // Index of the climate associated to each parent
+
+	// Observations
+	vector<lower = 0>[n_obs] Yobs;
+
+	// Explanatory variables
+	vector<lower = 0>[n_precip] precip; // Precipitations
+	real pr_mu; // To standardise the precipitations
+	real<lower = 0> pr_sd; // To standardise the precipitations
+
+	vector<lower = 0>[n_obs] totalTrunkArea;
+}
+
+transformed data {
+	vector[n_obs] normalised_Yobs = Yobs/sd(Yobs); // Normalised but NOT centred dbh
+	vector[n_precip] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centered precipitations
+}
+
+parameters {
+	// Parameters
+	real potentialGrowth; // Growth when all the explanatory variables are set to 0
+	real dbh_slope;
+
+	real pr_slope;
+	real pr_slope2;
+
+	real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
+
+	vector<lower = 0, upper = 10>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
+	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) growth
+}
+
+generated quantities { // Checked on paper by hand on 4th March 2022
+	array [n_obs] real newObservations;
+	{ // Variables declared in nested blocks are local variables, not generated quantities, and thus won't be printed.
+		real processError = 5.68/sd(Yobs)^2; // processError is a variance
+		real current_latent_dbh;
+		int growth_counter = 1;
+		real m; // mean gamma
+
+		for (i in 1:n_indiv) // Loop over all the individuals
+		{
+			newObservations[parents_index[i]] = normal_rng(latent_dbh_parents[i], measureError);
+			current_latent_dbh = latent_dbh_parents[i];
+			for (j in 1:nbYearsGrowth[i]) // Loop for all years but the first (which is the parent of indiv i)
+			{
+				// Dbh at time t + 1
+				current_latent_dbh += latent_growth[growth_counter];
+				growth_counter += 1;
+			}
+			// The last current_latent_dbh corresponds to the child latent dbh
+			newObservations[children_index[i]] = normal_rng(current_latent_dbh, measureError);
+		}
+	}
+}
+"
+)
+
+gq_model = cmdstan_model(gq_script)
+
+generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
+
+dim(generate_quantities$draws()) # iter_sampling * n_chains * n_obs
+
+iter_sampling = results$metadata()$iter_sampling
+
+hist(sd_dbh*generate_quantities$draws("newObservations[1]"))
+abline(v = treeData[1, dbh], lwd = 4, col = "blue")
+
