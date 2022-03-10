@@ -46,7 +46,7 @@ data {
 	int<lower = 1> n_indiv; // Number of individuals
 	int<lower = 1> n_precip; // Dimension of the climate vector
 	int<lower = 1> n_obs; // Number of trees observations
-	int<lower = 2> n_hiddenState; // Dimension of the state space vector
+	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth
 	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children trees observations = n_obs - n_indiv
 	array [n_indiv] int<lower = 2, upper = n_obs> nbYearsGrowth; // Number of years of growth for each individual
 
@@ -79,19 +79,19 @@ parameters {
 	real pr_slope;
 	real pr_slope2;
 
-	// real<lower = 0> processError; // Constrained by default, realistically not too small
+	real<lower = 0.5/sd(Yobs)^2> processError;
 	real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
 
-	vector<lower = 0>[n_indiv] latent_dbh_parents; // Real (and unobserved) parents dbh
-	vector<lower = 0>[n_hiddenState - n_indiv] latent_growth; // Real (and unobserved) yearly growth
+	vector<lower = 0, upper = 10>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
+	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
 model {
 	// Declare variables
+	int growth_counter = 1;
 	real expected_growth;
-	vector [n_indiv] latent_dbh_children;
-	real processError = 5.68/sd(Yobs)^2; // processError is a variance
-	int k = 0;
+	// real processError = 5.68/sd(Yobs)^2; // /!\ This is a variance, contrary to measureError which is a std. dev.
+	vector [n_obs - n_indiv] latent_dbh_children;
 
 	// Priors
 	target += normal_lpdf(potentialGrowth | 0, 100);
@@ -100,8 +100,25 @@ model {
 	target += normal_lpdf(pr_slope | 0, 5);
 	target += normal_lpdf(pr_slope2 | 0, 5);
 
-	// target += gamma_lpdf(processError | 1.0^2/10000, 1.0/10000); // Gives a mean  of 1 and variance of 10000
-	target += gamma_lpdf(measureError | 1.0/(0.15*sd(Yobs)), 1.0/(0.15*sd(Yobs))); // Correspond to a dbh measurement error of 1 mm, standardised
+	/*
+		A note on the two folowwing priors:
+		Let m be the mean of the gamma distribution, and v its variance (see comment at the beginning of this file to get shape and rate from
+		mean and variance).
+
+		For instance, for the measurement error, which is the standard deviation of the observation around the latent state, we have:
+		m = sqrt(3)
+		v = 0.15
+
+		Then, because I work on standardised dbh, I need to divide m by sd(dbh), and v by sd(dbh)^2. Therefore, we get the following:
+		shape = (m/sd(dbh))^2 / (v/sd(dbh)^2) = m^2/v
+		rate =  (m/sd(dbh))   / (v/sd(dbh)^2) = sd(dbh) * m/v
+
+		For the process error, which is the variance of growth, we have:
+		shape = (m/var(dbh))^2 / (v/var(dbh)^2) = m^2/v
+		rate = (m/var(dbh))    / (v/var(dbh)^2) = var(dbh) * m/v
+	*/
+	target += gamma_lpdf(processError | 5.0^2/1, variance(Yobs)*5.0/1); // Remember that processError is a variance, not a sd!
+	target += gamma_lpdf(measureError | 3.0/0.001, sd(Yobs)*sqrt(3)/0.001); // <=> measurement error (sd) = sqrt(3) mm
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
@@ -109,14 +126,14 @@ model {
 		latent_dbh_children[i] = latent_dbh_parents[i];
 		for (j in 1:nbYearsGrowth[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
-			k = k + 1;
+			// Process model
 			expected_growth = growth(latent_dbh_children[i], normalised_precip[climate_index[i] + j - 1],
 				potentialGrowth, dbh_slope, pr_slope, pr_slope2);
-			latent_dbh_children[i] += latent_growth[k];
+			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/processError, expected_growth/processError);
 
-			// Process model
-			target += gamma_lpdf(latent_growth[k] | expected_growth^2/processError, expected_growth/processError);
-			// The '-1' in j - 1 is because the growth depends on the current year, not on the next year!
+			// Dbh at time t + 1, only the last (i.e., child) dbh is recorded
+			latent_dbh_children[i] += latent_growth[growth_counter];
+			growth_counter += 1;
 		}
 	}
 	
@@ -124,9 +141,9 @@ model {
 	target += uniform_lpdf(latent_dbh_parents | 0.001, 10); // Remember that the dbh is standardised
 	
 	// --- Observation model
-	// Compare true (hidden/latent) parents with observed parents
+	// Compare true (i.e., hidden or latent) parents with observed parents
 	target += normal_lpdf(normalised_Yobs[parents_index] | latent_dbh_parents, measureError);
 
-	// Compare true (hidden/latent) children with observed children
+	// Compare true (i.e., hidden or latent) children with observed children
 	target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh_children, measureError);
 }
