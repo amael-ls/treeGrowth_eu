@@ -1,0 +1,571 @@
+
+#### Aim of prog: Analysing results (check-up residuals, plots)
+
+#### Clear memory and load packages
+rm(list = ls())
+graphics.off()
+
+options(max.print = 500)
+
+library(data.table)
+library(bayesplot)
+library(cmdstanr)
+library(stringi)
+library(DHARMa)
+# library(terra)
+
+#### Tool function
+## Get fixed values parameters
+getParams = function(model_cmdstan, params_names, type = "mean")
+{
+	if (!(type %in% c("mean", "median")))
+		stop("Unknown type. Please choose median or mean")
+	
+	vals = numeric(length(params_names))
+	names(vals) = params_names
+	for (i in 1:length(params_names))
+	{
+		vals[i] = ifelse(type == "mean",
+			mean(model_cmdstan$draws(params_names[i])),
+			median(model_cmdstan$draws(params_names[i])))
+	}
+	return (vals)
+}
+
+## Get name of the last run
+getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd", getAll = FALSE)
+{
+	if (format != "ymd")
+		stop("Format is not recognised. For now only year-month-day alias ymd works")
+	
+	ls_files = list.files(path = path, pattern = paste0("^", begin, ".*", extension, "$"))
+	ls_files_split = stri_split(stri_sub(ls_files, from = stri_locate(ls_files, regex = begin)[, "end"] + 1),
+			regex = "-", simplify = TRUE)
+	n = length(ls_files)
+	
+	if (format == "ymd") # year month day
+		dt = data.table(file = ls_files, year = ls_files_split[, 1], month = ls_files_split[, 2], day = ls_files_split[, 3])
+
+	dt[stri_detect(str = day, regex = extension), day := stri_sub(str = day, to = stri_locate_first(str = day, regex = "_")[,"start"] - 1)]
+	setorder(dt, year, month, day)
+	if (getAll)
+		return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-"), allFiles = dt))
+	return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-")))
+}
+
+
+## Bayesplot is having troubles on my mac (Arial font not always found), so I create my own traces plot
+lazyTrace = function(draws, ...)
+{
+	if (!is.array(draws) & !all(class(draws) %in% c("draws_array", "draws", "array")))
+		stop("The class of draws should be either array, or compatible with cmdstanr (draws_array, draws, array)")
+	
+	n_chains = dim(draws)[2]
+	n_iter = dim(draws)[1]
+	cols = c("#845D29", "#D8C29D", "#178F92", "#1D1F54")
+
+	min_val = min(draws)
+	max_val = max(draws)
+
+	providedArgs = list(...)
+	nbArgs = length(providedArgs)
+
+	ls_names = names(providedArgs)
+
+	val_ind = stri_detect(str = ls_names, regex = "val")
+	xlab_ind = (ls_names == "xlab")
+	ylab_ind = (ls_names == "ylab")
+	main_ind = (ls_names == "main")
+	label_ind = stri_detect(str = ls_names, regex = "label")
+
+	scaling_ind = (ls_names == "scaling")
+	if (any(scaling_ind)) scaling = providedArgs[["scaling"]] else scaling = 1
+
+	if (any(label_ind))
+		par(mar = c(5, 4, 4, 4))
+	
+	plot(0, pch = "", xlim = c(0, n_iter), ylim = scaling*c(min_val, max_val), axes = TRUE, bg = "transparent",
+		xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""),
+		ylab = ifelse(any(ylab_ind), providedArgs[["ylab"]], ""),
+		main = ifelse(any(main_ind), providedArgs[["main"]], ""))
+
+	for (chain in 1:n_chains)
+	{
+		if (all(class(draws) %in% c("draws_array", "draws", "array")))
+			lines(1:n_iter, scaling*draws[, chain,], type = "l", col = cols[chain])
+		if (is.array(draws) & !all(class(draws) %in% c("draws_array", "draws", "array")))
+			lines(1:n_iter, scaling*draws[, chain], type = "l", col = cols[chain])
+	}
+
+	if (any(val_ind))
+	{
+		for (val in ls_names[val_ind])
+			abline(h = scaling*providedArgs[[val]], col = "#CD212A", lwd = 4)
+		
+		if (any(label_ind))
+		{
+			num_vals = stri_sub(str = ls_names[val_ind], from = stri_locate(str = ls_names[val_ind], regex = "val")[, "end"] + 1)
+			for (label in ls_names[label_ind])
+			{
+				num_label = stri_sub(str = label, from = stri_locate(str = label, regex = "label")[, "end"] + 1)
+				corresponding_val = (ls_names[val_ind])[num_vals == num_label]
+				axis(4, at = scaling*providedArgs[[corresponding_val]], providedArgs[[label]], las = 1)
+			}
+		}
+	}
+}
+
+## Function to compute the residuals (latent state)
+myPredictObs = function(draws_array, id_latent, regex = "latent_dbh")
+{
+	id_latent = unique(id_latent)
+	if (length(id_latent) != 1)
+		stop("A single id should be provided")
+	
+	n_chains = ncol(draws_array)
+	length_chain = nrow(draws_array)
+	output = numeric(length = n_chains*length_chain)
+
+	for (i in 1:n_chains)
+	{
+		start = (i - 1)*length_chain + 1
+		end = i*length_chain
+		output[start:end] = draws_array[, i, paste0(regex, "[", id_latent, "]")]
+	}
+	return (output)
+}
+
+## Bayesplot is having troubles on my mac (Arial font not always found), so I create my own area plot
+# draws = results$draws("measureError")
+# ll = mcmc_areas_data(draws)
+lazyArea = function(draws, parameter = "Measurement error", fun = dnorm, ...)
+{
+	if (!all(class(draws) %in% c("draws_array", "draws", "array")))
+		stop("The class of draws should be compatible with stan (draws_array, draws, array)")
+
+	providedArgs = list(...)
+	nbArgs = length(providedArgs)
+	if (isTRUE(all.equal(fun, dnorm)))
+	{
+		if (!all(c("mean", "sd") %in% names(providedArgs)))
+			stop("You must provide mean and sd for dnorm")
+		
+		arg1 = providedArgs[["mean"]]
+		arg2 = providedArgs[["sd"]]
+	}
+
+	n_chains = dim(draws)[2]
+	n_iter = dim(draws)[1]
+	cols = c("#d1e1ec", "#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b")
+
+	min_val = min(draws)
+	max_val = max(draws)
+
+	avg_vals = rowMeans(draws)
+	plot(density(avg_vals, n = 1024), xlab = "parameter")
+	polygon(density(avg_vals, n = 1024), col = "#0F4C8122")
+	if (nbArgs == 2)
+		curve(fun(x, arg1, arg2), add = TRUE)
+	x = seq(min_val, max_val, length.out = 100*min(ceiling(max_val - min_val), 1e4))
+	y = fun(x, arg1, arg2)
+	polygon(c(x, rev(x)), c(y, rep(0, length(y))), col = "#F4C43011")
+}
+
+#### Read data
+## Common variables
+species = "Tilia_platyphyllos"
+path = paste0("./", species, "/")
+info_lastRun = getLastRun(path, getAll = TRUE)
+lastRun = info_lastRun[["file"]]
+time_ended = info_lastRun[["time_ended"]]
+
+isPrecip_normalised = TRUE
+isDBH_normalised = TRUE
+
+## Load results
+#! TEMPORARY
+# lastRun = info_lastRun[["allFiles"]][1, file]
+#! END TEMPORARY
+results = readRDS(paste0(path, lastRun))
+
+#! TEST
+ll = bayesplot::nuts_params(results)
+test = bayesplot::mcmc_nuts_energy(ll)
+marginalPlot(results$draws("measureError"))
+lazyTrace(results$draws("measureError", inc_warmup = TRUE))
+setDT(ll)
+ll = dcast(ll, Chain + Iteration ~ Parameter, value.var = "Value")
+#! END TEST
+
+if (isPrecip_normalised)
+{
+	print("Precip parameter must be transformed when working on the real precip scale")
+	norm_clim_dt = readRDS(paste0(path, "climate_normalisation.rds"))
+}
+
+if (isDBH_normalised)
+{
+	print("DBH must be transformed when working on the real DBH scale")
+	norm_dbh_dt = readRDS(paste0(path, "dbh_normalisation.rds"))
+}
+
+#### Get parameters
+paramsNames = c("potentialMaxGrowth", "power_dbh", "optimal_precip", "width_precip_niche", "processError")
+
+## Mean values
+meanParams = getParams(results, paramsNames)
+processError_mean = meanParams[["processError"]]
+
+## Median values
+medParams = getParams(results, paramsNames, type = "median")
+processError_med = medParams[["processError"]]
+
+#### Residuals
+## Load data
+treeFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
+# treeData = readRDS(paste0(treeFolder, "trees_forest_reshaped.rds"))
+treeData = readRDS(paste0(path, "trees_forest_reshaped.rds")) # Folder to use when running on local computer
+treeData = treeData[speciesName_sci == species]
+
+## Get dbh and time
+dbh_start = treeData[treeData[, .I[which.min(year)], by = .(tree_id, pointInventory_id)][, V1], dbh]
+dbh_end = treeData[treeData[, .I[which.max(year)], by = .(tree_id, pointInventory_id)][, V1], dbh]
+
+t_start = treeData[treeData[, .I[which.min(year)], by = .(tree_id, pointInventory_id)][, V1], year]
+t_end = treeData[treeData[, .I[which.max(year)], by = .(tree_id, pointInventory_id)][, V1], year]
+delta_t = t_end - t_start
+
+## Climate
+climFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/climateData/Chelsa/yearlyAverage/"
+# climate = readRDS(paste0(climFolder, "FR_reshaped_climate.rds"))
+climate = readRDS(paste0(path, "FR_reshaped_climate.rds")) # Folder to use when running on local computer
+
+## indices
+# indices = readRDS(paste0(treeFolder, species, "_indices.rds"))
+indices = readRDS(paste0(path, species, "_indices.rds"))
+indices_data = indices[, index_gen] 
+indices = unique(indices[, .(tree_id, pointInventory_id, index_clim_start, index_clim_end)])
+
+## Create simulations
+n_rep = 250
+dt = data.table(rep_dbh_end = rep(dbh_end, each = n_rep), sampled = numeric(n_rep * length(dbh_end)))
+medPred = numeric(length(dbh_end))
+
+if (isDBH_normalised)
+	dt[, rep_dbh_end := rep_dbh_end/norm_dbh_dt[, sd]]
+
+i = 1
+yr = 1
+for (i in 1:length(dbh_end))
+{
+	currentDbh = dbh_start[i]/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
+	currentDbh_med = dbh_start[i]/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
+	currentClim_index = indices[i, index_clim_start]
+	for (yr in 1:delta_t[i])
+	{
+		precip = climate[currentClim_index, pr]
+		currentDbh = rnorm(n_rep, rnorm(n_rep, nextDBH(currentDbh, precip, meanParams, norm_clim_dt), processError_mean), 0.006)
+		currentDbh_med = nextDBH(currentDbh_med, precip, medParams, norm_clim_dt)
+		currentClim_index = currentClim_index + 1
+	}
+	dt[((i - 1)*n_rep + 1):(i*n_rep), sampled := currentDbh]
+	medPred[i] = currentDbh_med
+	if (i %% 100 == 0)
+		print(paste0(round(i*100/length(dbh_end), 2), "% done"))
+}
+
+# saveRDS(dt, "testForResiduals.rds")
+
+## Reshape simulations into a matrix length(dbh) x n_rep
+sims = matrix(data = dt[, sampled], nrow = n_rep, ncol = length(dbh_end)) # each column is for one data point (the way I organised the dt)
+sims = t(sims) # Transpose the matrix for dharma
+
+forDharma = createDHARMa(simulatedResponse = sims,
+	observedResponse = dbh_end/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
+, fittedPredictedResponse = medPred)
+
+plot(forDharma)
+dev.off()
+
+# #### Residuals using posterior samples directly (should have nIter/2 samples per measure)
+# ## Get the posterior distrib of the states that have data to be compared to
+# n_rep = results$metadata()$iter_sampling
+# dt = data.table(measured = rep(treeData[, dbh], each = n_rep), sampled_mean = numeric(n_rep * treeData[, .N]),
+# 	sampled_med = numeric(n_rep * treeData[, .N]))
+# if (isDBH_normalised)
+# 	dt[, measured := measured/norm_dbh_dt[, sd]]
+
+# for (i in 1:treeData[, .N])
+# {
+# 	dt[((i - 1)*n_rep + 1):(i*n_rep),
+# 		sampled_mean := rnorm(n_rep, rowMeans(results$draws(paste0("latent_dbh[", indices_data[i], "]"))), 0.006)]
+# 	dt[((i - 1)*n_rep + 1):(i*n_rep),
+# 		sampled_med := rnorm(n_rep, apply(results$draws(paste0("latent_dbh[", indices_data[i], "]")), 1, median), 0.006)]
+# 	if (i %% 200 == 0)
+# 		print(paste0(round(i*100/treeData[, .N], 2), "% done"))
+# }
+
+# ## Reshape simulations into a matrix length(dbh) x n_rep
+# sims = matrix(data = dt[, sampled_mean], nrow = n_rep, ncol = treeData[, .N]) # each column is for one data point (the way I organised the dt)
+# sims = t(sims) # Transpose the matrix for dharma
+
+# forDharma = createDHARMa(simulatedResponse = sims,
+# 	observedResponse = dt[seq(1, .N, by = n_rep), measured]) # all.equal(ll, treeData[, dbh]/norm_dbh_dt[, sd]) 
+# # , fittedPredictedResponse = dt[seq(1, .N, by = n_rep), sampled_med])
+
+# # fittedPredictedResponse: optional fitted predicted response. For
+# #	Bayesian posterior predictive simulations, using the median
+# #	posterior prediction as fittedPredictedResponse is
+# #	recommended. If not provided, the mean simulatedResponse will
+# #	be used.
+
+# plot(forDharma)
+# dev.off()
+
+# plot(dt[, measured], dt[, sampled])
+
+#### Plot posterior distributions and traces of parameters
+# Folder to save plots
+figurePath = paste0(path, time_ended, "/")
+if (!dir.exists(figurePath))
+	dir.create(figurePath)
+
+# Potential maximal growth
+plot_title = ggplot2::ggtitle("Posterior distribution potentialMaxGrowth", "with medians and 80% intervals")
+temp_plot = mcmc_areas(results$draws("potentialMaxGrowth"), prob = 0.8) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "pmg-distrib.pdf"), plot = temp_plot, device = "pdf")
+
+plot_title = ggplot2::ggtitle("Traces for potentialMaxGrowth")
+temp_plot = mcmc_trace(results$draws("potentialMaxGrowth")) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "pmg-traces.pdf"), plot = temp_plot, device = "pdf")
+
+# Power dbh
+plot_title = ggplot2::ggtitle("Posterior distribution power_dbh", "with medians and 80% intervals")
+temp_plot = mcmc_areas(results$draws("power_dbh"), prob = 0.8) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "power_dbh-distrib.pdf"), plot = temp_plot, device = "pdf")
+
+plot_title = ggplot2::ggtitle("Traces for power_dbh")
+temp_plot = mcmc_trace(results$draws("power_dbh")) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "power_dbh-traces.pdf"), plot = temp_plot, device = "pdf")
+
+# Optimal precipitation
+plot_title = ggplot2::ggtitle("Posterior distribution optimal_precip", "with medians and 80% intervals")
+temp_plot = mcmc_areas(results$draws("optimal_precip"), prob = 0.8) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "optimal_precip-distrib.pdf"), plot = temp_plot, device = "pdf")
+
+plot_title = ggplot2::ggtitle("Traces for optimal_precip")
+temp_plot = mcmc_trace(results$draws("optimal_precip")) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "optimal_precip-traces.pdf"), plot = temp_plot, device = "pdf")
+
+# Width niche distribution (precipitation)
+plot_title = ggplot2::ggtitle("Posterior distribution width_precip_niche", "with medians and 80% intervals")
+temp_plot = mcmc_areas(results$draws("width_precip_niche"), prob = 0.8) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "width_precip_niche-distrib.pdf"), plot = temp_plot, device = "pdf")
+
+plot_title = ggplot2::ggtitle("Traces for width_precip_niche")
+temp_plot = mcmc_trace(results$draws("width_precip_niche")) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "width_precip_niche-traces.pdf"), plot = temp_plot, device = "pdf")
+
+# processError
+plot_title = ggplot2::ggtitle("Posterior distribution processError", "with medians and 80% intervals")
+temp_plot = mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "processError-distrib.pdf"), plot = temp_plot, device = "pdf")
+
+lazyTrace(results$draws("processError"))
+
+plot_title = ggplot2::ggtitle("Traces for processError")
+temp_plot = mcmc_trace(results$draws("processError")) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "processError-traces.pdf"), plot = temp_plot, device = "pdf")
+
+# measureError
+plot_title = ggplot2::ggtitle("Posterior distribution measureError", "with medians and 80% intervals")
+temp_plot = mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "measureError-distrib.pdf"), plot = temp_plot, device = "pdf")
+
+plot_title = ggplot2::ggtitle("Traces for measureError")
+temp_plot = mcmc_trace(results$draws("measureError")) + plot_title
+ggplot2::ggsave(filename = paste0(figurePath, "measureError-traces.pdf"), plot = temp_plot, device = "pdf")
+
+lazyTrace(results$draws("measureError"))
+
+cor(results$draws("processError"), results$draws("measureError"))
+
+for (i in c(1:6, 12:14))
+{
+	plot_title = ggplot2::ggtitle(paste0("Posterior distribution latent_dbh[", i, "]"),
+		"with medians and 80% intervals")
+	temp_plot = mcmc_areas(results$draws(paste0("latent_dbh[", i, "]")), prob = 0.8) + plot_title
+	ggplot2::ggsave(filename = paste0(figurePath, "latent_dbh_", i, "-distrib.pdf"), plot = temp_plot, device = "pdf")
+
+	plot_title = ggplot2::ggtitle(paste0("Traces for latent_dbh[", i, "]"))
+	temp_plot = mcmc_trace(results$draws(paste0("latent_dbh[", i, "]"), inc_warmup = TRUE)) + plot_title
+	ggplot2::ggsave(filename = paste0(figurePath, "latent_dbh_", i, "-traces.pdf"), plot = temp_plot, device = "pdf")
+}
+
+####! CRASH TEST ZONE
+latent_1_6 = getParams(results, paste0("latent_dbh[", 1:6, "]"))
+x = 2000:2005
+
+pdf("./latent_real_2ndOption.pdf", height = 7, width = 7)
+op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
+plot(2000:2005, norm_dbh_dt[, sd]*latent_1_6, pch = 19, col = "#34568B", cex = 4,
+	xlab = "Year", ylab = "Diameter at breast height (scaled)")
+points(x = 2000, y = treeData[1, dbh], pch = 19, col = "#FA7A35", cex = 2)
+points(x = 2005, y = treeData[2, dbh], pch = 19, col = "#CD212A", cex = 2)
+dev.off()
+
+pdf("./growth_dbh.pdf", height = 7, width = 7)
+op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
+curve(norm_dbh_dt[, sd]^(1 - meanParams["power_dbh"]) * growth(x, 0, params = meanParams, norm_clim_dt, isScaled = TRUE),
+	from = 50, to = 1000, lwd = 2, col = "#34568B", xlab = "dbh", ylab = "Growth (in mm/yr)")
+dev.off()
+
+# pdf("./growth_precip.pdf", height = 7, width = 7)
+# op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
+# curve(growth(250/norm_dbh_dt[, sd], x, params = meanParams, norm_clim_dt, isScaled = FALSE), from = 650, to = 1500,
+# 	lwd = 2, col = "#34568B", xlab = "Precipitation (mm/yr)", ylab = "Growth (in mm/yr)")
+# dev.off()
+
+## Compute average climate for each tree during its time span
+indices[, avg_pr := mean(climate[index_clim_start:index_clim_end, pr]), by = .(tree_id, pointInventory_id)]
+
+# What follows works only for the French data that have a particular structure. For the general case, use indices
+treeData = treeData[indices[, .(tree_id, pointInventory_id, avg_pr)], on = c("tree_id", "pointInventory_id")]
+dbh0 = treeData[seq(1, .N - 1, by = 2), dbh]
+dbh1 = treeData[seq(2, .N, by = 2), dbh]
+yearly_avg_growth = (dbh1 - dbh0)/(treeData[seq(2, .N, by = 2), year] - treeData[seq(1, .N - 1, by = 2), year])
+
+mean(treeData[, avg_pr])
+split_clim = min(treeData[, avg_pr]) + 0:3*(max(treeData[, avg_pr]) - min(treeData[, avg_pr]))/3
+
+treeData[, class_pr := ""]
+treeData[(split_clim[1] <= avg_pr) & (avg_pr < split_clim[2]), class_pr := "low"]
+treeData[(split_clim[2] <= avg_pr) & (avg_pr < split_clim[3]), class_pr := "medium"]
+treeData[(split_clim[3] <= avg_pr) & (avg_pr <= split_clim[4]), class_pr := "high"]
+
+colours = c("#CD212A", "#DAAE29", "#094F9A")
+treeData[class_pr == "low", colour := colours[1]]
+treeData[class_pr == "medium", colour := colours[2]]
+treeData[class_pr == "high", colour := colours[3]]
+
+# jpeg("test.jpg", width = 1080, height = 1080, quality = 100)
+pdf("test.pdf", width = 7, height = 7)
+op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
+plot(dbh0, yearly_avg_growth, pch = 19, col = treeData[seq(1, .N - 1, by = 2), colour],
+	xlab = "dbh (at time 0)", ylab = "yearly average growth", cex = 0.35)
+dev.off()
+
+####! END CRASH TEST ZONE
+
+
+
+
+
+# ## Growth function (expected growth)
+# growth = function(dbh, precip, params, isClimScaled = FALSE, isDbhScaled = TRUE, ...)
+# {
+# 	# Get the normalising constantes and rescale if necessary
+# 	if (!isClimScaled)
+# 	{
+# 		providedArgs = list(...)
+# 		if (!("norm_clim_dt" %in% names(providedArgs)))
+# 			stop("You must provide norm_clim_dt")
+
+# 		norm_clim_dt = providedArgs[["norm_clim_dt"]]
+
+# 		mu_clim = norm_clim_dt[variable == "pr", mu]
+# 		sd_clim = norm_clim_dt[variable == "pr", sd]
+# 		clim = (precip - mu_clim)/sd_clim
+# 	}
+
+# 	if (!isDbhScaled) #! DBH was not centered, only divide by sd(dbh)!
+# 	{
+# 		providedArgs = list(...)
+# 		if (!("norm_dbh_dt" %in% names(providedArgs)))
+# 			stop("You must provide norm_dbh_dt")
+
+# 		norm_dbh_dt = providedArgs[["norm_dbh_dt"]]
+# 		sd_dbh = norm_dbh_dt[variable == "dbh", sd]
+# 		dbh = dbh/sd_dbh
+# 	}
+
+# 	if (isClimScaled)
+# 		clim = precip
+		
+
+# 	potentialMaxGrowth = params[["potentialMaxGrowth"]]
+# 	power_dbh = params[["power_dbh"]]
+# 	optimal_clim = params[["optimal_precip"]]
+# 	width_clim_niche = params[["width_precip_niche"]]
+# 	G = potentialMaxGrowth * dbh^power_dbh *
+# 		exp(-(clim - optimal_clim)^2/width_clim_niche^2)
+# 	return (G)
+# }
+
+# ## Dbh function (expected dbh at time t + 1 given climate and dbh at time t)
+# nextDBH = function(currentDBH, precip, params, isClimScaled = FALSE, isDbhScaled = TRUE, ...)
+# {
+# 	if (!isClimScaled & !isDbhScaled)
+# 	{
+# 		providedArgs = list(...)
+# 		if (!all(c("norm_clim_dt", "norm_dbh_dt") %in% names(providedArgs)))
+# 			stop("You must provide norm_clim_dt and norm_dbh_dt")
+
+# 		norm_clim_dt = providedArgs[["norm_clim_dt"]]
+# 		norm_dbh_dt = providedArgs[["norm_dbh_dt"]]
+# 		return (currentDBH + growth(currentDBH, precip, params, FALSE, FALSE, norm_clim_dt = norm_clim_dt, norm_dbh_dt = norm_dbh_dt))
+# 	}
+
+# 	if (!isClimScaled)
+# 	{
+# 		providedArgs = list(...)
+# 		if (!("norm_clim_dt" %in% names(providedArgs)))
+# 			stop("You must provide norm_clim_dt")
+
+# 		norm_clim_dt = providedArgs[["norm_clim_dt"]]
+# 		return (currentDBH + growth(currentDBH, precip, params, FALSE, TRUE, norm_clim_dt = norm_clim_dt))
+# 	}
+
+# 	if (!isDbhScaled)
+# 	{
+# 		providedArgs = list(...)
+# 		if (!("norm_dbh_dt" %in% names(providedArgs)))
+# 			stop("You must provide norm_dbh_dt")
+
+# 		norm_dbh_dt = providedArgs[["norm_dbh_dt"]]
+# 		return (currentDBH + growth(currentDBH, precip, params, TRUE, FALSE, norm_dbh_dt = norm_dbh_dt))
+# 	}
+
+# 	return (currentDBH + growth(currentDBH, precip, params, TRUE, TRUE))
+# }
+
+
+m1 = readRDS("Tilia_platyphyllos/growth-2022-01-19_20h26.rds") 
+m2 = readRDS("Tilia_platyphyllos/growth-2022-01-23_21h01.rds") 
+
+d1_precip = m1$draws(variables = "optimal_precip")
+d1_width = m1$draws(variables = "width_precip_niche")
+
+cor(d1_precip, d1_width)
+
+d2_precip = m1$draws(variables = "optimal_precip")
+d2_width = m1$draws(variables = "width_precip_niche")
+
+p1 = getParams(m1, paramsNames)
+p2 = getParams(m2, paramsNames)
+
+precipParams1 = p1[c("optimal_precip", "width_precip_niche")]
+
+
+rescalePrecip(precipParams1, norm_clim_dt[, mu], norm_clim_dt[, sd])
+
+P = 1300.12
+s = 376.547
+m = 589.21
+Pn = (P - m)/s
+
+g = 2.1
+d = -20.54
+
+-1/g^2*(Pn - d)^2
+-1/(s^2*g^2)*(P - (m + s*d))^2
