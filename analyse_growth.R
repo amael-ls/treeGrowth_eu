@@ -8,11 +8,8 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
-library(bayesplot)
 library(cmdstanr)
 library(stringi)
-library(DHARMa)
-# library(terra)
 
 #### Tool function
 ## Get fixed values parameters
@@ -53,9 +50,8 @@ getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd
 	return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-")))
 }
 
-
 ## Bayesplot is having troubles on my mac (Arial font not always found), so I create my own traces plot
-lazyTrace = function(draws, ...)
+lazyTrace = function(draws, filename = NULL, ...)
 {
 	if (!is.array(draws) & !all(class(draws) %in% c("draws_array", "draws", "array")))
 		stop("The class of draws should be either array, or compatible with cmdstanr (draws_array, draws, array)")
@@ -83,6 +79,10 @@ lazyTrace = function(draws, ...)
 
 	if (any(label_ind))
 		par(mar = c(5, 4, 4, 4))
+	
+	# Plot
+	if (!is.null(filename))
+		pdf(paste0(filename, ".pdf"))
 	
 	plot(0, pch = "", xlim = c(0, n_iter), ylim = scaling*c(min_val, max_val), axes = TRUE, bg = "transparent",
 		xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""),
@@ -113,6 +113,9 @@ lazyTrace = function(draws, ...)
 			}
 		}
 	}
+
+	if (!is.null(filename))
+		dev.off()
 }
 
 ## Function to compute the residuals (latent state)
@@ -135,16 +138,31 @@ myPredictObs = function(draws_array, id_latent, regex = "latent_dbh")
 	return (output)
 }
 
-## Bayesplot is having troubles on my mac (Arial font not always found), so I create my own area plot
-# draws = results$draws("measureError")
-# ll = mcmc_areas_data(draws)
-lazyArea = function(draws, parameter = "Measurement error", fun = dnorm, ...)
+## Function to plot the prior and posterior of a parameter
+lazyPosterior = function(draws, fun = dnorm, filename = NULL, ...)
 {
-	if (!all(class(draws) %in% c("draws_array", "draws", "array")))
-		stop("The class of draws should be compatible with stan (draws_array, draws, array)")
+	# Check-up
+	if (!is.array(draws))
+		stop("Draws should be an array extracted from a CmdStanMCMC object")
+		
+	if (!isTRUE(all.equal(fun, dnorm)) & !isTRUE(all.equal(fun, dgamma))) # isFALSE will not work here, hence !isTRUE
+		stop("This function only accepts dnorm or dgamma as priors")
 
+	# Get list of arguments
 	providedArgs = list(...)
+	ls_names = names(providedArgs)
 	nbArgs = length(providedArgs)
+
+	# Get the argument for density if provided
+	n = 512
+	n_ind = (ls_names == "n")
+	if (any(n_ind))
+	{
+		n = providedArgs[["n"]]
+		print(paste0("Using n = ", n, " for the density plot"))
+	}
+
+	# Get parameters for prior
 	if (isTRUE(all.equal(fun, dnorm)))
 	{
 		if (!all(c("mean", "sd") %in% names(providedArgs)))
@@ -154,48 +172,64 @@ lazyArea = function(draws, parameter = "Measurement error", fun = dnorm, ...)
 		arg2 = providedArgs[["sd"]]
 	}
 
-	n_chains = dim(draws)[2]
-	n_iter = dim(draws)[1]
-	cols = c("#d1e1ec", "#b3cde0", "#6497b1", "#005b96", "#03396c", "#011f4b")
+	if (isTRUE(all.equal(fun, dgamma)))
+	{
+		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "rate") %in% names(providedArgs))))
+			stop("You must provide either mean and var or shape and rate for dgamma")
+		
+		if (all(c("mean", "var") %in% names(providedArgs)))
+		{
+			temp1 = providedArgs[["mean"]]
+			temp2 = providedArgs[["var"]]
 
-	min_val = min(draws)
-	max_val = max(draws)
+			arg1 = temp1^2/temp2 # shape
+			arg2 = temp1/temp2 # rate
+		}
 
-	avg_vals = rowMeans(draws)
-	plot(density(avg_vals, n = 1024), xlab = "parameter")
-	polygon(density(avg_vals, n = 1024), col = "#0F4C8122")
-	if (nbArgs == 2)
-		curve(fun(x, arg1, arg2), add = TRUE)
-	x = seq(min_val, max_val, length.out = 100*min(ceiling(max_val - min_val), 1e4))
-	y = fun(x, arg1, arg2)
-	polygon(c(x, rev(x)), c(y, rep(0, length(y))), col = "#F4C43011")
+		if (all(c("shape", "rate") %in% names(providedArgs)))
+		{
+			arg1 = providedArgs[["shape"]]
+			arg2 = providedArgs[["rate"]]
+		}
+	}
+
+	# Get posterior
+	density_from_draws = density(draws, n = n)
+	x = density_from_draws$x
+	min_x = min(x)
+	max_x = max(x)
+
+	min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+	max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+
+	# Plot
+	if (!is.null(filename))
+		pdf(paste0(filename, ".pdf"))
+	
+	# Plot posterior
+	plot(density_from_draws, xlim = c(min_x, max_x), col = "#34568B", lwd = 2, main = "Prior and posterior measurement error")
+	polygon(density_from_draws, col = "#34568B22")
+
+	# Plot prior
+	curve(fun(x, arg1, arg2), add = TRUE, lwd = 2, col = "#F4C430")
+	DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#F4C43022", density = NA)
+
+	legend(x = "topleft", legend = c("Prior", "Posterior"), fill = c("#F4C430", "#34568B"), box.lwd = 0)
+
+	if (!is.null(filename))
+		dev.off()
 }
 
 #### Read data
 ## Common variables
 species = "Tilia_platyphyllos"
 path = paste0("./", species, "/")
-info_lastRun = getLastRun(path, getAll = TRUE)
+info_lastRun = getLastRun(path)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
 
 isPrecip_normalised = TRUE
 isDBH_normalised = TRUE
-
-## Load results
-#! TEMPORARY
-# lastRun = info_lastRun[["allFiles"]][1, file]
-#! END TEMPORARY
-results = readRDS(paste0(path, lastRun))
-
-#! TEST
-ll = bayesplot::nuts_params(results)
-test = bayesplot::mcmc_nuts_energy(ll)
-marginalPlot(results$draws("measureError"))
-lazyTrace(results$draws("measureError", inc_warmup = TRUE))
-setDT(ll)
-ll = dcast(ll, Chain + Iteration ~ Parameter, value.var = "Value")
-#! END TEST
 
 if (isPrecip_normalised)
 {
@@ -207,7 +241,267 @@ if (isDBH_normalised)
 {
 	print("DBH must be transformed when working on the real DBH scale")
 	norm_dbh_dt = readRDS(paste0(path, "dbh_normalisation.rds"))
+	sd_dbh = norm_dbh_dt[, sd]
 }
+
+## Load results
+# results = readRDS("Tilia_platyphyllos//test_procErrorFixed_3rdOption_new.rds")
+results = readRDS(paste0(path, lastRun))
+
+#### Plot prior and posterior
+## For measurement error
+measurementError_array = results$draws("measureError")
+lazyPosterior(draws = measurementError_array, fun = dgamma, filename = "measureError_posterior",
+	shape = 3.0/0.001, rate = sd_dbh*sqrt(3.0)/0.001)
+
+## For process error
+processError_array = results$draws("processError")
+lazyPosterior(draws = processError_array, fun = dgamma, filename = "processError_posterior",
+	shape = 5.0^2/1, rate = sd_dbh^2*5.0/1)
+
+#### Plot chains main parameters
+lazyTrace(draws = results$draws("potentialGrowth"), filename = "potentialGrowth")
+lazyTrace(draws = results$draws("dbh_slope"), filename = "dbh_slope")
+lazyTrace(draws = results$draws("pr_slope"), filename = "pr_slope")
+lazyTrace(draws = results$draws("pr_slope2"), filename = "pr_slope2")
+
+#### Get parameters and convert them to the 'real' scale
+# If there is no mistake (see notebook), then the relation between some stan parameters and the parameters for non standardised dbh is:
+#	potentialGrowth_s = potentialGrowth_r - log(sd(dbh))
+#	dbh_slope_s = sd(dbh)*dbh_slope_r,
+# Where *_s are for the estimates on the standardised scale, while *_r are for the estimates on the 'real' scale (i.e. non-standardised)
+# Note that there is no transformation required for the climate parameters, only the dbh_slope and the intercept are influenced
+
+(potentialGrowth = mean(results$draws("potentialGrowth")) + log(sd_dbh))
+(dbh_slope = mean(results$draws("dbh_slope"))/sd_dbh)
+(pr_slope = mean(results$draws("pr_slope")))
+(pr_slope2 = mean(results$draws("pr_slope2")))
+
+#### Posterior predictive checking: Can the model give rise to new observations that properly resemble the original data?
+## Script to generate new data. Note that 'model' is an unnecessary block here as restart from results. gq stands for generated quantities
+# More information can be found at https://mc-stan.org/cmdstanr/reference/model-method-generate-quantities.html
+# The new observations are simulated as follow:
+#	1. Draw the vector of parameters theta (which includes the latent states!)
+#	2. Generate the parent observation from the corresponding latent dbh according to the model
+#	3. Generate the children observation according to the model (i.e., after n years of yearly latent growth)
+
+gq_script = write_stan_file(
+"
+functions {
+	// Function for growth. This returns the expected growth in mm, for 1 year.
+	real growth(real dbh0, real precip, real potentialGrowth, real dbh_slope, real pr_slope, real pr_slope2)
+	{
+		return (exp(potentialGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2));
+	}
+}
+
+data {
+	// Number of data
+	int<lower = 1> n_indiv; // Number of individuals
+	int<lower = 1> n_precip; // Dimension of the climate vector
+	int<lower = 1> n_obs; // Number of trees observations
+	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth
+	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children trees observations = n_obs - n_indiv
+	array [n_indiv] int<lower = 2, upper = n_obs> nbYearsGrowth; // Number of years of growth for each individual
+
+	// Indices
+	array [n_indiv] int<lower = 1, upper = n_obs - 1> parents_index; // Index of each parent in the observed data
+	array [n_children] int<lower = 2, upper = n_obs> children_index; // Index of children in the observed data
+	array [n_indiv] int<lower = 1, upper = n_precip - 1> climate_index; // Index of the climate associated to each parent
+
+	// Observations
+	vector<lower = 0>[n_obs] Yobs;
+
+	// Explanatory variables
+	vector<lower = 0>[n_precip] precip; // Precipitations
+	real pr_mu; // To standardise the precipitations
+	real<lower = 0> pr_sd; // To standardise the precipitations
+
+	vector<lower = 0>[n_obs] totalTrunkArea;
+}
+
+transformed data {
+	vector[n_obs] normalised_Yobs = Yobs/sd(Yobs); // Normalised but NOT centred dbh
+	vector[n_precip] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centered precipitations
+}
+
+parameters {
+	// Parameters
+	real potentialGrowth; // Growth when all the explanatory variables are set to 0
+	real dbh_slope;
+
+	real pr_slope;
+	real pr_slope2;
+
+	real<lower = 0.5/sd(Yobs)^2> processError;
+	real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
+
+	vector<lower = 0, upper = 10>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
+	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
+}
+
+generated quantities {
+	// Declaration output variables
+	array [n_obs] real newObservations;
+	array [n_obs] real latent_dbh_parentsChildren;
+	array [n_latentGrowth] real procError_sim;
+	array [n_latentGrowth + n_indiv] real yearly_latent_dbh;
+	
+	{
+		// Variables declared in nested blocks are local variables, not generated quantities, and thus won't be printed.
+		real current_latent_dbh;
+		int growth_counter = 1;
+		int dbh_counter = 1;
+		real expected_growth;
+
+		for (i in 1:n_indiv) // Loop over all the individuals
+		{
+			// Fill the parents
+			latent_dbh_parentsChildren[parents_index[i]] = latent_dbh_parents[i];
+			yearly_latent_dbh[dbh_counter] = latent_dbh_parents[i];
+
+			// Generate the parent observation conditional on the parent state
+			newObservations[parents_index[i]] = normal_rng(latent_dbh_parents[i], measureError);
+
+			// Starting point to compute latent dbh child
+			current_latent_dbh = latent_dbh_parents[i];
+
+			for (j in 1:nbYearsGrowth[i]) // Loop for all years but the first (which is the parent of indiv i)
+			{
+				// Process model
+				expected_growth = growth(current_latent_dbh, normalised_precip[climate_index[i] + j - 1],
+					potentialGrowth, dbh_slope, pr_slope, pr_slope2);
+
+				// Record difference expected growth versus latent growth
+				procError_sim[growth_counter] = expected_growth - latent_growth[growth_counter];
+
+				// Dbh at time t + 1
+				current_latent_dbh += latent_growth[growth_counter]; // Or should it be += gamma(mean = latent_growth, var = processError)?
+				growth_counter += 1;
+				dbh_counter += 1;
+				yearly_latent_dbh[dbh_counter] = current_latent_dbh;
+			}
+
+			// The last current_latent_dbh corresponds to the child latent dbh
+			latent_dbh_parentsChildren[children_index[i]] = current_latent_dbh;
+			newObservations[children_index[i]] = normal_rng(latent_dbh_parentsChildren[children_index[i]], measureError);
+			dbh_counter += 1;
+		}
+	}
+}
+"
+)
+
+## Compile simulation generator
+gq_model = cmdstan_model(gq_script)
+
+## Generate simulations
+# Access data
+n_chains = results$num_chains()
+iter_sampling = results$metadata()$iter_sampling
+stanData = readRDS(paste0(path, "stanData.rds"))
+n_obs = stanData$n_obs
+n_hiddenState = stanData$n_latentGrowth + stanData$n_indiv
+indices = readRDS(paste0(path, species, "_indices.rds"))
+
+# Simulations
+generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
+dim(generate_quantities$draws()) # iter_sampling * n_chains * (2*n_obs + n_latentGrowth + n_hiddenState)
+
+## Check that the observation residuals are ok. There should not be any difference between parents and children, and no pattern with dbh
+n_rep = iter_sampling * n_chains
+
+dt_dharma = data.table(rep_id = rep(1:n_obs, each = n_rep),
+	rep_dbh = rep(stanData$Yobs, each = n_rep), # Observations
+	latent_dbh = numeric(n_rep * n_obs), # Estimated latent dbh
+	simulated_observations = numeric(n_rep * n_obs))
+
+newObservations_array = generate_quantities$draws("newObservations")
+latent_dbh_array = generate_quantities$draws("latent_dbh_parentsChildren")
+
+dt_dharma[, simulated_observations := myPredictObs(newObservations_array, rep_id, regex = "newObservations"), by = rep_id]
+dt_dharma[, simulated_observations := sd_dbh*simulated_observations]
+
+dt_dharma[, latent_dbh := myPredictObs(latent_dbh_array, rep_id, regex = "latent_dbh_parentsChildren"), by = rep_id]
+dt_dharma[, latent_dbh := sd_dbh*latent_dbh]
+
+dt_dharma[, residuals_obs := rep_dbh - simulated_observations]
+
+dt_dharma[rep_id %in% stanData$parents_index, type := "parents"]
+dt_dharma[rep_id %in% stanData$children_index, type := "children"]
+
+setorderv(x = dt_dharma, cols = c("type", "rep_id"), order = c(-1, 1)) # The -1 is to have parents first
+
+jpeg("residuals_obs_scatter.jpg", quality = 100)
+plot(dt_dharma[, rep_id], dt_dharma[, residuals_obs], pch = 19, col = "#A1A1A122")
+abline(v = stanData$n_indiv, lwd = 2, col = "#CD212A")
+axis(3, at = n_obs/4, "Parents", las = 1)
+axis(3, at = 3*n_obs/4, "Children", las = 1)
+dev.off()
+
+pdf("residuals_obs_hist.pdf")
+hist(dt_dharma[, residuals_obs])
+dev.off()
+
+qq = qqnorm(dt_dharma[, residuals_obs], pch = 1, frame = FALSE, plot.it = FALSE)
+
+jpeg("qqplot.jpg")
+plot(qq)
+qqline(dt_dharma[, residuals_obs], col = "#34568B", lwd = 3)
+dev.off()
+
+## Check that the process error does not show any pattern with any predictor, and that it is gamma distributed
+processError_array = generate_quantities$draws("procError_sim")
+mean(processError_array)
+
+dim(processError_array) # iter_sampling * n_chains * n_latentGrowth
+
+processError_vec = as.vector(processError_array) # The order is array[,1,1], array[,2,1], ..., array[,n_chain,1], array[,2,1], ...
+length(processError_vec)
+
+pdf("processError_check_hist.pdf")
+hist(processError_vec)
+dev.off()
+
+processError_avg = apply(processError_array, 3, mean) # Average processError for each latent growth (or dbh)
+length(processError_avg)
+
+index_notLastMeasure = 1:n_hiddenState
+index_notLastMeasure = index_notLastMeasure[!(index_notLastMeasure %in% indices[stanData$children_index, index_gen])]
+
+if (length(index_notLastMeasure) != length (processError_avg))
+	stop("Dimension mismatch between processError_avg and index_notLastMeasure")
+
+latent_dbh = apply(generate_quantities$draws("yearly_latent_dbh"), 3, mean)
+latent_dbh = latent_dbh[index_notLastMeasure]
+
+pdf("processError_vs_dbh_check.pdf")
+plot(latent_dbh, processError_avg, type = "l")
+dev.off()
+
+cor(latent_dbh, processError_avg)
+
+
+
+
+
+
+
+
+
+
+
+####! CRASH TEST ZONE
+#! TEST
+ll = bayesplot::nuts_params(results)
+test = bayesplot::mcmc_nuts_energy(ll)
+marginalPlot(results$draws("measureError"))
+lazyTrace(results$draws("measureError", inc_warmup = TRUE))
+setDT(ll)
+ll = dcast(ll, Chain + Iteration ~ Parameter, value.var = "Value")
+#! END TEST
+
+
 
 #### Get parameters
 paramsNames = c("potentialMaxGrowth", "power_dbh", "optimal_precip", "width_precip_niche", "processError")
@@ -402,7 +696,7 @@ for (i in c(1:6, 12:14))
 	ggplot2::ggsave(filename = paste0(figurePath, "latent_dbh_", i, "-traces.pdf"), plot = temp_plot, device = "pdf")
 }
 
-####! CRASH TEST ZONE
+
 latent_1_6 = getParams(results, paste0("latent_dbh[", 1:6, "]"))
 x = 2000:2005
 
@@ -457,115 +751,3 @@ dev.off()
 
 ####! END CRASH TEST ZONE
 
-
-
-
-
-# ## Growth function (expected growth)
-# growth = function(dbh, precip, params, isClimScaled = FALSE, isDbhScaled = TRUE, ...)
-# {
-# 	# Get the normalising constantes and rescale if necessary
-# 	if (!isClimScaled)
-# 	{
-# 		providedArgs = list(...)
-# 		if (!("norm_clim_dt" %in% names(providedArgs)))
-# 			stop("You must provide norm_clim_dt")
-
-# 		norm_clim_dt = providedArgs[["norm_clim_dt"]]
-
-# 		mu_clim = norm_clim_dt[variable == "pr", mu]
-# 		sd_clim = norm_clim_dt[variable == "pr", sd]
-# 		clim = (precip - mu_clim)/sd_clim
-# 	}
-
-# 	if (!isDbhScaled) #! DBH was not centered, only divide by sd(dbh)!
-# 	{
-# 		providedArgs = list(...)
-# 		if (!("norm_dbh_dt" %in% names(providedArgs)))
-# 			stop("You must provide norm_dbh_dt")
-
-# 		norm_dbh_dt = providedArgs[["norm_dbh_dt"]]
-# 		sd_dbh = norm_dbh_dt[variable == "dbh", sd]
-# 		dbh = dbh/sd_dbh
-# 	}
-
-# 	if (isClimScaled)
-# 		clim = precip
-		
-
-# 	potentialMaxGrowth = params[["potentialMaxGrowth"]]
-# 	power_dbh = params[["power_dbh"]]
-# 	optimal_clim = params[["optimal_precip"]]
-# 	width_clim_niche = params[["width_precip_niche"]]
-# 	G = potentialMaxGrowth * dbh^power_dbh *
-# 		exp(-(clim - optimal_clim)^2/width_clim_niche^2)
-# 	return (G)
-# }
-
-# ## Dbh function (expected dbh at time t + 1 given climate and dbh at time t)
-# nextDBH = function(currentDBH, precip, params, isClimScaled = FALSE, isDbhScaled = TRUE, ...)
-# {
-# 	if (!isClimScaled & !isDbhScaled)
-# 	{
-# 		providedArgs = list(...)
-# 		if (!all(c("norm_clim_dt", "norm_dbh_dt") %in% names(providedArgs)))
-# 			stop("You must provide norm_clim_dt and norm_dbh_dt")
-
-# 		norm_clim_dt = providedArgs[["norm_clim_dt"]]
-# 		norm_dbh_dt = providedArgs[["norm_dbh_dt"]]
-# 		return (currentDBH + growth(currentDBH, precip, params, FALSE, FALSE, norm_clim_dt = norm_clim_dt, norm_dbh_dt = norm_dbh_dt))
-# 	}
-
-# 	if (!isClimScaled)
-# 	{
-# 		providedArgs = list(...)
-# 		if (!("norm_clim_dt" %in% names(providedArgs)))
-# 			stop("You must provide norm_clim_dt")
-
-# 		norm_clim_dt = providedArgs[["norm_clim_dt"]]
-# 		return (currentDBH + growth(currentDBH, precip, params, FALSE, TRUE, norm_clim_dt = norm_clim_dt))
-# 	}
-
-# 	if (!isDbhScaled)
-# 	{
-# 		providedArgs = list(...)
-# 		if (!("norm_dbh_dt" %in% names(providedArgs)))
-# 			stop("You must provide norm_dbh_dt")
-
-# 		norm_dbh_dt = providedArgs[["norm_dbh_dt"]]
-# 		return (currentDBH + growth(currentDBH, precip, params, TRUE, FALSE, norm_dbh_dt = norm_dbh_dt))
-# 	}
-
-# 	return (currentDBH + growth(currentDBH, precip, params, TRUE, TRUE))
-# }
-
-
-m1 = readRDS("Tilia_platyphyllos/growth-2022-01-19_20h26.rds") 
-m2 = readRDS("Tilia_platyphyllos/growth-2022-01-23_21h01.rds") 
-
-d1_precip = m1$draws(variables = "optimal_precip")
-d1_width = m1$draws(variables = "width_precip_niche")
-
-cor(d1_precip, d1_width)
-
-d2_precip = m1$draws(variables = "optimal_precip")
-d2_width = m1$draws(variables = "width_precip_niche")
-
-p1 = getParams(m1, paramsNames)
-p2 = getParams(m2, paramsNames)
-
-precipParams1 = p1[c("optimal_precip", "width_precip_niche")]
-
-
-rescalePrecip(precipParams1, norm_clim_dt[, mu], norm_clim_dt[, sd])
-
-P = 1300.12
-s = 376.547
-m = 589.21
-Pn = (P - m)/s
-
-g = 2.1
-d = -20.54
-
--1/g^2*(Pn - d)^2
--1/(s^2*g^2)*(P - (m + s*d))^2
