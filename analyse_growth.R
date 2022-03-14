@@ -54,7 +54,7 @@ getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd
 }
 
 ## Bayesplot is having troubles on my mac (Arial font not always found), so I create my own traces plot
-lazyTrace = function(draws, filename = NULL, ...)
+lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 {
 	if (!is.array(draws) & !all(class(draws) %in% c("draws_array", "draws", "array")))
 		stop("The class of draws should be either array, or compatible with cmdstanr (draws_array, draws, array)")
@@ -85,7 +85,10 @@ lazyTrace = function(draws, filename = NULL, ...)
 	
 	# Plot
 	if (!is.null(filename))
-		pdf(paste0(filename, ".pdf"))
+	{
+		pdf(paste0(filename, ifelse(!is.null(run), paste0("_", run), ""), ".pdf"))
+		print(paste0("Figure saved under the name:", filename, ifelse(!is.null(run), paste0("_", run), ""), ".pdf"))
+	}
 	
 	plot(0, pch = "", xlim = c(0, n_iter), ylim = scaling*c(min_val, max_val), axes = TRUE, bg = "transparent",
 		xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""),
@@ -142,7 +145,7 @@ myPredictObs = function(draws_array, id_latent, regex = "latent_dbh")
 }
 
 ## Function to plot the prior and posterior of a parameter
-lazyPosterior = function(draws, fun = dnorm, filename = NULL, ...)
+lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 {
 	# Check-up
 	if (!is.array(draws))
@@ -207,7 +210,10 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, ...)
 
 	# Plot
 	if (!is.null(filename))
-		pdf(paste0(filename, ".pdf"))
+	{
+		pdf(paste0(filename, ifelse(!is.null(run), paste0("_", run), ""), ".pdf"))
+		print(paste0("Figure saved under the name:", filename, ifelse(!is.null(run), paste0("_", run), ""), ".pdf"))
+	}
 	
 	# Plot posterior
 	plot(density_from_draws, xlim = c(min_x, max_x), col = "#34568B", lwd = 2, main = "Prior and posterior measurement error")
@@ -227,7 +233,8 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, ...)
 ## Common variables
 species = "Picea_abies"
 path = paste0("./", species, "/")
-info_lastRun = getLastRun(path = path, run = 1)
+run = 1
+info_lastRun = getLastRun(path = path, run = run)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
 
@@ -248,25 +255,29 @@ if (isDBH_normalised)
 }
 
 ## Load results
-# results = readRDS("Tilia_platyphyllos//test_procErrorFixed_3rdOption_new.rds")
 results = readRDS(paste0(path, lastRun))
 
 #### Plot prior and posterior
 ## For measurement error
 measurementError_array = results$draws("measureError")
-lazyPosterior(draws = measurementError_array, fun = dgamma, filename = "measureError_posterior",
+lazyPosterior(draws = measurementError_array, fun = dgamma, filename = paste0(path, "measureError_posterior"), run = run,
 	shape = 3.0/0.001, rate = sd_dbh*sqrt(3.0)/0.001)
 
 ## For process error
 processError_array = results$draws("processError")
-lazyPosterior(draws = processError_array, fun = dgamma, filename = "processError_posterior",
+lazyPosterior(draws = processError_array, fun = dgamma, filename = paste0(path, "processError_posterior"),
 	shape = 5.0^2/1, rate = sd_dbh^2*5.0/1)
 
 #### Plot chains main parameters
-lazyTrace(draws = results$draws("potentialGrowth"), filename = "potentialGrowth")
-lazyTrace(draws = results$draws("dbh_slope"), filename = "dbh_slope")
-lazyTrace(draws = results$draws("pr_slope"), filename = "pr_slope")
-lazyTrace(draws = results$draws("pr_slope2"), filename = "pr_slope2")
+lazyTrace(draws = results$draws("potentialGrowth"), filename = paste0(path, "potentialGrowth"), run = run)
+lazyTrace(draws = results$draws("dbh_slope"), filename = paste0(path, "dbh_slope"), run = run)
+
+lazyTrace(draws = results$draws("pr_slope"), filename = paste0(path, "pr_slope"), run = run)
+lazyTrace(draws = results$draws("pr_slope2"), filename = paste0(path, "pr_slope2"), run = run)
+lazyTrace(draws = results$draws("tas_slope"), filename = paste0(path, "tas_slope"), run = run)
+lazyTrace(draws = results$draws("tas_slope2"), filename = paste0(path, "tas_slope2"), run = run)
+
+lazyTrace(draws = results$draws("competition_slope"), filename = paste0(path, "competition_slope"), run = run)
 
 #### Get parameters and convert them to the 'real' scale
 # If there is no mistake (see notebook), then the relation between some stan parameters and the parameters for non standardised dbh is:
