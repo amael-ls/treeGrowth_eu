@@ -30,10 +30,13 @@ getParams = function(model_cmdstan, params_names, type = "mean")
 }
 
 ## Get name of the last run
-getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd", getAll = FALSE)
+getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd", run = NULL, getAll = FALSE)
 {
 	if (format != "ymd")
 		stop("Format is not recognised. For now only year-month-day alias ymd works")
+	
+	if (!is.null(run))
+		begin = paste0(begin, "run=", run, "-")
 	
 	ls_files = list.files(path = path, pattern = paste0("^", begin, ".*", extension, "$"))
 	ls_files_split = stri_split(stri_sub(ls_files, from = stri_locate(ls_files, regex = begin)[, "end"] + 1),
@@ -222,9 +225,9 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, ...)
 
 #### Read data
 ## Common variables
-species = "Tilia_platyphyllos"
+species = "Picea_abies"
 path = paste0("./", species, "/")
-info_lastRun = getLastRun(path)
+info_lastRun = getLastRun(path = path, run = 1)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
 
