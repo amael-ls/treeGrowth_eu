@@ -111,7 +111,7 @@ climate_path = "/home/amael/project_ssm/climateData/Chelsa/yearlyAverage/"
 shapefile_path = "/home/amael/shapefiles/deutschland/"
 # shapefile_path = "/Users/mistral/Nextcloud/shapefiles/Germany_shapefile/"
 
-## Tree data and parameters
+## Tree data
 species = "Picea_abies"
 path = paste0("./", species, "/")
 run = 1
@@ -120,10 +120,22 @@ lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
 results = readRDS(paste0(path, lastRun))
 
+## Associated estimated parameters
 params_names = c("potentialGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2", "competition_slope",
 	"measureError", "processError")
 
+# Mean estimation
 estimated_params = getParams(model_cmdstan = results, params_names = params_names)
+
+# Array to create a set of parameters
+estimated_params_array = results$draws(params_names)
+dim(estimated_params_array) # iter_sampling * n_chain * nbParams
+
+n_rep = results$metadata()$iter_sampling * results$num_chains()
+dt_params_set = data.table()
+dt_params_set[, c(params_names) := numeric(n_rep)]
+for (param in params_names)
+	dt_params_set[, (param) := as.vector(estimated_params_array[, , param])]
 
 ## Climate
 temperature_files = paste0(climate_path, "tas/", years, ".tif")
@@ -192,7 +204,24 @@ dt_growth_tas[, integral := integrate(growth_fct, lower = lower_dbh, upper = upp
 	sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
 	tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd])$value, by = temperature]
 
+selected_iterations = seq(1, dt_params_set[, .N], by = 3)
+
+for (i in selected_iterations)
+{
+	current_params = unlist(dt_params_set[i, ])
+	dt_growth_tas[, (paste0("integral", i)) := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
+		precipitation = mean_pr, temperature = temperature, basalArea = 0,
+		params = current_params, scaled_dbh = FALSE, scaled_clim = FALSE,
+		sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
+		tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd])$value, by = temperature]
+
+	if (i %% 10 == 0)
+		print(paste0(i*100/n_rep, "% done"))
+}
+
 dt_growth_tas[, integral := integral/(upper_dbh - lower_dbh)]
+dt_growth_tas[, paste0("integral", selected_iterations) := lapply(.SD, function(x){x/(upper_dbh - lower_dbh)}),
+	.SDcols = paste0("integral", selected_iterations)]
 
 ## Precipitation gradient
 dt_growth_pr = data.table(precipitation = seq(min_pr, max_pr, length.out = n_pr), integral = numeric(n_pr))
@@ -203,7 +232,22 @@ dt_growth_pr[, integral := integrate(growth_fct, lower = lower_dbh, upper = uppe
 	sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
 	tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd])$value, by = precipitation]
 
+for (i in selected_iterations)
+{
+	current_params = unlist(dt_params_set[i, ])
+	dt_growth_pr[, (paste0("integral", i)) := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
+		precipitation = precipitation, temperature = mean_tas, basalArea = 0,
+		params = current_params, scaled_dbh = FALSE, scaled_clim = FALSE,
+		sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
+		tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd])$value, by = precipitation]
+
+	if (i %% 10 == 0)
+		print(paste0(i*100/n_rep, "% done"))
+}
+
 dt_growth_pr[, integral := integral/(upper_dbh - lower_dbh)]
+dt_growth_pr[, paste0("integral", selected_iterations) := lapply(.SD, function(x){x/(upper_dbh - lower_dbh)}),
+	.SDcols = paste0("integral", selected_iterations)]
 
 #### Plot average growth
 ## In function of climate
@@ -212,17 +256,30 @@ y_min = min(dt_growth_tas[, min(integral)], dt_growth_pr[, min(integral)])
 y_max = max(dt_growth_tas[, max(integral)], dt_growth_pr[, max(integral)])
 
 # Average growth versus temperature
-pdf(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_tas.pdf"))
+# pdf(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_tas.pdf"))
+png(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_tas.png"), width = 1080, height = 1080)
 par(mar = c(5, 5, 0.5, 0.5))
 plot(dt_growth_tas[, temperature], dt_growth_tas[, integral], xlab = "Temperature", ylab = "Growth (mm/yr)",
-	type = "l", lwd = 2, las = 1, cex.lab = 1.75, cex.axis = 1.75, ylim = c(y_min, y_max))
+	type = "l", las = 1, cex.lab = 1.75, cex.axis = 1.75, ylim = c(y_min, y_max), col = "#CD212A", lwd = 4)
+
+for (i in selected_iterations)
+{
+	col_i = paste0(paste0("integral", i))
+	lines(dt_growth_tas[, temperature], unlist(dt_growth_tas[, ..col_i]), col = "#44444422")
+}
 dev.off()
 
 # Average growth versus precipitation
 pdf(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_pr.pdf"))
 par(mar = c(5, 5, 0.5, 0.5))
 plot(dt_growth_pr[, precipitation], dt_growth_pr[, integral], xlab = "Precipitation", ylab = "Growth (mm/yr)",
-	type = "l", lwd = 2, las = 1, cex.lab = 1.75, cex.axis = 1.75, ylim = c(y_min, y_max))
+	type = "l", las = 1, cex.lab = 1.75, cex.axis = 1.75, ylim = c(y_min, y_max), col = "#CD212A", lwd = 4)
+
+for (i in selected_iterations)
+{
+	col_i = paste0(paste0("integral", i))
+	lines(dt_growth_pr[, precipitation], unlist(dt_growth_precipitation[, ..col_i]), col = "#44444422")
+}
 dev.off()
 
 ## In a landscape
@@ -244,29 +301,3 @@ plot(subset(growth_bayern_rs, "integral"), axes = FALSE, col = viridis(256),
 plot(bayern, add = TRUE, lwd = 2)
 plot(cities_rs, pch = 19, add = TRUE, cex = 4)
 dev.off()
-
-
-# a = rast(nrows = 3, ncols = 4)
-# b = rast(nrows = 3, ncols = 4)
-# d = rast(nrows = 3, ncols = 4)
-
-# values(a) = 1:ncell(a) + 4
-# values(b) = 1:ncell(b)
-# values(d) = 4*1:ncell(d)
-
-# cc = c(a, b, d)
-# names(cc) = paste0("ll", 1:3)
-
-# # give least weight to first layer, most to last layer
-# wm1 <- mean(subset(cc, c("ll1", "ll3")))
-
-# par(mfrow = c(1, 4))
-# plot(a)
-# text(a)
-# plot(b)
-# text(b)
-# plot(d)
-# text(d)
-# plot(wm1)
-# text(wm1, digits = 2)
-# dev.off()
