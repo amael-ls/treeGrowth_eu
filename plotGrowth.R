@@ -10,6 +10,7 @@ options(max.print = 500)
 library(data.table)
 library(cmdstanr)
 library(stringi)
+library(viridis)
 library(terra)
 
 #### Tool functions
@@ -136,6 +137,16 @@ germany = vect(paste0(shapefile_path, "germany.shp"))
 germany = simplifyGeom(x = germany, tolerance = 100)
 germany = project(x = germany, y = climate)
 
+bayern = vect(paste0(shapefile_path, "bayern.shp"))
+bayern = project(x = bayern, y = climate)
+
+cities = data.table(
+	x = c(11.576124, 13.404954, 8.682127, 11.061859),
+	y = c(48.137154, 52.520008, 50.110924, 49.460983),
+	name = c("München", "Berlin", "Frankfurt", "Nürnberg"))
+
+cities_rs = vect(x = cities, geom = c("x", "y"), crs = crs(germany))
+
 ## Crop climate to Germany only
 climate = crop(x = climate, y = germany, mask = TRUE)
 climate_mean = c(mean(subset(climate, paste0("tas_", years))), mean(subset(climate, paste0("pr_", years))))
@@ -167,7 +178,7 @@ max_tas = max(values(subset(climate_mean, "temperature")), na.rm = TRUE)
 
 mean_pr = mean(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
 min_pr = min(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
-max_pr = max(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
+max_pr = 1800 # max(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
 
 n_tas = 200
 n_pr = 2000
@@ -196,21 +207,42 @@ dt_growth_pr[, integral := integral/(upper_dbh - lower_dbh)]
 
 #### Plot average growth
 ## In function of climate
+# Common variables
+y_min = min(dt_growth_tas[, min(integral)], dt_growth_pr[, min(integral)])
+y_max = max(dt_growth_tas[, max(integral)], dt_growth_pr[, max(integral)])
+
 # Average growth versus temperature
-jpeg(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_tas.jpg"))
-plot(dt_growth_tas[, temperature], dt_growth_tas[, integral])
+pdf(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_tas.pdf"))
+par(mar = c(5, 5, 0.5, 0.5))
+plot(dt_growth_tas[, temperature], dt_growth_tas[, integral], xlab = "Temperature", ylab = "Growth (mm/yr)",
+	type = "l", lwd = 2, las = 1, cex.lab = 1.75, cex.axis = 1.75, ylim = c(y_min, y_max))
 dev.off()
 
 # Average growth versus precipitation
-jpeg(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_pr.jpg"))
-plot(dt_growth_pr[, precipitation], dt_growth_pr[, integral])
+pdf(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_pr.pdf"))
+par(mar = c(5, 5, 0.5, 0.5))
+plot(dt_growth_pr[, precipitation], dt_growth_pr[, integral], xlab = "Precipitation", ylab = "Growth (mm/yr)",
+	type = "l", lwd = 2, las = 1, cex.lab = 1.75, cex.axis = 1.75, ylim = c(y_min, y_max))
 dev.off()
 
 ## In a landscape
-growth_rs = rast(x = average_growth, type = "xyz")
+growth_rs = rast(x = average_growth, type = "xyz", crs = crs(climate_mean))
 
-jpeg(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "average_growth_landscape.jpg"))
-plot(subset(growth_rs, "integral"))
+png(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "average_growth_landscape.png"), width = 1080, height = 1080)
+plot(subset(growth_rs, "integral"), axes = FALSE, col = viridis(256),
+	plg = list(cex = 3, title = "Growth(mm/yr)"))
+plot(germany, add = TRUE, col = NA, lwd = 2)
+plot(cities_rs, pch = 19, add = TRUE, cex = 4)
+dev.off()
+
+## In Bavaria
+growth_bayern_rs = crop(growth_rs, bayern, mask = TRUE)
+
+png(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "average_growth_landscape_Bayern.png"), width = 1080, height = 1080)
+plot(subset(growth_bayern_rs, "integral"), axes = FALSE, col = viridis(256),
+	plg = list(cex = 3, title = "Growth(mm/yr)"))
+plot(bayern, add = TRUE, lwd = 2)
+plot(cities_rs, pch = 19, add = TRUE, cex = 4)
 dev.off()
 
 
