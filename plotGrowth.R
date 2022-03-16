@@ -101,7 +101,7 @@ getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd
 
 #### Load data
 ## Common variables
-species = "Picea_abies"
+species = "Fagus_sylvatica"
 run = 1
 years = 2010:2018
 
@@ -109,16 +109,12 @@ years = 2010:2018
 tree_path = paste0("./", species, "/")
 climate_path = "/home/amael/project_ssm/climateData/Chelsa/yearlyAverage/"
 shapefile_path = "/home/amael/shapefiles/deutschland/"
-# shapefile_path = "/Users/mistral/Nextcloud/shapefiles/Germany_shapefile/"
 
 ## Tree data
-species = "Picea_abies"
-path = paste0("./", species, "/")
-run = 1
-info_lastRun = getLastRun(path = path, run = run)
+info_lastRun = getLastRun(path = tree_path, run = run)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
-results = readRDS(paste0(path, lastRun))
+results = readRDS(paste0(tree_path, lastRun))
 
 ## Associated estimated parameters
 params_names = c("potentialGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2", "competition_slope",
@@ -165,8 +161,8 @@ climate_mean = c(mean(subset(climate, paste0("tas_", years))), mean(subset(clima
 names(climate_mean) = c("temperature", "precipitation")
 
 ## Scaling
-dbh_mu_sd = readRDS(paste0(tree_path, "dbh_normalisation.rds"))
-climate_mu_sd = readRDS(paste0(tree_path, "climate_normalisation.rds"))
+dbh_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "dbh_normalisation.rds"))
+climate_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "climate_normalisation.rds"))
 
 #### Compute average growth in landscape
 average_growth = setDT(as.data.frame(x = climate_mean, xy = TRUE))
@@ -193,7 +189,7 @@ min_pr = min(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
 max_pr = 1800 # max(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
 
 n_tas = 200
-n_pr = 2000
+n_pr = 600
 
 ## Temperature gradient
 dt_growth_tas = data.table(temperature = seq(min_tas, max_tas, length.out = n_tas), integral = numeric(n_tas))
@@ -252,12 +248,13 @@ dt_growth_pr[, paste0("integral", selected_iterations) := lapply(.SD, function(x
 #### Plot average growth
 ## In function of climate
 # Common variables
-y_min = min(dt_growth_tas[, min(integral)], dt_growth_pr[, min(integral)])
-y_max = max(dt_growth_tas[, max(integral)], dt_growth_pr[, max(integral)])
+y_min = min(dt_growth_tas[, min(.SD), .SDcols = c("integral", paste0("integral", selected_iterations))],
+	dt_growth_pr[, min(.SD), .SDcols = c("integral", paste0("integral", selected_iterations))])
+y_max = max(dt_growth_tas[, max(.SD), .SDcols = c("integral", paste0("integral", selected_iterations))],
+	dt_growth_pr[, max(.SD), .SDcols = c("integral", paste0("integral", selected_iterations))])
 
 # Average growth versus temperature
-# pdf(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_tas.pdf"))
-png(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_tas.png"), width = 1080, height = 1080)
+pdf(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "growth_vs_tas.pdf"))
 par(mar = c(5, 5, 0.5, 0.5))
 plot(dt_growth_tas[, temperature], dt_growth_tas[, integral], xlab = "Temperature", ylab = "Growth (mm/yr)",
 	type = "l", las = 1, cex.lab = 1.75, cex.axis = 1.75, ylim = c(y_min, y_max), col = "#CD212A", lwd = 4)
@@ -267,6 +264,7 @@ for (i in selected_iterations)
 	col_i = paste0(paste0("integral", i))
 	lines(dt_growth_tas[, temperature], unlist(dt_growth_tas[, ..col_i]), col = "#44444422")
 }
+lines(dt_growth_tas[, temperature], dt_growth_tas[, integral], col = "#CD212A", lwd = 4)
 dev.off()
 
 # Average growth versus precipitation
@@ -278,8 +276,9 @@ plot(dt_growth_pr[, precipitation], dt_growth_pr[, integral], xlab = "Precipitat
 for (i in selected_iterations)
 {
 	col_i = paste0(paste0("integral", i))
-	lines(dt_growth_pr[, precipitation], unlist(dt_growth_precipitation[, ..col_i]), col = "#44444422")
+	lines(dt_growth_pr[, precipitation], unlist(dt_growth_pr[, ..col_i]), col = "#44444422")
 }
+lines(dt_growth_pr[, precipitation], dt_growth_pr[, integral], col = "#CD212A", lwd = 4)
 dev.off()
 
 ## In a landscape
