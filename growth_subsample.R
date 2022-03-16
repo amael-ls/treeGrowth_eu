@@ -17,9 +17,9 @@ args = commandArgs(trailingOnly = TRUE)
 if (length(args) != 3)
   stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
-species_id = 46
-run_id = 1
-max_indiv = 4000
+species_id = 71
+run_id = 4
+max_indiv = 3000
 # species_id = as.integer(args[1])
 # run_id = as.integer(args[2])
 # max_indiv = as.integer(args[3])
@@ -349,7 +349,7 @@ stanData = list(
 saveRDS(object = stanData, file = paste0(savingPath, run_id, "_stanData.rds"))
 
 ## Compile model
-model = cmdstan_model("./growth_3rdOption.stan")
+model = cmdstan_model("./growth.stan")
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
@@ -357,12 +357,12 @@ results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50
 	max_treedepth = 13, adapt_delta = 0.9)
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
-results$save_output_files(dir = savingPath, basename = paste0("growth-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-", time_ended, ".rds"))
+results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, ".rds"))
 
 results$cmdstan_diagnose()
 
-results$print(c("potentialGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+results$print(c("lp__", "potentialGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"competition_slope", "measureError", "processError"))
 
 

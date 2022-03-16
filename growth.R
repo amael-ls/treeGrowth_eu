@@ -329,7 +329,7 @@ stanData = list(
 saveRDS(object = stanData, file = paste0(savingPath, "stanData.rds"))
 
 ## Compile model
-model = cmdstan_model("./growth_3rdOption.stan")
+model = cmdstan_model("./growth.stan")
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
