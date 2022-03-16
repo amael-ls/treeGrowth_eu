@@ -124,8 +124,8 @@ lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 		dev.off()
 }
 
-## Function to compute the residuals (latent state)
-myPredictObs = function(draws_array, id_latent, regex = "latent_dbh")
+## Function to reshape draws_array
+reshapeDraws = function(draws_array, id_latent, regex = "latent_dbh")
 {
 	id_latent = unique(id_latent)
 	if (length(id_latent) != 1)
@@ -278,18 +278,6 @@ lazyTrace(draws = results$draws("tas_slope"), filename = paste0(path, "tas_slope
 lazyTrace(draws = results$draws("tas_slope2"), filename = paste0(path, "tas_slope2"), run = run)
 
 lazyTrace(draws = results$draws("competition_slope"), filename = paste0(path, "competition_slope"), run = run)
-
-#### Get parameters and convert them to the 'real' scale
-# If there is no mistake (see notebook), then the relation between some stan parameters and the parameters for non standardised dbh is:
-#	potentialGrowth_s = potentialGrowth_r - log(sd(dbh))
-#	dbh_slope_s = sd(dbh)*dbh_slope_r,
-# Where *_s are for the estimates on the standardised scale, while *_r are for the estimates on the 'real' scale (i.e. non-standardised)
-# Note that there is no transformation required for the climate parameters, only the dbh_slope and the intercept are influenced
-
-(potentialGrowth = mean(results$draws("potentialGrowth")) + log(sd_dbh))
-(dbh_slope = mean(results$draws("dbh_slope"))/sd_dbh)
-(pr_slope = mean(results$draws("pr_slope")))
-(pr_slope2 = mean(results$draws("pr_slope2")))
 
 #### Posterior predictive checking: Can the model give rise to new observations that properly resemble the original data?
 ## Script to generate new data. Note that 'model' is an unnecessary block here as restart from results. gq stands for generated quantities
@@ -448,10 +436,10 @@ dt_dharma = data.table(rep_id = rep(1:n_obs, each = n_rep),
 newObservations_array = generate_quantities$draws("newObservations")
 latent_dbh_array = generate_quantities$draws("latent_dbh_parentsChildren")
 
-dt_dharma[, simulated_observations := myPredictObs(newObservations_array, rep_id, regex = "newObservations"), by = rep_id]
+dt_dharma[, simulated_observations := reshapeDraws(newObservations_array, rep_id, regex = "newObservations"), by = rep_id]
 dt_dharma[, simulated_observations := sd_dbh*simulated_observations]
 
-dt_dharma[, latent_dbh := myPredictObs(latent_dbh_array, rep_id, regex = "latent_dbh_parentsChildren"), by = rep_id]
+dt_dharma[, latent_dbh := reshapeDraws(latent_dbh_array, rep_id, regex = "latent_dbh_parentsChildren"), by = rep_id]
 dt_dharma[, latent_dbh := sd_dbh*latent_dbh]
 
 dt_dharma[, residuals_obs := rep_dbh - simulated_observations]
@@ -504,279 +492,8 @@ if (length(index_notLastMeasure) != length (processError_avg))
 latent_dbh = apply(generate_quantities$draws("yearly_latent_dbh"), 3, mean)
 latent_dbh = latent_dbh[index_notLastMeasure]
 
-pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "processError_vs_dbh_check.pdf"))
+jpeg(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "processError_vs_dbh_check.jpg"), quality = 50)
 plot(latent_dbh, processError_avg, type = "l")
 dev.off()
 
 cor(latent_dbh, processError_avg)
-
-
-
-
-
-
-
-
-
-
-
-####! CRASH TEST ZONE
-#! TEST
-ll = bayesplot::nuts_params(results)
-test = bayesplot::mcmc_nuts_energy(ll)
-marginalPlot(results$draws("measureError"))
-lazyTrace(results$draws("measureError", inc_warmup = TRUE))
-setDT(ll)
-ll = dcast(ll, Chain + Iteration ~ Parameter, value.var = "Value")
-#! END TEST
-
-
-
-#### Get parameters
-paramsNames = c("potentialMaxGrowth", "power_dbh", "optimal_precip", "width_precip_niche", "processError")
-
-## Mean values
-meanParams = getParams(results, paramsNames)
-processError_mean = meanParams[["processError"]]
-
-## Median values
-medParams = getParams(results, paramsNames, type = "median")
-processError_med = medParams[["processError"]]
-
-#### Residuals
-## Load data
-treeFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/BayForDemo Inventories/FR IFN/processed data/"
-# treeData = readRDS(paste0(treeFolder, "trees_forest_reshaped.rds"))
-treeData = readRDS(paste0(path, "trees_forest_reshaped.rds")) # Folder to use when running on local computer
-treeData = treeData[speciesName_sci == species]
-
-## Get dbh and time
-dbh_start = treeData[treeData[, .I[which.min(year)], by = .(tree_id, pointInventory_id)][, V1], dbh]
-dbh_end = treeData[treeData[, .I[which.max(year)], by = .(tree_id, pointInventory_id)][, V1], dbh]
-
-t_start = treeData[treeData[, .I[which.min(year)], by = .(tree_id, pointInventory_id)][, V1], year]
-t_end = treeData[treeData[, .I[which.max(year)], by = .(tree_id, pointInventory_id)][, V1], year]
-delta_t = t_end - t_start
-
-## Climate
-climFolder = "~/projects/def-dgravel/amael/postdoc/bayForDemo/climateData/Chelsa/yearlyAverage/"
-# climate = readRDS(paste0(climFolder, "FR_reshaped_climate.rds"))
-climate = readRDS(paste0(path, "FR_reshaped_climate.rds")) # Folder to use when running on local computer
-
-## indices
-# indices = readRDS(paste0(treeFolder, species, "_indices.rds"))
-indices = readRDS(paste0(path, species, "_indices.rds"))
-indices_data = indices[, index_gen] 
-indices = unique(indices[, .(tree_id, pointInventory_id, index_clim_start, index_clim_end)])
-
-## Create simulations
-n_rep = 250
-dt = data.table(rep_dbh_end = rep(dbh_end, each = n_rep), sampled = numeric(n_rep * length(dbh_end)))
-medPred = numeric(length(dbh_end))
-
-if (isDBH_normalised)
-	dt[, rep_dbh_end := rep_dbh_end/norm_dbh_dt[, sd]]
-
-i = 1
-yr = 1
-for (i in 1:length(dbh_end))
-{
-	currentDbh = dbh_start[i]/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
-	currentDbh_med = dbh_start[i]/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
-	currentClim_index = indices[i, index_clim_start]
-	for (yr in 1:delta_t[i])
-	{
-		precip = climate[currentClim_index, pr]
-		currentDbh = rnorm(n_rep, rnorm(n_rep, nextDBH(currentDbh, precip, meanParams, norm_clim_dt), processError_mean), 0.006)
-		currentDbh_med = nextDBH(currentDbh_med, precip, medParams, norm_clim_dt)
-		currentClim_index = currentClim_index + 1
-	}
-	dt[((i - 1)*n_rep + 1):(i*n_rep), sampled := currentDbh]
-	medPred[i] = currentDbh_med
-	if (i %% 100 == 0)
-		print(paste0(round(i*100/length(dbh_end), 2), "% done"))
-}
-
-# saveRDS(dt, "testForResiduals.rds")
-
-## Reshape simulations into a matrix length(dbh) x n_rep
-sims = matrix(data = dt[, sampled], nrow = n_rep, ncol = length(dbh_end)) # each column is for one data point (the way I organised the dt)
-sims = t(sims) # Transpose the matrix for dharma
-
-forDharma = createDHARMa(simulatedResponse = sims,
-	observedResponse = dbh_end/ifelse(isDBH_normalised, norm_dbh_dt[, sd], 1)
-, fittedPredictedResponse = medPred)
-
-plot(forDharma)
-dev.off()
-
-# #### Residuals using posterior samples directly (should have nIter/2 samples per measure)
-# ## Get the posterior distrib of the states that have data to be compared to
-# n_rep = results$metadata()$iter_sampling
-# dt = data.table(measured = rep(treeData[, dbh], each = n_rep), sampled_mean = numeric(n_rep * treeData[, .N]),
-# 	sampled_med = numeric(n_rep * treeData[, .N]))
-# if (isDBH_normalised)
-# 	dt[, measured := measured/norm_dbh_dt[, sd]]
-
-# for (i in 1:treeData[, .N])
-# {
-# 	dt[((i - 1)*n_rep + 1):(i*n_rep),
-# 		sampled_mean := rnorm(n_rep, rowMeans(results$draws(paste0("latent_dbh[", indices_data[i], "]"))), 0.006)]
-# 	dt[((i - 1)*n_rep + 1):(i*n_rep),
-# 		sampled_med := rnorm(n_rep, apply(results$draws(paste0("latent_dbh[", indices_data[i], "]")), 1, median), 0.006)]
-# 	if (i %% 200 == 0)
-# 		print(paste0(round(i*100/treeData[, .N], 2), "% done"))
-# }
-
-# ## Reshape simulations into a matrix length(dbh) x n_rep
-# sims = matrix(data = dt[, sampled_mean], nrow = n_rep, ncol = treeData[, .N]) # each column is for one data point (the way I organised the dt)
-# sims = t(sims) # Transpose the matrix for dharma
-
-# forDharma = createDHARMa(simulatedResponse = sims,
-# 	observedResponse = dt[seq(1, .N, by = n_rep), measured]) # all.equal(ll, treeData[, dbh]/norm_dbh_dt[, sd]) 
-# # , fittedPredictedResponse = dt[seq(1, .N, by = n_rep), sampled_med])
-
-# # fittedPredictedResponse: optional fitted predicted response. For
-# #	Bayesian posterior predictive simulations, using the median
-# #	posterior prediction as fittedPredictedResponse is
-# #	recommended. If not provided, the mean simulatedResponse will
-# #	be used.
-
-# plot(forDharma)
-# dev.off()
-
-# plot(dt[, measured], dt[, sampled])
-
-#### Plot posterior distributions and traces of parameters
-# Folder to save plots
-figurePath = paste0(path, time_ended, "/")
-if (!dir.exists(figurePath))
-	dir.create(figurePath)
-
-# Potential maximal growth
-plot_title = ggplot2::ggtitle("Posterior distribution potentialMaxGrowth", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("potentialMaxGrowth"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "pmg-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for potentialMaxGrowth")
-temp_plot = mcmc_trace(results$draws("potentialMaxGrowth")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "pmg-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# Power dbh
-plot_title = ggplot2::ggtitle("Posterior distribution power_dbh", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("power_dbh"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "power_dbh-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for power_dbh")
-temp_plot = mcmc_trace(results$draws("power_dbh")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "power_dbh-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# Optimal precipitation
-plot_title = ggplot2::ggtitle("Posterior distribution optimal_precip", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("optimal_precip"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "optimal_precip-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for optimal_precip")
-temp_plot = mcmc_trace(results$draws("optimal_precip")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "optimal_precip-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# Width niche distribution (precipitation)
-plot_title = ggplot2::ggtitle("Posterior distribution width_precip_niche", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("width_precip_niche"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "width_precip_niche-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for width_precip_niche")
-temp_plot = mcmc_trace(results$draws("width_precip_niche")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "width_precip_niche-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# processError
-plot_title = ggplot2::ggtitle("Posterior distribution processError", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("processError"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "processError-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-lazyTrace(results$draws("processError"))
-
-plot_title = ggplot2::ggtitle("Traces for processError")
-temp_plot = mcmc_trace(results$draws("processError")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "processError-traces.pdf"), plot = temp_plot, device = "pdf")
-
-# measureError
-plot_title = ggplot2::ggtitle("Posterior distribution measureError", "with medians and 80% intervals")
-temp_plot = mcmc_areas(results$draws("measureError"), prob = 0.8) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "measureError-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-plot_title = ggplot2::ggtitle("Traces for measureError")
-temp_plot = mcmc_trace(results$draws("measureError")) + plot_title
-ggplot2::ggsave(filename = paste0(figurePath, "measureError-traces.pdf"), plot = temp_plot, device = "pdf")
-
-lazyTrace(results$draws("measureError"))
-
-cor(results$draws("processError"), results$draws("measureError"))
-
-for (i in c(1:6, 12:14))
-{
-	plot_title = ggplot2::ggtitle(paste0("Posterior distribution latent_dbh[", i, "]"),
-		"with medians and 80% intervals")
-	temp_plot = mcmc_areas(results$draws(paste0("latent_dbh[", i, "]")), prob = 0.8) + plot_title
-	ggplot2::ggsave(filename = paste0(figurePath, "latent_dbh_", i, "-distrib.pdf"), plot = temp_plot, device = "pdf")
-
-	plot_title = ggplot2::ggtitle(paste0("Traces for latent_dbh[", i, "]"))
-	temp_plot = mcmc_trace(results$draws(paste0("latent_dbh[", i, "]"), inc_warmup = TRUE)) + plot_title
-	ggplot2::ggsave(filename = paste0(figurePath, "latent_dbh_", i, "-traces.pdf"), plot = temp_plot, device = "pdf")
-}
-
-
-latent_1_6 = getParams(results, paste0("latent_dbh[", 1:6, "]"))
-x = 2000:2005
-
-pdf("./latent_real_2ndOption.pdf", height = 7, width = 7)
-op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
-plot(2000:2005, norm_dbh_dt[, sd]*latent_1_6, pch = 19, col = "#34568B", cex = 4,
-	xlab = "Year", ylab = "Diameter at breast height (scaled)")
-points(x = 2000, y = treeData[1, dbh], pch = 19, col = "#FA7A35", cex = 2)
-points(x = 2005, y = treeData[2, dbh], pch = 19, col = "#CD212A", cex = 2)
-dev.off()
-
-pdf("./growth_dbh.pdf", height = 7, width = 7)
-op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
-curve(norm_dbh_dt[, sd]^(1 - meanParams["power_dbh"]) * growth(x, 0, params = meanParams, norm_clim_dt, isScaled = TRUE),
-	from = 50, to = 1000, lwd = 2, col = "#34568B", xlab = "dbh", ylab = "Growth (in mm/yr)")
-dev.off()
-
-# pdf("./growth_precip.pdf", height = 7, width = 7)
-# op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
-# curve(growth(250/norm_dbh_dt[, sd], x, params = meanParams, norm_clim_dt, isScaled = FALSE), from = 650, to = 1500,
-# 	lwd = 2, col = "#34568B", xlab = "Precipitation (mm/yr)", ylab = "Growth (in mm/yr)")
-# dev.off()
-
-## Compute average climate for each tree during its time span
-indices[, avg_pr := mean(climate[index_clim_start:index_clim_end, pr]), by = .(tree_id, pointInventory_id)]
-
-# What follows works only for the French data that have a particular structure. For the general case, use indices
-treeData = treeData[indices[, .(tree_id, pointInventory_id, avg_pr)], on = c("tree_id", "pointInventory_id")]
-dbh0 = treeData[seq(1, .N - 1, by = 2), dbh]
-dbh1 = treeData[seq(2, .N, by = 2), dbh]
-yearly_avg_growth = (dbh1 - dbh0)/(treeData[seq(2, .N, by = 2), year] - treeData[seq(1, .N - 1, by = 2), year])
-
-mean(treeData[, avg_pr])
-split_clim = min(treeData[, avg_pr]) + 0:3*(max(treeData[, avg_pr]) - min(treeData[, avg_pr]))/3
-
-treeData[, class_pr := ""]
-treeData[(split_clim[1] <= avg_pr) & (avg_pr < split_clim[2]), class_pr := "low"]
-treeData[(split_clim[2] <= avg_pr) & (avg_pr < split_clim[3]), class_pr := "medium"]
-treeData[(split_clim[3] <= avg_pr) & (avg_pr <= split_clim[4]), class_pr := "high"]
-
-colours = c("#CD212A", "#DAAE29", "#094F9A")
-treeData[class_pr == "low", colour := colours[1]]
-treeData[class_pr == "medium", colour := colours[2]]
-treeData[class_pr == "high", colour := colours[3]]
-
-# jpeg("test.jpg", width = 1080, height = 1080, quality = 100)
-pdf("test.pdf", width = 7, height = 7)
-op <- par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.5, 0), tck = -0.015)
-plot(dbh0, yearly_avg_growth, pch = 19, col = treeData[seq(1, .N - 1, by = 2), colour],
-	xlab = "dbh (at time 0)", ylab = "yearly average growth", cex = 0.35)
-dev.off()
-
-####! END CRASH TEST ZONE
-
