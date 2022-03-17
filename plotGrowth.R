@@ -102,7 +102,7 @@ getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd
 
 #### Load data
 ## Common variables
-species = "Fagus_sylvatica"
+species = "Picea_abies"
 run = 1
 years = 2010:2018
 
@@ -123,16 +123,6 @@ params_names = c("potentialGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_s
 
 # Mean estimation
 estimated_params = getParams(model_cmdstan = results, params_names = params_names)
-
-# Array to create a set of parameters
-estimated_params_array = results$draws(params_names)
-dim(estimated_params_array) # iter_sampling * n_chain * nbParams
-
-n_rep = results$metadata()$iter_sampling * results$num_chains()
-dt_params_set = data.table()
-dt_params_set[, c(params_names) := numeric(n_rep)]
-for (param in params_names)
-	dt_params_set[, (param) := as.vector(estimated_params_array[, , param])]
 
 ## Climate
 temperature_files = paste0(climate_path, "tas/", years, ".tif")
@@ -165,35 +155,7 @@ names(climate_mean) = c("temperature", "precipitation")
 dbh_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "dbh_normalisation.rds"))
 climate_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "climate_normalisation.rds"))
 
-#### Compute average growth in landscape
-average_growth = setDT(as.data.frame(x = climate_mean, xy = TRUE))
-
-lower_dbh = 40
-upper_dbh = 700
-
-average_growth[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
-	precipitation = precipitation, temperature = temperature, basalArea = 0,
-	params = estimated_params, scaled_dbh = FALSE, scaled_clim = FALSE,
-	sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
-	tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd])$value, by = .(x, y)]
-
-average_growth[, integral := integral/(upper_dbh - lower_dbh)]
-
-#### Compute average growth along a one-dimension environmental gradient
-## Common variables
-mean_tas = mean(values(subset(climate_mean, "temperature")), na.rm = TRUE)
-min_tas = min(values(subset(climate_mean, "temperature")), na.rm = TRUE)
-max_tas = max(values(subset(climate_mean, "temperature")), na.rm = TRUE)
-
-mean_pr = mean(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
-min_pr = min(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
-max_pr = 1800 # max(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
-
-n_tas = 200
-n_pr = 600
-
-n_chains = results$num_chains()
-
+#### Compute average growth in a landscape/along a gradient
 ## Define stan model to compute average growth (integral in generated quantities block)
 gq_script = write_stan_file(
 "
@@ -221,7 +183,6 @@ functions {
 			tas_slope*temperature + tas_slope2*temperature^2 + competition_slope*totalTreeWeight));
 	}
 }
-
 
 data {
 	// Number of data
@@ -318,7 +279,36 @@ generated quantities {
 
 gq_model = cmdstan_model(gq_script)
 
-## Temperature gradient
+## Common variables
+mean_tas = mean(values(subset(climate_mean, "temperature")), na.rm = TRUE)
+min_tas = min(values(subset(climate_mean, "temperature")), na.rm = TRUE)
+max_tas = max(values(subset(climate_mean, "temperature")), na.rm = TRUE)
+
+mean_pr = mean(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
+min_pr = min(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
+max_pr = max(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
+
+n_tas = 200
+n_pr = 600
+
+n_chains = results$num_chains()
+
+lower_dbh = 40
+upper_dbh = 700
+
+## Compute average growth in a landscape
+average_growth = setDT(as.data.frame(x = climate_mean, xy = TRUE))
+
+average_growth[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
+	precipitation = precipitation, temperature = temperature, basalArea = 0,
+	params = estimated_params, scaled_dbh = FALSE, scaled_clim = FALSE,
+	sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
+	tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd])$value, by = .(x, y)]
+
+average_growth[, integral := integral/(upper_dbh - lower_dbh)]
+
+## Compute average growth along a one-dimension environmental gradient
+# Temperature gradient
 dt_growth_tas = data.table(temperature = seq(min_tas, max_tas, length.out = n_tas), integral = numeric(n_tas))
 
 dt_growth_tas[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
@@ -329,7 +319,6 @@ dt_growth_tas[, integral := integrate(growth_fct, lower = lower_dbh, upper = upp
 
 dt_growth_tas[, integral := integral/(upper_dbh - lower_dbh)]
 
-# Generate simulations
 stanData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 stanData$x_r = c((rep(mean_pr, n_tas) - stanData$pr_mu)/stanData$pr_sd, # Precip
 	(dt_growth_tas[, temperature] - stanData$tas_mu)/stanData$tas_sd, # Temperature
@@ -344,7 +333,7 @@ quantile_tas = data.table(q5 = numeric(n_tas), q95 = numeric(n_tas))
 for (i in 1:n_tas)
 	quantile_tas[i, c("q5", "q95") := as.list(sd(stanData$Yobs)*quantile2(x = average_growth_sim[, , i], probs = c(0.05, 0.95)))]
 
-## Precipitation gradient
+# Precipitation gradient
 dt_growth_pr = data.table(precipitation = seq(min_pr, max_pr, length.out = n_pr), integral = numeric(n_pr))
 
 dt_growth_pr[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
