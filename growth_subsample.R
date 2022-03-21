@@ -18,7 +18,7 @@ if (length(args) != 3)
   stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
 species_id = 71
-run_id = 4
+run_id = 1
 max_indiv = 3000
 # species_id = as.integer(args[1])
 # run_id = as.integer(args[2])
@@ -223,6 +223,9 @@ if (!dir.exists(savingPath))
 	dir.create(savingPath)
 
 ## Subsample tree data
+mean_dbh_beforeSubsample = treeData[, mean(dbh)]
+sd_dbh_beforeSubsample = treeData[, sd(dbh)]
+
 # Get parents and children indices
 n_indiv = unique(treeData[, .(tree_id, pointInventory_id)])[, .N]
 print(paste("Number of individuals:", n_indiv))
@@ -238,6 +241,12 @@ if (n_indiv > max_indiv)
 	setorder(treeData, pointInventory_id, tree_id, year)
 	n_indiv = unique(treeData[, .(tree_id, pointInventory_id)])[, .N]
 	print(paste("Number of individuals:", n_indiv))
+
+	if ((treeData[, mean(dbh)]/mean_dbh_beforeSubsample > 1.05) | (treeData[, mean(dbh)]/mean_dbh_beforeSubsample < 0.95))
+		warning("The subsample does not look representative of the whole data set, check the average")
+
+	if ((treeData[, sd(dbh)]/sd_dbh_beforeSubsample > 1.05) | (treeData[, sd(dbh)]/sd_dbh_beforeSubsample < 0.95))
+		warning("The subsample does not look representative of the whole data set, check the std. dev")
 }
 
 ## Climate
