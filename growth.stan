@@ -106,7 +106,6 @@ model {
 	// Declare variables
 	int growth_counter = 1;
 	real expected_growth;
-	// real processError = 5.68/sd(Yobs)^2; // /!\ This is a variance, contrary to measureError which is a std. dev.
 	vector [n_obs - n_indiv] latent_dbh_children;
 
 	// Priors
@@ -160,7 +159,7 @@ model {
 	}
 	
 	// Prior on initial hidden state: This is a diffuse initialisation
-	target += uniform_lpdf(latent_dbh_parents | 0.001, 10); // Remember that the dbh is standardised
+	target += uniform_lpdf(latent_dbh_parents | 0.1/sd(Yobs), 2000/sd(Yobs)); // Remember that the dbh is in mm and standardised
 	
 	// --- Observation model
 	// Compare true (i.e., hidden or latent) parents with observed parents

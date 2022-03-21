@@ -58,7 +58,7 @@ init_fun = function(...)
 		for (j in 1:nbYearsGrowth[i])
 		{
 			counter_growth = counter_growth + 1
-			latent_growth_gen[counter_growth] = rgamma(n = 1, shape = average_yearlyGrowth[i]^2/0.5, rate = average_yearlyGrowth[i]^2/0.5)
+			latent_growth_gen[counter_growth] = rgamma(n = 1, shape = average_yearlyGrowth[i]^2/0.5, rate = average_yearlyGrowth[i]/0.5)
 		}
 	}
 
@@ -497,7 +497,7 @@ curve(var_fct(x, var_params, sd_dbh), from = 0, to = 600)
 #### FROM https://discourse.mc-stan.org/t/saving-reusing-adaptation-in-cmdstanr/19166/44
 get_inits = function(chain_id){
 	warmup_draws = results$draws(inc_warmup = TRUE)
-	final_warmup_value = warmup_draws[maxIter/2, chain_id, 2:(dim(warmup_draws)[3])]
+	final_warmup_value = warmup_draws[results$metadata()$iter_sampling, chain_id, 2:(dim(warmup_draws)[3])]
 	(
 		final_warmup_value
 		%>% tibble::as_tibble(.name_repair = function(names){
