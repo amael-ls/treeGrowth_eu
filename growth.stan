@@ -57,6 +57,9 @@ data {
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
 
+	// sd_dbh is for the whole species and should not be more than 5% different from the sd of the subsample, namely sd(Yobs)
+	real<lower = 0.95*sd(Yobs), upper = 1.05*sd(Yobs)> sd_dbh;
+
 	// Explanatory variables
 	vector<lower = 0>[n_climate] precip; // Precipitations
 	real pr_mu; // To standardise the precipitations
@@ -75,7 +78,7 @@ data {
 }
 
 transformed data {
-	vector[n_obs] normalised_Yobs = Yobs/sd(Yobs); // Normalised but NOT centred dbh
+	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
 	vector[n_indiv] normalised_totalTreeWeight = (totalTreeWeight - mean(totalTreeWeight))/sd(totalTreeWeight);
@@ -95,10 +98,10 @@ parameters {
 
 	real competition_slope;
 
-	real<lower = 0.5/sd(Yobs)^2> processError;
-	real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
+	real<lower = 0.5/sd_dbh^2> processError;
+	real<lower = 0.1/sqrt(12)*25.4/sd_dbh> measureError; // Constrained by default, see appendix D Eitzel for the calculus
 
-	vector<lower = 0, upper = 10>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
+	vector<lower = 0.1/sd_dbh, upper = 2000/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
@@ -138,7 +141,7 @@ model {
 		rate = (m/var(dbh))    / (v/var(dbh)^2) = var(dbh) * m/v
 	*/
 	target += gamma_lpdf(processError | 5.0^2/1, variance(Yobs)*5.0/1); // Remember that processError is a variance, not a sd!
-	target += gamma_lpdf(measureError | 3.0/0.001, sd(Yobs)*sqrt(3)/0.001); // <=> measurement error (sd) = sqrt(3) mm
+	target += gamma_lpdf(measureError | 3.0/0.001, sd_dbh*sqrt(3)/0.001); // <=> measurement error (sd) = sqrt(3) mm
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
@@ -159,7 +162,7 @@ model {
 	}
 	
 	// Prior on initial hidden state: This is a diffuse initialisation
-	target += uniform_lpdf(latent_dbh_parents | 0.1/sd(Yobs), 2000/sd(Yobs)); // Remember that the dbh is in mm and standardised
+	target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 2000/sd_dbh); // Remember that the dbh is in mm and standardised
 	
 	// --- Observation model
 	// Compare true (i.e., hidden or latent) parents with observed parents

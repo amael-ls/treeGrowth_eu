@@ -313,6 +313,7 @@ stanData = list(
 
 	# Observations
 	Yobs = treeData[, dbh],
+	sd_dbh = treeData[, sd(dbh)],
 
 	# Explanatory variables
 	precip = climate[, pr], # Annual precipitations (sum over 12 months)
