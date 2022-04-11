@@ -17,9 +17,13 @@ args = commandArgs(trailingOnly = TRUE)
 if (length(args) != 3)
   stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
-species_id = 71
+# species_id = 46 #! REMOVE THIS LINE WHEN DONE WITH TEST. FAGUS_SYLVATICA
+# species_id = 85 #! REMOVE THIS LINE WHEN DONE WITH TEST. PINUS_SYLVESTRIS
+# species_id = 150 #! REMOVE THIS LINE WHEN DONE WITH TEST. TILIA PLATYPHYLLOS
+
+species_id = 71 #! REMOVE THIS LINE WHEN DONE WITH TEST. PICEA_ABIES
 run_id = 1
-max_indiv = 3000
+max_indiv = 4000
 # species_id = as.integer(args[1])
 # run_id = as.integer(args[2])
 # max_indiv = as.integer(args[3])
@@ -62,7 +66,7 @@ init_fun = function(...)
 		for (j in 1:nbYearsGrowth[i])
 		{
 			counter_growth = counter_growth + 1
-			latent_growth_gen[counter_growth] = rgamma(n = 1, shape = average_yearlyGrowth[i]^2/0.5, rate = average_yearlyGrowth[i]^2/0.5)
+			latent_growth_gen[counter_growth] = rgamma(n = 1, shape = average_yearlyGrowth[i]^2/0.5, rate = average_yearlyGrowth[i]/0.5)
 		}
 	}
 
@@ -306,7 +310,7 @@ climate_mu_sd = readRDS(paste0(savingPath, run_id, "_climate_normalisation.rds")
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 2400
+maxIter = 1500
 n_chains = 3
 
 # Initial values for states only
@@ -363,7 +367,7 @@ model = cmdstan_model("./growth.stan")
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
-	iter_warmup = round(2*maxIter/3), iter_sampling = round(maxIter/3), save_warmup = TRUE, init = initVal_Y_gen,
+	iter_warmup = round(1*maxIter/3), iter_sampling = round(2*maxIter/3), save_warmup = TRUE, init = initVal_Y_gen,
 	max_treedepth = 13, adapt_delta = 0.9)
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
