@@ -204,17 +204,14 @@ data {
 
 	// Explanatory variables
 	vector<lower = 0>[n_climate] precip; // Precipitations
-	// array [n_climate_new] real precip_new; // New precipitations
 	real pr_mu; // To standardise the precipitations
 	real<lower = 0> pr_sd; // To standardise the precipitations
 
 	vector[n_climate] tas; // Temperature
-	// array [n_climate_new] real tas; // Temperature
 	real tas_mu; // To standardise the temperature
 	real<lower = 0> tas_sd; // To standardise the temperature
 
 	vector<lower = 0>[n_indiv] totalTreeWeight; // Sum of the tree weights for a given plot at a given time
-	// array [n_indiv] real totalTreeWeight_new; // Sum of the tree weights for a given plot at a given time
 
 	array [3*n_climate_new] real x_r; // Contains in this order: pr, ts, totalTreeWeight, each of size n_climate_new, and already standardised
 }
@@ -225,16 +222,7 @@ transformed data {
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centered temperatures
 	vector[n_indiv] normalised_totalTreeWeight = (totalTreeWeight - mean(totalTreeWeight))/sd(totalTreeWeight);
 
-	// Array concatenating the three real predictors (used to compute integral), and unused, but necessary, int array to compute integral
-/*	array [3 * n_climate] real x_r;
-	for (i in 1:n_climate)
-	{
-		x_r[i] = normalised_precip[i];
-		x_r[i + n_climate] = normalised_tas[i];
-		x_r[i + 2*n_climate] = normalised_totalTreeWeight[i];
-	}
-*/
-	array [0] int x_i;
+	array [0] int x_i; // Unused, but necessary, int array to compute integral
 }
 
 parameters {
