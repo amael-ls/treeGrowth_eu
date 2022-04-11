@@ -36,11 +36,21 @@ getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd
 		stop("Format is not recognised. For now only year-month-day alias ymd works")
 	
 	if (!is.null(run))
+	{
+		print(paste("Searching among runs =", run))
 		begin = paste0(begin, "run=", run, "-")
+	}
 	
 	ls_files = list.files(path = path, pattern = paste0("^", begin, ".*", extension, "$"))
-	ls_files_split = stri_split(stri_sub(ls_files, from = stri_locate(ls_files, regex = begin)[, "end"] + 1),
-			regex = "-", simplify = TRUE)
+
+	if (is.null(run))
+		ls_files = ls_files[!stri_detect(str = ls_files, regex = paste0(begin, "run="))]
+
+	ls_files_split = stri_split(
+		str = stri_sub(str = ls_files,
+			from = stri_locate(ls_files, regex = begin)[, "end"] + 1,
+			to = stri_locate_last(ls_files, regex = "_[[:digit:]].*.rds")[, "start"] - 1),
+		regex = "-", simplify = TRUE)
 	n = length(ls_files)
 	
 	if (format == "ymd") # year month day
@@ -233,7 +243,7 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 ## Common variables
 species = "Picea_abies"
 path = paste0("./", species, "/")
-run = 1
+run = NULL
 info_lastRun = getLastRun(path = path, run = run)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
@@ -269,15 +279,18 @@ lazyPosterior(draws = processError_array, fun = dgamma, filename = paste0(path, 
 	shape = 5.0^2/1, rate = sd_dbh^2*5.0/1)
 
 #### Plot chains main parameters
-lazyTrace(draws = results$draws("potentialGrowth"), filename = paste0(path, "potentialGrowth"), run = run)
-lazyTrace(draws = results$draws("dbh_slope"), filename = paste0(path, "dbh_slope"), run = run)
+lazyTrace(draws = results$draws("potentialGrowth", inc_warmup = TRUE), filename = paste0(path, "potentialGrowth"), run = run)
+lazyTrace(draws = results$draws("dbh_slope", inc_warmup = TRUE), filename = paste0(path, "dbh_slope"), run = run)
 
-lazyTrace(draws = results$draws("pr_slope"), filename = paste0(path, "pr_slope"), run = run)
-lazyTrace(draws = results$draws("pr_slope2"), filename = paste0(path, "pr_slope2"), run = run)
-lazyTrace(draws = results$draws("tas_slope"), filename = paste0(path, "tas_slope"), run = run)
-lazyTrace(draws = results$draws("tas_slope2"), filename = paste0(path, "tas_slope2"), run = run)
+lazyTrace(draws = results$draws("pr_slope", inc_warmup = TRUE), filename = paste0(path, "pr_slope"), run = run)
+lazyTrace(draws = results$draws("pr_slope2", inc_warmup = TRUE), filename = paste0(path, "pr_slope2"), run = run)
+lazyTrace(draws = results$draws("tas_slope", inc_warmup = TRUE), filename = paste0(path, "tas_slope"), run = run)
+lazyTrace(draws = results$draws("tas_slope2", inc_warmup = TRUE), filename = paste0(path, "tas_slope2"), run = run)
 
-lazyTrace(draws = results$draws("competition_slope"), filename = paste0(path, "competition_slope"), run = run)
+lazyTrace(draws = results$draws("competition_slope", inc_warmup = TRUE), filename = paste0(path, "competition_slope"), run = run)
+
+lazyTrace(draws = results$draws("measureError", inc_warmup = TRUE), filename = paste0(path, "measureError_trace"), run = run)
+lazyTrace(draws = results$draws("processError", inc_warmup = TRUE), filename = paste0(path, "processError_trace"), run = run)
 
 #### Posterior predictive checking: Can the model give rise to new observations that properly resemble the original data?
 ## Script to generate new data. Note that 'model' is an unnecessary block here as restart from results. gq stands for generated quantities
