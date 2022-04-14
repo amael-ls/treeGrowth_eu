@@ -11,19 +11,18 @@ options(max.print = 500)
 library(data.table)
 library(cmdstanr)
 library(stringi)
+library(terra)
 
 #### Get parameters for run
 args = commandArgs(trailingOnly = TRUE)
 if (length(args) != 3)
   stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
-# species_id = 46 #! REMOVE THIS LINE WHEN DONE WITH TEST. FAGUS_SYLVATICA
-# species_id = 85 #! REMOVE THIS LINE WHEN DONE WITH TEST. PINUS_SYLVESTRIS
-# species_id = 150 #! REMOVE THIS LINE WHEN DONE WITH TEST. TILIA PLATYPHYLLOS
+# species_id = 52 #! REMOVE THIS LINE WHEN DONE WITH TEST. FAGUS_SYLVATICA
 
-species_id = 71 #! REMOVE THIS LINE WHEN DONE WITH TEST. PICEA_ABIES
+species_id = 79 #! REMOVE THIS LINE WHEN DONE WITH TEST. PICEA_ABIES
 run_id = 1
-max_indiv = 4000
+max_indiv = 8000
 # species_id = as.integer(args[1])
 # run_id = as.integer(args[2])
 # max_indiv = as.integer(args[3])
@@ -197,21 +196,64 @@ normalisation = function(dt, colnames = names(df), folder = "./", filename = "no
 	print(paste0("files containing coefficients saved at: ", folder, filename))
 }
 
+## Function to subsample the data either spatially (the number of individuals might not be the targeted number) or numerically
+subsampling = function(dt, n_indiv_target, mode = "spatial")
+{
+	if (!any(c("spatial", "numeric") %in% mode))
+		stop("Unknown mode, please choose spatial or numeric")
+
+	mean_dbh_beforeSubsample = dt[, mean(dbh)]
+	sd_dbh_beforeSubsample = dt[, sd(dbh)]
+	quantile_beforeSubsample_25_75 = quantile(dt[, dbh], probs = c(0.25, 0.5, 0.75))
+	
+	if (mode == "spatial")
+	{
+		n_indiv_per_plot_avg = dt[, length(unique(tree_id)), by = plot_id][, mean(V1)]
+		n_plots_sampling = round(n_indiv_target/n_indiv_per_plot_avg)
+		coords = unique(dt[, plot_id])
+		sample_plots = sample(x = coords, size = n_plots_sampling)
+
+		setkey(dt, plot_id)
+		dt = dt[sample_plots]
+		setorder(dt, plot_id, tree_id, year)
+	}
+
+	if (mode == "numeric")
+	{
+		setkey(dt, tree_id, plot_id)
+		parents_index = dt[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1]
+		sampled_indices = sort(sample(x = parents_index, size = n_indiv_target, replace = FALSE))
+		chosen_individuals = dt[sampled_indices, .(tree_id, plot_id)]
+		dt = dt[chosen_individuals]
+		setorder(dt, plot_id, tree_id, year)
+	}
+
+	diffAverage = (dt[, mean(dbh)]/mean_dbh_beforeSubsample > 1.05) | (dt[, mean(dbh)]/mean_dbh_beforeSubsample < 0.95)
+	diffSD = (dt[, sd(dbh)]/sd_dbh_beforeSubsample > 1.05) | (dt[, sd(dbh)]/sd_dbh_beforeSubsample < 0.95)
+	diffQuantile_25_75 = any((quantile(dt[, dbh], probs = c(0.25, 0.5, 0.75))/quantile_beforeSubsample_25_75 > 1.05) |
+		(quantile(dt[, dbh], probs = c(0.25, 0.5, 0.75))/quantile_beforeSubsample_25_75 < 0.95))
+
+	n_indiv = unique(dt[, .(tree_id, plot_id)])[, .N]
+
+	return(list(sampledData = dt, diffAverage = diffAverage, diffSD = diffSD, diffQuantile_25_75 = diffQuantile_25_75, n_indiv = n_indiv,
+		n_plots_sampling = ifelse(mode == "spatial", n_plots_sampling, NA)))
+}
+
 ## Function to recompute indices when subsetting
 source("./indices_subsample.R")
 
 #### Load data
 ## Paths
-mainFolder = "/home/amael/project_ssm/inventories/FR IFN/processed data/"
+mainFolder = "/home/amael/project_ssm/inventories/growth/"
 if (!dir.exists(mainFolder))
 	stop(paste0("Folder\n\t", mainFolder, "\ndoes not exist"))
 
-clim_folder = "/home/amael/project_ssm/climateData/Chelsa/yearlyAverage/"
+clim_folder = "/home/amael/project_ssm/inventories/growth/"
 if (!dir.exists(clim_folder))
 	stop(paste0("Folder\n\t", clim_folder, "\ndoes not exist"))
 
 ## Tree inventories data
-treeData = readRDS(paste0(mainFolder, "trees_forest_reshaped.rds"))
+treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshaped.rds"))
 ls_species = sort(treeData[, unique(speciesName_sci)])
 
 if ((species_id < 1) | (species_id > length(ls_species)))
@@ -227,46 +269,49 @@ if (!dir.exists(savingPath))
 	dir.create(savingPath)
 
 ## Subsample tree data
-mean_dbh_beforeSubsample = treeData[, mean(dbh)]
-sd_dbh_beforeSubsample = treeData[, sd(dbh)]
+
 
 # Get parents and children indices
-n_indiv = unique(treeData[, .(tree_id, pointInventory_id)])[, .N]
+n_indiv = unique(treeData[, .(tree_id, plot_id)])[, .N]
 print(paste("Number of individuals:", n_indiv))
 
 if (n_indiv > max_indiv)
 {
 	print("Too many individuals, subsampling")
-	setkey(treeData, tree_id, pointInventory_id)
-	parents_index = treeData[, .I[which.min(year)], by = .(pointInventory_id, tree_id)][, V1]
-	sampled_indices = sort(sample(x = parents_index, size = max_indiv, replace = FALSE))
-	chosen_individuals = treeData[sampled_indices, .(tree_id, pointInventory_id)]
-	treeData = treeData[chosen_individuals]
-	setorder(treeData, pointInventory_id, tree_id, year)
-	n_indiv = unique(treeData[, .(tree_id, pointInventory_id)])[, .N]
-	print(paste("Number of individuals:", n_indiv))
 
-	if ((treeData[, mean(dbh)]/mean_dbh_beforeSubsample > 1.05) | (treeData[, mean(dbh)]/mean_dbh_beforeSubsample < 0.95))
+	checkSampling = subsampling(treeData, n_indiv_target = max_indiv, mode = "spatial")
+	treeData = checkSampling[["sampledData"]]
+	n_indiv = checkSampling[["n_indiv"]]
+
+	if (checkSampling[["diffAverage"]])
 		warning("The subsample does not look representative of the whole data set, check the average")
 
-	if ((treeData[, sd(dbh)]/sd_dbh_beforeSubsample > 1.05) | (treeData[, sd(dbh)]/sd_dbh_beforeSubsample < 0.95))
+	if (checkSampling[["diffSD"]])
 		warning("The subsample does not look representative of the whole data set, check the std. dev")
+
+	if (checkSampling[["diffQuantile_25_75"]])
+		warning("The subsample does not look representative of the whole data set, check the quantiles 0.25, 0.5, and 0.75")
 }
 
 ## Climate
-climate = readRDS(paste0(clim_folder, "FR_reshaped_climate.rds"))
+climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
 
 ## Set-up indices
 indices = indices_subsample(species_id, run_id, treeData, savingPath, mainFolder, clim_folder)
+
+# indices[plot_id == "504259_france"]
+# 504259_france, 1
+indices[plot_id == "880396_france"]
+# 880396_france, 30
 
 # Set everyone to child type
 indices[, type := "child"]
 
 # Correct for those who are parent type
-indices[indices[, .I[which.min(year)], by = .(pointInventory_id, tree_id)][, V1], type := "parent"]
+indices[indices[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1], type := "parent"]
 
 # Compute the number of growing years per individual
-indices[, nbYearsGrowth := max(year) - min(year), by = .(pointInventory_id, tree_id)]
+indices[, nbYearsGrowth := max(year) - min(year), by = .(plot_id, tree_id)]
 
 checkUp = all(indices[, nbYearsGrowth == index_clim_end - index_clim_start])
 if(!checkUp)
@@ -278,7 +323,7 @@ if (indices[, .N] != treeData[, .N])
 n_obs = treeData[, .N]
 print(paste("Number of data:", n_obs))
 
-nbYearsGrowth = unique(indices[, .(tree_id, pointInventory_id, nbYearsGrowth)])[, nbYearsGrowth]
+nbYearsGrowth = unique(indices[, .(tree_id, plot_id, nbYearsGrowth)])[, nbYearsGrowth]
 if (length(nbYearsGrowth) != n_indiv)
 	stop("Dimension mismatch between nbYearsGrowth and n_indiv")
 
@@ -287,9 +332,9 @@ print(paste("Number of latent dbh:", n_hiddenState))
 n_latentGrowth = n_hiddenState - n_indiv
 print(paste("Number of latent growth:", n_latentGrowth))
 
-parents_index = treeData[, .I[which.min(year)], by = .(pointInventory_id, tree_id)][, V1]
-children_index = treeData[, .I[which(year != min(year))], by = .(pointInventory_id, tree_id)][, V1]
-last_child_index = treeData[, .I[which.max(year)], by = .(pointInventory_id, tree_id)][, V1]
+parents_index = treeData[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1]
+children_index = treeData[, .I[which(year != min(year))], by = .(plot_id, tree_id)][, V1]
+last_child_index = treeData[, .I[which.max(year)], by = .(plot_id, tree_id)][, V1]
 
 if (length(parents_index) != n_indiv)
 	stop("Dimension mismatch between parents_index and n_indiv")
