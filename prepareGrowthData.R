@@ -1,9 +1,10 @@
 
 #### Aim of script: Prepare the data for growth (indices for multiple countries)
 ## Comments
-# There are two parts in this program:
+# There are three parts in this program:
 #	1. Standardisation of the growth data among country
-#	2. Extract climate data and check that all the rasters have the same grid:
+#	2. Filter unknown species, check names are standardised, keep only most abundant species (threshold to 2000 measurements)
+#	3. Extract climate data and check that all the rasters have the same grid:
 #		- It is important that all the rasters share the same grid because I am using indices in stan and I need to make sure that indices
 #			and geographic locations are equivalent (i.e., an index designates the same location regardless of the raster)
 #
@@ -35,7 +36,7 @@ std_epsg = data.table(standardised = "EPSG:4326",
 #### Load and reshape data
 ## List processed data
 inputDataFolder = "/bigdata/Inventories/"
-outputFolder = "/home/amael/project_ssm/inventories/"
+outputFolder = "/home/amael/project_ssm/inventories/growth/"
 
 if (!dir.exists(inputDataFolder))
 	stop("Input data folder does not exist")
@@ -85,15 +86,44 @@ growthData = rbindlist(data_ls, idcol = "nfi_id", use.names = TRUE)
 
 ## Add country (note that I remain neutral regarding the status of Bavaria in Germany, although I called the column country...)
 growthData[, country := NFI_ls[NFI == nfi_id, country], by = nfi_id]
-growthData[, plot_id := paste(plot_id, country, sep = "_")]
-
-## Save data
-saveRDS(growthData, paste0(outputFolder, "standardised_european_growth_data.rds"))
+growthData[, plot_id := paste(country, plot_id, sep = "_")]
 
 
 
 #? --------------------------------------------------------------------------------------------------------
-######## PART II: Extract climate data and check that all the rasters have the same grid
+######## PART II: Standardisation of the species names among country, keep only most abundant
+#? --------------------------------------------------------------------------------------------------------
+#### Load species names (obtained from taxa folder, script 'getSpeciesFromIndividual.R')
+ls_species = readRDS("/bigdata/Inventories/Taxa/species_fromIndividuals.rds")
+
+#### Compute how many scientific species names are associated to a single taxon ID. It should be a bijection
+ls_species[, nb := length(unique(speciesName_sci)), by = taxonID]
+
+if (any(ls_species[, nb > 1]))
+{
+	warning("Some taxon ID have more than one associated scientific name. It should be a bijection!")
+	if (ls_species[nb > 1, all(is.na(taxonID))])
+	{
+		warning("The previous warning concerns only NA taxon ID, so it does not matter. These species have been removed")
+		problematicSpecies = ls_species[is.na(taxonID), speciesName_sci]
+		growthData = growthData[!(speciesName_sci %in% problematicSpecies)]
+		ls_species = ls_species[!(speciesName_sci %in% problematicSpecies)]
+		ls_species[, nb := NULL]
+	}
+}
+
+#### Compute number of measurements per species (now that we insured names are standardised), remove species below threshold
+## Data table species - measures
+nbMeasurePerSpecies = growthData[, .N, by = speciesName_sci]
+
+## Filter with threshold
+threshold = 2000
+speciesToKeep = nbMeasurePerSpecies[N > threshold, speciesName_sci]
+
+growthData = growthData[speciesName_sci %in% speciesToKeep]
+
+#? --------------------------------------------------------------------------------------------------------
+######## PART III: Extract climate data and check that all the rasters have the same grid
 #? --------------------------------------------------------------------------------------------------------
 #### Tool functions
 ## Function to check that the selected climate variables all cover the same timespan
@@ -258,7 +288,6 @@ getYears = function(time_range)
 
 #### Load data
 ## Paths
-treeFolder = "/home/amael/project_ssm/inventories/"
 clim_folder = "/bigdata/Predictors/climateChelsa/"
 
 ## Common variables
@@ -274,39 +303,36 @@ if (any(!(selectedVariables %in% availableVariables)))
 	selectedVariables = selectedVariables[selectedVariables %in% availableVariables]
 }
 
-# Tree data
-treeData = readRDS(paste0(treeFolder, "standardised_european_growth_data.rds"))
-
-timespan = timeCover_climate(clim_folder, selected_climate = c("pr", "tas", "tasmin", "tasmax"))
+timespan = timeCover_climate(clim_folder, selected_climate = selectedVariables)
 if (!timespan[["sameTimeCover"]])
 	warning("The climate data from\n\t", clim_folder, "\ndo not all cover the same years for the tested variable. This might involve some NAs and bugs")
 
 #### Subset tree data to cover the same timespan as climate
 ## Remove data from inventories that do not have associated climate data
-if (!all(treeData[, unique(year)] %in% timespan[["available_climate_years"]]))
+if (!all(growthData[, unique(year)] %in% timespan[["available_climate_years"]]))
 	warning(paste0("Some years of climate data are missing. The following years are removed from the tree data: \n- ",
-		paste0(treeData[, unique(year)][!(treeData[, unique(year)] %in% timespan[["available_climate_years"]])], collapse = "\n- ")))
+		paste0(growthData[, unique(year)][!(growthData[, unique(year)] %in% timespan[["available_climate_years"]])], collapse = "\n- ")))
 
-treeData = treeData[year %in% timespan[["available_climate_years"]]]
-treeData[, nb := .N, by = .(nfi_id, plot_id, tree_id)]
-treeData = treeData[nb > 1]
-treeData[, nb := NULL]
+growthData = growthData[year %in% timespan[["available_climate_years"]]]
+growthData[, nb := .N, by = .(nfi_id, plot_id, tree_id)]
+growthData = growthData[nb > 1]
+growthData[, nb := NULL]
 
-setorder(treeData, plot_id, tree_id, year)
-saveRDS(treeData, paste0(treeFolder, "standardised_european_growth_data_reshaped.rds"))
+setorder(growthData, plot_id, tree_id, year)
+saveRDS(growthData, paste0(outputFolder, "standardised_european_growth_data_reshaped.rds"))
 
 ## Save time-space (i.e., time interval covered per plot)
-treeCoords = unique(treeData[, .(plot_id, x, y)])
-index_min = unique(treeData[treeData[, .I[year == min(year)], by = c("plot_id", "x", "y")]$V1,
+treeCoords = unique(growthData[, .(plot_id, x, y)])
+index_min = unique(growthData[growthData[, .I[year == min(year)], by = c("plot_id", "x", "y")]$V1,
 	.(plot_id, x, y, year)])
-index_max = unique(treeData[treeData[, .I[year == max(year)], by = c("plot_id", "x", "y")]$V1,
+index_max = unique(growthData[growthData[, .I[year == max(year)], by = c("plot_id", "x", "y")]$V1,
 	.(plot_id, x, y, year)])
 
 treeCoords[index_min, on = "plot_id", min_year := i.year]
 treeCoords[index_max, on = "plot_id", max_year := i.year]
 treeCoords[, unique_year_id := paste(min_year, max_year, sep = "-")]
 
-saveRDS(treeCoords, paste0(treeFolder, "time_coordinates_growth.rds"))
+saveRDS(treeCoords, paste0(outputFolder, "time_coordinates_growth.rds"))
 
 #### Check raster projection, origin, and extent
 mismatch = checkRasters(selectedVariables = selectedVariables, years = timespan[["available_climate_years"]])
@@ -336,7 +362,7 @@ clim_dt[, year := 0]
 count_clim_var = 0
 
 ## Stack raster, note that raster layer names cannot start by a digit, so R adds 'X'
-treeYears = sort(unique(treeData[, year]))
+treeYears = sort(unique(growthData[, year]))
 for (clim_var in selectedVariables)
 {
 	clim_rs = rast(x = paste0(clim_folder, clim_var, "/", treeYears, ".tif"))
