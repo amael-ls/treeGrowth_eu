@@ -15,7 +15,7 @@
 
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
-	real growth(real dbh0, real precip, real temperature, real totalTreeWeight,
+	real growth(real dbh0, real precip, real temperature, real standBasalArea,
 		real potentialGrowth, real dbh_slope, real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real competition_slope)
 	{
 		/*
@@ -23,7 +23,7 @@ functions {
 				- dbh0: The diameter
 				- precip: The precipitations
 				- temperature: The temperature
-				- totalTreeWeight: The sum of all the tree weights
+				- standBasalArea: Basal area of the stand (i.e., includes all the trees, regardless of the species)
 			
 			It takes the following parameters:
 				- potentialGrowth: The basic growth, when all the explanatory variables are set to zero
@@ -36,22 +36,24 @@ functions {
 		*/
 
 		return (exp(potentialGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
-			tas_slope*temperature + tas_slope2*temperature^2 + competition_slope*totalTreeWeight));
+			tas_slope*temperature + tas_slope2*temperature^2 + competition_slope*standBasalArea));
 	}
 }
 
 data {
 	// Number of data
-	int<lower = 1> n_indiv; // Number of individuals
-	int<lower = 1> n_climate; // Dimension of the climate vector
-	int<lower = 1> n_obs; // Number of trees observations
-	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth
-	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children trees observations = n_obs - n_indiv
+	int<lower = 1> n_indiv; // Total number of individuals (all NFIs together)
+	int<lower = 1> n_climate; // Dimension of the climate vector (all NFIs together)
+	int<lower = 1> n_obs; // Total number of tree observations (all NFIs together)
+	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth (all NFIs together)
+	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children tree observations = n_obs - n_indiv
 	array [n_indiv] int<lower = 2, upper = n_obs> nbYearsGrowth; // Number of years of growth for each individual
+	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 
 	// Indices
-	array [n_indiv] int<lower = 1, upper = n_obs - 1> parents_index; // Index of each parent in the observed data
-	array [n_children] int<lower = 2, upper = n_obs> children_index; // Index of children in the observed data
+	array [n_indiv] int<lower = 1, upper = n_obs - 1> parents_index; // Index of each parent in the 'observation space'
+	array [n_children] int<lower = 2, upper = n_obs> children_index; // Index of children in the 'observation space'
+	array [n_children] int<lower = 2> latent_children_index; // Index of children in the 'latent space'
 	array [n_indiv] int<lower = 1, upper = n_climate - 1> climate_index; // Index of the climate associated to each parent
 
 	// Observations
@@ -74,15 +76,14 @@ data {
 			1. the area of the plot (disc with a radius of 6, 9 or 15 metres depending on the size class)
 			2. the proximity to the boundary (rectification of the probability of drawing trees at the edge)
 	*/
-	vector<lower = 0>[n_indiv] totalTreeWeight; // Sum of the tree weights for a given plot at a given tieme
+	vector<lower = 0>[n_indiv] standBasalArea; // Sum of the tree basal area for a given plot at a given time
 }
 
 transformed data {
 	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
-	vector[n_indiv] normalised_totalTreeWeight = (totalTreeWeight - mean(totalTreeWeight))/sd(totalTreeWeight);
-	// Normalised and centred totalTreeWeight
+	vector[n_indiv] normalised_standBasalArea = (standBasalArea - mean(standBasalArea))/sd(standBasalArea); // Normalised and centred BA
 }
 
 parameters {
@@ -98,19 +99,33 @@ parameters {
 
 	real competition_slope;
 
-	real<lower = 0.5/sd_dbh^2> processError;
-	real<lower = 0.1/sqrt(12)*25.4/sd_dbh> measureError; // Constrained by default, see appendix D Eitzel for the calculus
+	real<lower = 0.5/sd_dbh^2> sigmaProc; // /!\ Variance of a gamma distrib /!\
+	// The observation error is constrained by default, see appendix D Eitzel for the calculus.
+	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // /!\ Std. Dev. of a normal distrib /!\
+	// I decided that the extreme error would be at least twice the observation error. Rüger 2011 found it is around 8 times larger
+	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // /!\ Std. Dev. of a normal distrib /!\
+	
+	array [n_inventories] real<lower = 0, upper = 1> p; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
-	vector<lower = 0.1/sd_dbh, upper = 2000/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
+	vector<lower = 0.1/sd_dbh, upper = 3500/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
 model {
 	// Declare variables
-	int growth_counter = 1;
+	int growth_counter = 1; // Counter in the latent space
+	int children_counter = 1; // Counter in the 'observation space' for chidlren
 	real expected_growth;
-	vector [n_obs - n_indiv] latent_dbh_children;
+	real temporary;
+	vector [n_children] latent_dbh_children;
 
+	int min_i_t = 10000000;
+	int min_i = 10000000;
+	int max_i_t = 0;
+	int max_i = 0;
+	int mamax = 0;
+
+	print("******************************************");
 	// Priors
 	target += normal_lpdf(potentialGrowth | 0, 100);
 	target += normal_lpdf(dbh_slope | 0, 5);
@@ -128,7 +143,7 @@ model {
 		Let m be the mean of the gamma distribution, and v its variance (see comment at the beginning of this file to get shape and rate from
 		mean and variance).
 
-		For instance, for the measurement error, which is the standard deviation of the observation around the latent state, we have:
+		For instance, for the routine measure error, which is the standard deviation of the observation around the latent state, we have:
 		m = sqrt(3)
 		v = 0.15
 
@@ -140,34 +155,82 @@ model {
 		shape = (m/var(dbh))^2 / (v/var(dbh)^2) = m^2/v
 		rate = (m/var(dbh))    / (v/var(dbh)^2) = var(dbh) * m/v
 	*/
-	target += gamma_lpdf(processError | 5.0^2/1, variance(Yobs)*5.0/1); // Remember that processError is a variance, not a sd!
-	target += gamma_lpdf(measureError | 3.0/0.001, sd_dbh*sqrt(3)/0.001); // <=> measurement error (sd) = sqrt(3) mm
+	target += gamma_lpdf(sigmaProc | 5.0^2/1, variance(Yobs)*5.0/1); // Remember that sigmaProc is a variance, not a sd!
+	target += gamma_lpdf(sigmaObs | 3.0/0.15, sd_dbh*sqrt(3)/0.15); // <=> routine measurement error (sd) = sqrt(3) mm
+	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
+
+	target += beta_lpdf(p | 48.67, 1714.84);
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
 	{
-		latent_dbh_children[i] = latent_dbh_parents[i];
+		temporary = latent_dbh_parents[i];
 		for (j in 1:nbYearsGrowth[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
 			// Process model
-			expected_growth = growth(latent_dbh_children[i], normalised_precip[climate_index[i] + j - 1],
-				normalised_tas[climate_index[i] + j - 1], normalised_totalTreeWeight[i],
+			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
+				normalised_tas[climate_index[i] + j - 1], normalised_standBasalArea[i],
 				potentialGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, competition_slope);
-			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/processError, expected_growth/processError);
+			// target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
 
-			// Dbh at time t + 1, only the last (i.e., child) dbh is recorded
-			latent_dbh_children[i] += latent_growth[growth_counter];
+			// Dbh at time t + 1
+			temporary += latent_growth[growth_counter];
+
 			growth_counter += 1;
+
+			// Only the relevant (i.e., children) dbh are recorded
+			if (growth_counter == latent_children_index[children_counter])
+			{
+				if (is_nan(temporary) || is_inf(temporary))
+				{
+					if (i < min_i_t)
+						min_i_t = i;
+
+					if (i > max_i_t)
+						max_i_t = i;
+				}
+				latent_dbh_children[children_counter] = temporary;
+				children_counter += 1;
+
+				if (mamax < children_counter)
+					mamax = children_counter;
+			}
 		}
 	}
 	
 	// Prior on initial hidden state: This is a diffuse initialisation
-	target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 2000/sd_dbh); // Remember that the dbh is in mm and standardised
+	// target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 3500/sd_dbh); // Remember that the dbh is in mm and standardised
 	
 	// --- Observation model
-	// Compare true (i.e., hidden or latent) parents with observed parents
-	target += normal_lpdf(normalised_Yobs[parents_index] | latent_dbh_parents, measureError);
+	for (k in 1:n_inventories)
+	{
+		// Compare true (i.e., hidden or latent) parents with observed parents
+		for (i in 1:n_indiv)
+		{
+			// target += (1 - p[k]) * normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]) +
+			// 	p[k] * normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]);
+		}
 
-	// Compare true (i.e., hidden or latent) children with observed children
-	target += normal_lpdf(normalised_Yobs[children_index] | latent_dbh_children, measureError);
+		// Compare true (i.e., hidden or latent) children with observed children
+		for (i in 1:n_children)
+		{
+			if (is_nan(latent_dbh_children[i]) || is_inf(latent_dbh_children[i]))
+			{
+				if (i < min_i)
+					min_i = i;
+
+				if (i > max_i)
+					max_i = i;
+			}
+			
+			// target += (1 - p[k]) * normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], sigmaObs[k]) +
+			// 	p[k] * normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], etaObs[k]);
+		}
+	}
+	print ("min children id temp = ", min_i_t);
+	print ("min children id = ", min_i);
+	print ("max children id temp = ", max_i_t);
+	print ("max children id = ", max_i);
+	print ("mamax = ", mamax);
+	print("------------------------------------------");
 }
