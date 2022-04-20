@@ -55,6 +55,11 @@ data {
 	array [n_children] int<lower = 2, upper = n_obs> children_index; // Index of children in the 'observation space'
 	array [n_children] int<lower = 2> latent_children_index; // Index of children in the 'latent space'
 	array [n_indiv] int<lower = 1, upper = n_climate - 1> climate_index; // Index of the climate associated to each parent
+	
+	array [n_inventories] int<lower = 1, upper = n_indiv - 1> start_nfi_parents; // Starting point of each NFI for parents
+	array [n_inventories] int<lower = 2, upper = n_indiv> end_nfi_parents; // Ending point of each NFI for parents
+	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_children; // Starting point of each NFI for children
+	array [n_inventories] int<lower = 1, upper = n_children> end_nfi_children; // Ending point of each NFI for children
 
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
@@ -107,7 +112,7 @@ parameters {
 	
 	array [n_inventories] real<lower = 0, upper = 1> p; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
-	vector<lower = 0.1/sd_dbh, upper = 3500/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
+	vector<lower = 0.1/sd_dbh, upper = 3000/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
@@ -115,17 +120,11 @@ model {
 	// Declare variables
 	int growth_counter = 1; // Counter in the latent space
 	int children_counter = 1; // Counter in the 'observation space' for chidlren
+	int record_children_counter = 1; // Counter to know when we should register the current dbh value into latent_dbh_children
 	real expected_growth;
 	real temporary;
 	vector [n_children] latent_dbh_children;
 
-	int min_i_t = 10000000;
-	int min_i = 10000000;
-	int max_i_t = 0;
-	int max_i = 0;
-	int mamax = 0;
-
-	print("******************************************");
 	// Priors
 	target += normal_lpdf(potentialGrowth | 0, 100);
 	target += normal_lpdf(dbh_slope | 0, 5);
@@ -171,66 +170,40 @@ model {
 			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
 				normalised_tas[climate_index[i] + j - 1], normalised_standBasalArea[i],
 				potentialGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, competition_slope);
-			// target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
+			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
 
 			// Dbh at time t + 1
 			temporary += latent_growth[growth_counter];
 
 			growth_counter += 1;
+			record_children_counter += 1;
 
 			// Only the relevant (i.e., children) dbh are recorded
-			if (growth_counter == latent_children_index[children_counter])
+			if (record_children_counter == latent_children_index[children_counter])
 			{
-				if (is_nan(temporary) || is_inf(temporary))
-				{
-					if (i < min_i_t)
-						min_i_t = i;
-
-					if (i > max_i_t)
-						max_i_t = i;
-				}
 				latent_dbh_children[children_counter] = temporary;
 				children_counter += 1;
-
-				if (mamax < children_counter)
-					mamax = children_counter;
 			}
 		}
+		record_children_counter += 1; // The growth counter stops one year earlier! Indeed 3 measurements implies only 2 growing years!
 	}
 	
 	// Prior on initial hidden state: This is a diffuse initialisation
-	// target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 3500/sd_dbh); // Remember that the dbh is in mm and standardised
+	target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 3000/sd_dbh); // Remember that the dbh is in mm and standardised
 	
 	// --- Observation model
 	for (k in 1:n_inventories)
 	{
-		// Compare true (i.e., hidden or latent) parents with observed parents
-		for (i in 1:n_indiv)
-		{
-			// target += (1 - p[k]) * normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]) +
-			// 	p[k] * normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]);
-		}
+		// Compare true (i.e., hidden or latent) parents with observed parents per chunk (i.e. per country/NFI)
+		target += (1 - p[k]) * normal_lpdf(normalised_Yobs[parents_index[start_nfi_parents[k]:end_nfi_parents[k]]] |
+				latent_dbh_parents[start_nfi_parents[k]:end_nfi_parents[k]], sigmaObs[k]) +
+			p[k] * normal_lpdf(normalised_Yobs[parents_index[start_nfi_parents[k]:end_nfi_parents[k]]] |
+				latent_dbh_parents[start_nfi_parents[k]:end_nfi_parents[k]], etaObs[k]);
 
-		// Compare true (i.e., hidden or latent) children with observed children
-		for (i in 1:n_children)
-		{
-			if (is_nan(latent_dbh_children[i]) || is_inf(latent_dbh_children[i]))
-			{
-				if (i < min_i)
-					min_i = i;
-
-				if (i > max_i)
-					max_i = i;
-			}
-			
-			// target += (1 - p[k]) * normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], sigmaObs[k]) +
-			// 	p[k] * normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], etaObs[k]);
-		}
+		// Compare true (i.e., hidden or latent) children with observed children per chunk (i.e. per country/NFI)
+		target += (1 - p[k]) * normal_lpdf(normalised_Yobs[children_index[start_nfi_children[k]:end_nfi_children[k]]] |
+				latent_dbh_children[start_nfi_children[k]:end_nfi_children[k]], sigmaObs[k]) +
+			p[k] * normal_lpdf(normalised_Yobs[children_index[start_nfi_children[k]:end_nfi_children[k]]] |
+				latent_dbh_children[start_nfi_children[k]:end_nfi_children[k]], etaObs[k]);
 	}
-	print ("min children id temp = ", min_i_t);
-	print ("min children id = ", min_i);
-	print ("max children id temp = ", max_i_t);
-	print ("max children id = ", max_i);
-	print ("mamax = ", mamax);
-	print("------------------------------------------");
 }
