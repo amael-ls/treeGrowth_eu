@@ -120,7 +120,19 @@ nbMeasurePerSpecies = growthData[, .N, by = speciesName_sci]
 threshold = 2000
 speciesToKeep = nbMeasurePerSpecies[N > threshold, speciesName_sci]
 
+print(paste(ls_species[, .N] - length(speciesToKeep), "species will be remove as their number of individuals is below", threshold))
+print(paste("This correspond to", round(100*growthData[!(speciesName_sci %in% speciesToKeep), .N]/growthData[, .N], 2), "% of the data"))
+
 growthData = growthData[speciesName_sci %in% speciesToKeep]
+
+## Add column taxonID to growth data. This code is obtained from the 'world flora online, WFO'
+growthData = merge.data.table(x = growthData, y = unique(ls_species[, .(speciesName_sci, taxonID)]), by = "speciesName_sci", all.x = TRUE)
+
+if (any(growthData[, is.na(taxonID)]))
+{
+	warning(paste0(round(100*growthData[is.na(taxonID), .N]/growthData[, .N], 3), "% of the data have an unknown taxon. These are removed"))
+	growthData = growthData[!is.na(taxonID)]
+}
 
 #? --------------------------------------------------------------------------------------------------------
 ######## PART III: Extract climate data and check that all the rasters have the same grid
