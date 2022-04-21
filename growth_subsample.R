@@ -17,9 +17,9 @@ args = commandArgs(trailingOnly = TRUE)
 if (length(args) != 3)
   stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
-species_id = 17 # as.integer(args[1])
-run_id = 1 # as.integer(args[2])
-max_indiv = 8000 # as.integer(args[3])
+species_id = as.integer(args[1]) # 17
+run_id = as.integer(args[2]) # 1
+max_indiv = as.integer(args[3]) # 8000
 
 set.seed(run_id)
 
@@ -277,6 +277,9 @@ if (n_indiv > max_indiv)
 	if (checkSampling[["diffQuantile_25_75"]])
 		warning("The subsample does not look representative of the whole data set, check the quantiles 0.25, 0.5, and 0.75")
 }
+
+if ((!subsamplingActivated) & (run_id != 1))
+	stop("Running the model only once (i.e., with run_id = 1) is enough: There is no subsampling")
 
 n_inventories = length(treeData[, unique(nfi_id)])
 
