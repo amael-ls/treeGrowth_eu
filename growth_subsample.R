@@ -354,6 +354,14 @@ if (n_inventories > 1)
 end_nfi_parents[n_inventories] = n_indiv
 end_nfi_children[n_inventories] = n_obs - n_indiv # Which is n_children
 
+if (n_inventories == 1)
+{
+	start_nfi_parents = as.array(start_nfi_parents)
+	end_nfi_parents = as.array(end_nfi_parents)
+	start_nfi_children = as.array(start_nfi_children)
+	end_nfi_children = as.array(end_nfi_children)
+}
+
 #### Compute and save normalising constants
 normalisation(dt = treeData, colnames = "dbh", folder = savingPath, filename = paste0(run_id, "_dbh_normalisation.rds"))
 normalisation(dt = climate, colnames = c("pr", "tas"), folder = savingPath, filename = paste0(run_id, "_climate_normalisation.rds"),
