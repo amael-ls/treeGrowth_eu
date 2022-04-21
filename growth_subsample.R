@@ -11,21 +11,17 @@ options(max.print = 500)
 library(data.table)
 library(cmdstanr)
 library(stringi)
-library(terra)
 
 #### Get parameters for run
 args = commandArgs(trailingOnly = TRUE)
 if (length(args) != 3)
   stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
-# species_id = 52 #! REMOVE THIS LINE WHEN DONE WITH TEST. FAGUS_SYLVATICA
+species_id = 17 # as.integer(args[1])
+run_id = 1 # as.integer(args[2])
+max_indiv = 8000 # as.integer(args[3])
 
-species_id = 79 #! REMOVE THIS LINE WHEN DONE WITH TEST. PICEA_ABIES
-run_id = 1
-max_indiv = 8000
-# species_id = as.integer(args[1])
-# run_id = as.integer(args[2])
-# max_indiv = as.integer(args[3])
+set.seed(run_id)
 
 #### Tool function
 ## Initiate Y_gen with reasonable values (by default, stan would generate them between 0 and 2---constraint Y_gen > 0)
@@ -55,6 +51,12 @@ init_fun = function(...)
 		average_yearlyGrowth[average_yearlyGrowth == 0] = 0.5
 	}
 
+	if (any(average_yearlyGrowth < 0))
+	{
+		warning("Some average yearly growth were negative. They have been replaced by 0.1")
+		average_yearlyGrowth[average_yearlyGrowth < 0] = 0.1
+	}
+
 	n_indiv = length(dbh_parents)
 	Y_gen = rgamma(n_indiv, dbh_parents^2/0.5, dbh_parents/0.5) # Average = dbh_parents, variance = 0.5
 
@@ -74,19 +76,6 @@ init_fun = function(...)
 		warning("Some generated latent growth were 0. There have been replaced by 0.1 (before standardising)")
 		latent_growth_gen[latent_growth_gen == 0] = 0.1
 	}
-	
-	# All the following initialisations are based on a previous run on Tilia platyphyllos. The set sd is 4 times the estimated sd
-	potentialGrowth = rnorm(n = 1, mean = -3.98, sd = 0.08)
-	dbh_slope = rnorm(n = 1, mean = 0.10, sd = 0.04)
-	
-	pr_slope = rnorm(n = 1, mean = -0.09, sd = 0.04)
-	pr_slope2 = rnorm(n = 1, mean = 0, sd = 0.04)
-	tas_slope = rnorm(n = 1, mean = -0.09, sd = 0.04)
-	tas_slope2 = rnorm(n = 1, mean = 0, sd = 0.04)
-	competition_slope = rnorm(n = 1, mean = -0.09, sd = 0.04)
-
-	measureError = rgamma(n = 1, shape = 0.011^2/0.0015, rate = 0.011/0.0015)
-	processError = rgamma(n = 1, shape = 0.0009^2/0.00012, rate = 0.0009/0.00012)
 
 	# Normalise dbh
 	if (normalise)
@@ -97,11 +86,7 @@ init_fun = function(...)
 		latent_growth_gen = latent_growth_gen/sd_dbh
 	}
 
-	return(list(latent_dbh_parents = Y_gen, latent_growth = latent_growth_gen,
-		potentialGrowth = potentialGrowth, dbh_slope = dbh_slope,
-		pr_slope = pr_slope, pr_slope2 = pr_slope2,
-		tas_slope = tas_slope, tas_slope2 = tas_slope2,
-		competition_slope = competition_slope))
+	return(list(latent_dbh_parents = Y_gen, latent_growth = latent_growth_gen))
 }
 
 ## Function to compute the mean and sd of given variables in a data table
@@ -236,7 +221,8 @@ subsampling = function(dt, n_indiv_target, mode = "spatial")
 	n_indiv = unique(dt[, .(tree_id, plot_id)])[, .N]
 
 	return(list(sampledData = dt, diffAverage = diffAverage, diffSD = diffSD, diffQuantile_25_75 = diffQuantile_25_75, n_indiv = n_indiv,
-		n_plots_sampling = ifelse(mode == "spatial", n_plots_sampling, NA)))
+		n_plots_sampling = ifelse(mode == "spatial", n_plots_sampling, NA), mean_dbh_beforeSubsample = mean_dbh_beforeSubsample,
+		sd_dbh_beforeSubsample = sd_dbh_beforeSubsample, quantile_beforeSubsample_25_75 = quantile_beforeSubsample_25_75))
 }
 
 ## Function to recompute indices when subsetting
@@ -268,16 +254,15 @@ savingPath = paste0("./", species, "/")
 if (!dir.exists(savingPath))
 	dir.create(savingPath)
 
-## Subsample tree data
-
-
-# Get parents and children indices
+## Subsample tree data if necessary
 n_indiv = unique(treeData[, .(tree_id, plot_id)])[, .N]
 print(paste("Number of individuals:", n_indiv))
+subsamplingActivated = FALSE
 
 if (n_indiv > max_indiv)
 {
 	print("Too many individuals, subsampling")
+	subsamplingActivated = TRUE
 
 	checkSampling = subsampling(treeData, n_indiv_target = max_indiv, mode = "spatial")
 	treeData = checkSampling[["sampledData"]]
@@ -293,16 +278,13 @@ if (n_indiv > max_indiv)
 		warning("The subsample does not look representative of the whole data set, check the quantiles 0.25, 0.5, and 0.75")
 }
 
-## Climate
+n_inventories = length(treeData[, unique(nfi_id)])
+
+## Read climate
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
 
 ## Set-up indices
 indices = indices_subsample(species_id, run_id, treeData, savingPath, mainFolder, clim_folder)
-
-# indices[plot_id == "504259_france"]
-# 504259_france, 1
-indices[plot_id == "880396_france"]
-# 880396_france, 30
 
 # Set everyone to child type
 indices[, type := "child"]
@@ -313,7 +295,7 @@ indices[indices[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1], type := 
 # Compute the number of growing years per individual
 indices[, nbYearsGrowth := max(year) - min(year), by = .(plot_id, tree_id)]
 
-checkUp = all(indices[, nbYearsGrowth == index_clim_end - index_clim_start])
+checkUp = all(indices[, nbYearsGrowth <= index_clim_end - index_clim_start])
 if(!checkUp)
 	stop("Suspicious indexing. Review the indices data.table")
 
@@ -327,11 +309,13 @@ nbYearsGrowth = unique(indices[, .(tree_id, plot_id, nbYearsGrowth)])[, nbYearsG
 if (length(nbYearsGrowth) != n_indiv)
 	stop("Dimension mismatch between nbYearsGrowth and n_indiv")
 
+# Compute the number of latent states (hiddenState is for the number of latent dbh)
 n_hiddenState = indices[.N, index_gen]
 print(paste("Number of latent dbh:", n_hiddenState))
 n_latentGrowth = n_hiddenState - n_indiv
 print(paste("Number of latent growth:", n_latentGrowth))
 
+# Define parents, children, and last child
 parents_index = treeData[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1]
 children_index = treeData[, .I[which(year != min(year))], by = .(plot_id, tree_id)][, V1]
 last_child_index = treeData[, .I[which.max(year)], by = .(plot_id, tree_id)][, V1]
@@ -342,10 +326,29 @@ if (length(parents_index) != n_indiv)
 if (length(children_index) != n_obs - n_indiv)
 	stop("Dimension mismatch between children_index and number of children")
 
-# if (length(not_parent_index) != indices[.N, index_gen] - n_indiv)
-# 	stop("Dimension mismatch between not_parent_index, n_hiddenState, and n_indiv")
+# Define for each NFI at which individual they start and end (given treeData is sorted by plot_id, with the country first)!
+start_nfi_parents = integer(n_inventories)
+end_nfi_parents = integer(n_inventories)
+start_nfi_children = integer(n_inventories)
+end_nfi_children = integer(n_inventories)
 
-#### Compute and save normalising constantes
+ls_countries = treeData[, unique(country)]
+start_nfi_parents[1] = 1
+start_nfi_children[1] = 1
+
+for (k in 1:(n_inventories - 1))
+{
+	end_nfi_parents[k] = start_nfi_parents[k] + indices[(type == "parent") & (stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
+	start_nfi_parents[k + 1] = end_nfi_parents[k] + 1
+
+	end_nfi_children[k] = start_nfi_children[k] + indices[(type == "child") & (stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
+	start_nfi_children[k + 1] = end_nfi_children[k] + 1
+}
+
+end_nfi_parents[n_inventories] = n_indiv
+end_nfi_children[n_inventories] = n_obs - n_indiv # Which is n_children
+
+#### Compute and save normalising constants
 normalisation(dt = treeData, colnames = "dbh", folder = savingPath, filename = paste0(run_id, "_dbh_normalisation.rds"))
 normalisation(dt = climate, colnames = c("pr", "tas"), folder = savingPath, filename = paste0(run_id, "_climate_normalisation.rds"),
 	indices = indices, col_ind_start = "index_clim_start", col_ind_end = "index_clim_end")
@@ -379,19 +382,29 @@ stanData = list(
 	# Number of data
 	n_indiv = n_indiv, # Number of individuals
 	n_climate = climate[, .N], # Dimension of the climate vector
+	n_plots = length(treeData[, unique(plot_id)]), # Number of plots (all NFIs together)
 	n_obs = n_obs, # Number of trees observations
-	n_latentGrowth = n_hiddenState - n_indiv, # Dimension of the state space vector for latent growth
+	n_latentGrowth = n_latentGrowth, # Dimension of the state space vector for latent growth
 	n_children = n_obs - n_indiv, # Number of children trees observations = n_obs - n_indiv
 	nbYearsGrowth = nbYearsGrowth, # Number of years for each individual
+	n_inventories = n_inventories, # Number of forest inventories involving different measurement errors in the data
 
 	# Indices
-	parents_index = parents_index, # Index of each parent in the observed data
-	children_index = children_index, # Index of children in the observed data
+	parents_index = parents_index, # Index of each parent in the 'observation space'
+	children_index = children_index, # Index of children in the 'observation space'
+	latent_children_index = indices[type == "child", index_gen], # Index of children in the 'latent space'
 	climate_index = indices[type == "parent", index_clim_start], # Index of the climate associated to each parent
+
+	start_nfi_parents = start_nfi_parents, # Starting point of each NFI for parents
+	end_nfi_parents = end_nfi_parents, # Ending point of each NFI for parents
+	start_nfi_children = start_nfi_children, # Starting point of each NFI for children
+	end_nfi_children = end_nfi_children, # Ending point of each NFI for children
+
+	plot_index = unique(indices[, .(tree_id, plot_id, plot_index)])[, plot_index], # Indicates to which plot individuals belong to
 
 	# Observations
 	Yobs = treeData[, dbh],
-	sd_dbh = sd_dbh_beforeSubsample,
+	sd_dbh = ifelse(subsamplingActivated, checkSampling[["sd_dbh_beforeSubsample"]], treeData[, sd(dbh)]),
 
 	# Explanatory variables
 	precip = climate[, pr], # Annual precipitations (sum over 12 months)
@@ -402,7 +415,7 @@ stanData = list(
 	tas_mu = climate_mu_sd[variable == "tas", mu],
 	tas_sd = climate_mu_sd[variable == "tas", sd],
 
-	totalTreeWeight = treeData[parents_index, totalTreeWeight] # Includes also the weight of other species!
+	standBasalArea = treeData[parents_index, standBasalArea] # Computed accounting for all the species!
 )
 
 saveRDS(object = stanData, file = paste0(savingPath, run_id, "_stanData.rds"))
@@ -423,5 +436,3 @@ results$cmdstan_diagnose()
 
 results$print(c("lp__", "potentialGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"competition_slope", "measureError", "processError"))
-
-
