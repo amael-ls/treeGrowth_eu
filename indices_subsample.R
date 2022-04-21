@@ -69,8 +69,7 @@ indices_subsample = function(species_id, run_id, treeData, savingPath, mainFolde
 
 	## Function to create the individual indices to match with climate (stan)
 	# This function will modify the indices data table by reference and avoiding a copy.
-	# The clim_var does not matter, all the rasters have the same grid, hence the same indices
-	indices_climate = function(indices_dt, climate, time_space, clim_var = "pr")
+	indices_climate = function(indices_dt, climate, time_space)
 	{
 		for (plot in indices_dt[, unique(plot_id)])
 		{
@@ -106,6 +105,9 @@ indices_subsample = function(species_id, run_id, treeData, savingPath, mainFolde
 
 	## Remove the zeros #! (because of a quick and dirty solution in indices_state_space, I might optimise this code later)
 	indices = indices[index_gen != 0]
+
+	## Add an index per plot
+	indices[, plot_index := .GRP, by = plot_id]
 
 	## Saving indices for the chosen species
 	saveRDS(indices, paste0(savingPath, run_id, "_indices.rds"))
