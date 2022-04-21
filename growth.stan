@@ -16,7 +16,7 @@
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
 	real growth(real dbh0, real precip, real temperature, real standBasalArea,
-		real potentialGrowth, real dbh_slope, real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real competition_slope)
+		real averageGrowth, real dbh_slope, real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real competition_slope)
 	{
 		/*
 			It takes the following variables:
@@ -26,7 +26,7 @@ functions {
 				- standBasalArea: Basal area of the stand (i.e., includes all the trees, regardless of the species)
 			
 			It takes the following parameters:
-				- potentialGrowth: The basic growth, when all the explanatory variables are set to zero
+				- averageGrowth: The basic growth, when all the explanatory variables are set to zero
 				- dbh_slope: The slope for dbh
 				- pr_slope: The slope for precipitation
 				- pr_slope2: The slope for precipitation (squared term)
@@ -35,7 +35,7 @@ functions {
 				- competition_slope: The slope for competition
 		*/
 
-		return (exp(potentialGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
+		return (exp(averageGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
 			tas_slope*temperature + tas_slope2*temperature^2 + competition_slope*standBasalArea));
 	}
 }
@@ -44,6 +44,7 @@ data {
 	// Number of data
 	int<lower = 1> n_indiv; // Total number of individuals (all NFIs together)
 	int<lower = 1> n_climate; // Dimension of the climate vector (all NFIs together)
+	int<lower = 1, upper = n_indiv> n_plots; // Number of plots (all NFIs together)
 	int<lower = 1> n_obs; // Total number of tree observations (all NFIs together)
 	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth (all NFIs together)
 	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children tree observations = n_obs - n_indiv
@@ -60,6 +61,8 @@ data {
 	array [n_inventories] int<lower = 2, upper = n_indiv> end_nfi_parents; // Ending point of each NFI for parents
 	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_children; // Starting point of each NFI for children
 	array [n_inventories] int<lower = 1, upper = n_children> end_nfi_children; // Ending point of each NFI for children
+	
+	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
@@ -92,8 +95,8 @@ transformed data {
 }
 
 parameters {
-	// Parameters
-	real potentialGrowth; // Growth when all the explanatory variables are set to 0
+	// Parameters for growth function
+	array [n_plots] real averageGrowth; // Growth (grouped by plots) when all the explanatory variables are set to 0
 	real dbh_slope;
 
 	real pr_slope;
@@ -104,15 +107,27 @@ parameters {
 
 	real competition_slope;
 
-	real<lower = 0.5/sd_dbh^2> sigmaProc; // /!\ Variance of a gamma distrib /!\
-	// The observation error is constrained by default, see appendix D Eitzel for the calculus.
-	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // /!\ Std. Dev. of a normal distrib /!\
-	// I decided that the extreme error would be at least twice the observation error. Rüger 2011 found it is around 8 times larger
-	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // /!\ Std. Dev. of a normal distrib /!\
+	// Hyper parameters for growth function
+	real averageGrowth_mu;
+	real<lower = 0> averageGrowth_sd;
+
+	// Errors (observation and process)
+	// --- Process error, which is the variance of a gamma distrib /!\
+	real<lower = 0.5/sd_dbh^2> sigmaProc;
+
+	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
+	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
+
+	// --- Extreme error, by default at least twice the observation error. Rüger 2011 found it is around 8 times larger
+	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
 	
 	array [n_inventories] real<lower = 0, upper = 1> p; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
+	// Latent states
+	// --- Parent (i.e., primary) dbh
 	vector<lower = 0.1/sd_dbh, upper = 3000/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
+
+	// --- Growth
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
@@ -126,7 +141,9 @@ model {
 	vector [n_children] latent_dbh_children;
 
 	// Priors
-	target += normal_lpdf(potentialGrowth | 0, 100);
+	// --- Growth parameters
+	target += normal_lpdf(averageGrowth | averageGrowth_mu, averageGrowth_sd);
+	
 	target += normal_lpdf(dbh_slope | 0, 5);
 	
 	target += normal_lpdf(pr_slope | 0, 5);
@@ -137,6 +154,11 @@ model {
 
 	target += normal_lpdf(competition_slope | 0, 5);
 
+	// --- Hyper parameters
+	target += normal_lpdf(averageGrowth_mu | 0, 1000);
+	target += gamma_lpdf(averageGrowth_sd | 1.0/100, 1.0/100);
+
+	// --- Errors
 	/*
 		A note on the two folowwing priors:
 		Let m be the mean of the gamma distribution, and v its variance (see comment at the beginning of this file to get shape and rate from
@@ -169,7 +191,7 @@ model {
 			// Process model
 			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
 				normalised_tas[climate_index[i] + j - 1], normalised_standBasalArea[i],
-				potentialGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, competition_slope);
+				averageGrowth[plot_index[i]], dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, competition_slope);
 			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
 
 			// Dbh at time t + 1
