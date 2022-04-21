@@ -339,13 +339,16 @@ ls_countries = treeData[, unique(country)]
 start_nfi_parents[1] = 1
 start_nfi_children[1] = 1
 
-for (k in 1:(n_inventories - 1))
+if (n_inventories > 1)
 {
-	end_nfi_parents[k] = start_nfi_parents[k] + indices[(type == "parent") & (stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
-	start_nfi_parents[k + 1] = end_nfi_parents[k] + 1
+	for (k in 1:(n_inventories - 1))
+	{
+		end_nfi_parents[k] = start_nfi_parents[k] + indices[(type == "parent") & (stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
+		start_nfi_parents[k + 1] = end_nfi_parents[k] + 1
 
-	end_nfi_children[k] = start_nfi_children[k] + indices[(type == "child") & (stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
-	start_nfi_children[k + 1] = end_nfi_children[k] + 1
+		end_nfi_children[k] = start_nfi_children[k] + indices[(type == "child") & (stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
+		start_nfi_children[k + 1] = end_nfi_children[k] + 1
+	}
 }
 
 end_nfi_parents[n_inventories] = n_indiv
