@@ -238,6 +238,10 @@ clim_folder = "/home/amael/project_ssm/inventories/growth/"
 if (!dir.exists(clim_folder))
 	stop(paste0("Folder\n\t", clim_folder, "\ndoes not exist"))
 
+soil_folder = "/home/amael/project_ssm/inventories/growth/"
+if (!dir.exists(clim_folder))
+	stop(paste0("Folder\n\t", soil_folder, "\ndoes not exist"))
+
 ## Tree inventories data
 treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshaped.rds"))
 ls_species = sort(treeData[, unique(speciesName_sci)])
@@ -285,6 +289,9 @@ n_inventories = length(treeData[, unique(nfi_id)])
 
 ## Read climate
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
+
+## Read soil data (pH)
+soil = readRDS(paste0(clim_folder, "europe_reshaped_soil.rds"))
 
 ## Set-up indices
 indices = indices_subsample(species_id, run_id, treeData, savingPath, mainFolder, clim_folder)
@@ -366,8 +373,10 @@ if (n_inventories == 1)
 normalisation(dt = treeData, colnames = "dbh", folder = savingPath, filename = paste0(run_id, "_dbh_normalisation.rds"))
 normalisation(dt = climate, colnames = c("pr", "tas"), folder = savingPath, filename = paste0(run_id, "_climate_normalisation.rds"),
 	indices = indices, col_ind_start = "index_clim_start", col_ind_end = "index_clim_end")
+normalisation(dt = soil, colnames = "ph", folder = savingPath, filename = paste0(run_id, "_ph_normalisation.rds"))
 
 climate_mu_sd = readRDS(paste0(savingPath, run_id, "_climate_normalisation.rds"))
+ph_mu_sd = readRDS(paste0(savingPath, run_id, "_ph_normalisation.rds"))
 
 #### Stan model
 ## Define stan variables
@@ -429,6 +438,10 @@ stanData = list(
 	tas_mu = climate_mu_sd[variable == "tas", mu],
 	tas_sd = climate_mu_sd[variable == "tas", sd],
 
+	ph = soil[, ph], # pH of the soil measured with CaCl2
+	ph_mu = ph_mu_sd[variable == "ph", mu],
+	ph_sd = ph_mu_sd[variable == "ph", sd],
+
 	standBasalArea = treeData[parents_index, standBasalArea] # Computed accounting for all the species!
 )
 
@@ -448,5 +461,6 @@ results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_e
 
 results$cmdstan_diagnose()
 
-results$print(c("lp__", "potentialGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-	"competition_slope", "measureError", "processError"))
+results$print(c("lp__", "averageGrowth_mu",, "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"))
+	

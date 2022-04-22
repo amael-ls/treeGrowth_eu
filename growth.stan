@@ -15,7 +15,7 @@
 
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
-	real growth(real dbh0, real precip, real temperature, real standBasalArea,
+	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea,
 		real averageGrowth, real dbh_slope, real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real competition_slope)
 	{
 		/*
@@ -23,6 +23,7 @@ functions {
 				- dbh0: The diameter
 				- precip: The precipitations
 				- temperature: The temperature
+				- ph: The pH (CaCl2)
 				- standBasalArea: Basal area of the stand (i.e., includes all the trees, regardless of the species)
 			
 			It takes the following parameters:
@@ -32,11 +33,13 @@ functions {
 				- pr_slope2: The slope for precipitation (squared term)
 				- tas_slope: The slope for temperature (tas)
 				- tas_slope2: The slope for temperature (tas, squared term)
+				- ph_slope: The slope for pH
+				- ph_slope2: The slope for pH (squared term)
 				- competition_slope: The slope for competition
 		*/
 
 		return (exp(averageGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
-			tas_slope*temperature + tas_slope2*temperature^2 + competition_slope*standBasalArea));
+			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea));
 	}
 }
 
@@ -72,18 +75,17 @@ data {
 
 	// Explanatory variables
 	vector<lower = 0>[n_climate] precip; // Precipitations
-	real pr_mu; // To standardise the precipitations
+	real<lower = 0> pr_mu; // To standardise the precipitations
 	real<lower = 0> pr_sd; // To standardise the precipitations
 
 	vector[n_climate] tas; // Temperature
 	real tas_mu; // To standardise the temperature
 	real<lower = 0> tas_sd; // To standardise the temperature
 
-	/*
-		The tree weight correspond to the weight of the tree per hectar. It accounts for:
-			1. the area of the plot (disc with a radius of 6, 9 or 15 metres depending on the size class)
-			2. the proximity to the boundary (rectification of the probability of drawing trees at the edge)
-	*/
+	vector[n_plots]<lower = 0, upper = 14> ph; // pH of the soil measured with CaCl2
+	real<lower = 0, upper = 14> ph_mu; // To standardise the pH
+	real<lower = 0> ph_sd; // To standardise the pH
+
 	vector<lower = 0>[n_indiv] standBasalArea; // Sum of the tree basal area for a given plot at a given time
 }
 
@@ -91,6 +93,7 @@ transformed data {
 	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
+	vector[n_plots] normalised_ph = (ph - ph_mu)/ph_sd; // Normalised and centred pH
 	vector[n_indiv] normalised_standBasalArea = (standBasalArea - mean(standBasalArea))/sd(standBasalArea); // Normalised and centred BA
 }
 
@@ -104,6 +107,9 @@ parameters {
 
 	real tas_slope;
 	real tas_slope2;
+
+	real ph_slope;
+	real ph_slope2;
 
 	real competition_slope;
 
@@ -121,7 +127,7 @@ parameters {
 	// --- Extreme error, by default at least twice the observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
 	
-	array [n_inventories] real<lower = 0, upper = 1> p; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
+	array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
 	// Latent states
 	// --- Parent (i.e., primary) dbh
@@ -152,6 +158,9 @@ model {
 	target += normal_lpdf(tas_slope | 0, 5);
 	target += normal_lpdf(tas_slope2 | 0, 5);
 
+	target += normal_lpdf(ph_slope | 0, 5);
+	target += normal_lpdf(ph_slope2 | 0, 5);
+
 	target += normal_lpdf(competition_slope | 0, 5);
 
 	// --- Hyper parameters
@@ -180,7 +189,7 @@ model {
 	target += gamma_lpdf(sigmaObs | 3.0/0.15, sd_dbh*sqrt(3)/0.15); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
-	target += beta_lpdf(p | 48.67, 1714.84);
+	target += beta_lpdf(proba | 48.67, 1714.84);
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
@@ -190,8 +199,8 @@ model {
 		{
 			// Process model
 			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
-				normalised_tas[climate_index[i] + j - 1], normalised_standBasalArea[i],
-				averageGrowth[plot_index[i]], dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, competition_slope);
+				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[i],
+				averageGrowth[plot_index[i]], dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
 
 			// Dbh at time t + 1
@@ -217,15 +226,15 @@ model {
 	for (k in 1:n_inventories)
 	{
 		// Compare true (i.e., hidden or latent) parents with observed parents per chunk (i.e. per country/NFI)
-		target += (1 - p[k]) * normal_lpdf(normalised_Yobs[parents_index[start_nfi_parents[k]:end_nfi_parents[k]]] |
+		target += (1 - proba[k]) * normal_lpdf(normalised_Yobs[parents_index[start_nfi_parents[k]:end_nfi_parents[k]]] |
 				latent_dbh_parents[start_nfi_parents[k]:end_nfi_parents[k]], sigmaObs[k]) +
-			p[k] * normal_lpdf(normalised_Yobs[parents_index[start_nfi_parents[k]:end_nfi_parents[k]]] |
+			proba[k] * normal_lpdf(normalised_Yobs[parents_index[start_nfi_parents[k]:end_nfi_parents[k]]] |
 				latent_dbh_parents[start_nfi_parents[k]:end_nfi_parents[k]], etaObs[k]);
 
 		// Compare true (i.e., hidden or latent) children with observed children per chunk (i.e. per country/NFI)
-		target += (1 - p[k]) * normal_lpdf(normalised_Yobs[children_index[start_nfi_children[k]:end_nfi_children[k]]] |
+		target += (1 - proba[k]) * normal_lpdf(normalised_Yobs[children_index[start_nfi_children[k]:end_nfi_children[k]]] |
 				latent_dbh_children[start_nfi_children[k]:end_nfi_children[k]], sigmaObs[k]) +
-			p[k] * normal_lpdf(normalised_Yobs[children_index[start_nfi_children[k]:end_nfi_children[k]]] |
+			proba[k] * normal_lpdf(normalised_Yobs[children_index[start_nfi_children[k]:end_nfi_children[k]]] |
 				latent_dbh_children[start_nfi_children[k]:end_nfi_children[k]], etaObs[k]);
 	}
 }
