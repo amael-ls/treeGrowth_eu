@@ -7,6 +7,10 @@
 #	3. Extract climate data and check that all the rasters have the same grid:
 #		- It is important that all the rasters share the same grid because I am using indices in stan and I need to make sure that indices
 #			and geographic locations are equivalent (i.e., an index designates the same location regardless of the raster)
+#	4. Extract pH of soil. The data are explained in a publication:
+#		"Continental-scale digital soil mapping using european soil profile data: soil ph",
+#		Hannes Isaak Reuter, Luis Rodriguez Lado, Tomislav Hengl & Luca Montanarella,
+#		Hamburger Beiträge zur Physischen Geographie und Landschaftsökologie - 92 Heft 19/2008, pp. 91-102.
 #
 
 #### Clear memory and load packages
@@ -410,3 +414,33 @@ for (clim_var in selectedVariables)
 setorder(clim_dt, plot_id, year)
 
 saveRDS(clim_dt, paste0(outputFolder, "europe_reshaped_climate.rds"))
+
+#? --------------------------------------------------------------------------------------------------------
+######## PART IV: Extract soil data (pH) https://esdac.jrc.ec.europa.eu/content/soil-ph-europe
+#? --------------------------------------------------------------------------------------------------------
+#### Load data 
+## Paths
+soil_folder = "/bigdata/Predictors/Soil\ esdacph\ Soil\ pH\ in\ Europe/"
+
+## Soil data. According to https://esdac.jrc.ec.europa.eu/content/soil-ph-europe, the projection is ETRS89 Lambert Azimuthal Equal Area 
+soil = rast(paste0(soil_folder, "ph_cacl2/w001001.adf"))
+soil_shp = vect(paste0(soil_folder, "country_laea.shp"))
+crs(soil) = crs(soil_shp)
+
+## Project and extract
+# Coordinates
+coords = vect(treeCoords[, .(plot_id, x, y)], crs = std_epsg[, standardised], geom = c("x", "y")) # Order MUST be longitude, latitude
+
+# Change projection to standardised projection
+soil = project(x = soil, y = crs(coords))
+
+# Extract values
+soil_values = extract(x = soil, y = coords)
+setDT(soil_values)
+soil_values[, ID := NULL]
+soil_values[, plot_id := coords$plot_id]
+
+setorder(soil_values, plot_id)
+setnames(soil_values, old = "ph_cacl2", new = "ph")
+
+saveRDS(soil_values, paste0(outputFolder, "europe_reshaped_soil.rds"))
