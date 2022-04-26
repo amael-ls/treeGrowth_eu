@@ -296,19 +296,6 @@ soil = readRDS(paste0(clim_folder, "europe_reshaped_soil.rds"))
 ## Set-up indices
 indices = indices_subsample(species_id, run_id, treeData, savingPath, mainFolder, clim_folder)
 
-# Set everyone to child type
-indices[, type := "child"]
-
-# Correct for those who are parent type
-indices[indices[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1], type := "parent"]
-
-# Compute the number of growing years per individual
-indices[, nbYearsGrowth := max(year) - min(year), by = .(plot_id, tree_id)]
-
-checkUp = all(indices[, nbYearsGrowth <= index_clim_end - index_clim_start])
-if(!checkUp)
-	stop("Suspicious indexing. Review the indices data.table")
-
 if (indices[, .N] != treeData[, .N])
 	stop(paste0("Dimension mismatch between indices and treeData for species `", species, "`"))
 
@@ -323,6 +310,10 @@ if (length(nbYearsGrowth) != n_indiv)
 n_hiddenState = indices[.N, index_gen]
 print(paste("Number of latent dbh:", n_hiddenState))
 n_latentGrowth = n_hiddenState - n_indiv
+
+if (n_latentGrowth != sum(nbYearsGrowth))
+	stop("Dimensions mismatch between latent growth and nb years growth")
+
 print(paste("Number of latent growth:", n_latentGrowth))
 
 # Define parents, children, and last child
@@ -411,6 +402,7 @@ stanData = list(
 	n_children = n_obs - n_indiv, # Number of children trees observations = n_obs - n_indiv
 	nbYearsGrowth = nbYearsGrowth, # Number of years for each individual
 	n_inventories = n_inventories, # Number of forest inventories involving different measurement errors in the data
+	last_child_index = last_child_index, # Not used in stan, but useful for analyse_growth
 
 	# Indices
 	parents_index = parents_index, # Index of each parent in the 'observation space'
@@ -461,6 +453,13 @@ results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_e
 
 results$cmdstan_diagnose()
 
-results$print(c("lp__", "averageGrowth_mu",, "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"))
-	
+
+
+# The following parameters had split R-hat greater than 1.05:
+#   averageGrowth[216], averageGrowth[311], averageGrowth[445], averageGrowth[522], averageGrowth[619], averageGrowth[866], averageGrowth[898], averageGrowth[1145], pr_slope2, sigmaProc, sigmaObs[1], latent_growth[4575]
+# Such high values indicate incomplete mixing and biased estimation.
+# You should consider regularizating your model with additional prior information or a more effective parameterization.
+
+# Processing complete.
