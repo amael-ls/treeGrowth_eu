@@ -113,7 +113,20 @@ indices_subsample = function(species_id, run_id, treeData, savingPath, mainFolde
 	indices[, nfi := stri_sub(plot_id, to = stri_locate_first(plot_id, regex = "_")[, "start"] - 1)]
 	indices[, nfi_index := .GRP, by = nfi]
 
+	## Add type (either parent or child, which correspond to primary and subsequent in the article)
+	indices[, type := "child"]
+
+	# Correct for those who are parent type
+	indices[indices[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1], type := "parent"]
+
+	## Compute the number of growing years per individual
+	indices[, nbYearsGrowth := max(year) - min(year), by = .(plot_id, tree_id)]
+
 	## Saving indices for the chosen species
+	checkUp = all(indices[, nbYearsGrowth <= index_clim_end - index_clim_start])
+	if(!checkUp)
+		stop("Suspicious indexing. Review the indices data.table")
+	
 	saveRDS(indices, paste0(savingPath, run_id, "_indices.rds"))
 	return (indices)
 }
