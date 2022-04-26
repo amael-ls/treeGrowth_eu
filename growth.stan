@@ -15,8 +15,8 @@
 
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
-	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea,
-		real averageGrowth, real dbh_slope, real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real competition_slope)
+	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope,
+		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real ph_slope, real ph_slope2, real competition_slope)
 	{
 		/*
 			It takes the following variables:
@@ -82,7 +82,7 @@ data {
 	real tas_mu; // To standardise the temperature
 	real<lower = 0> tas_sd; // To standardise the temperature
 
-	vector[n_plots]<lower = 0, upper = 14> ph; // pH of the soil measured with CaCl2
+	vector<lower = 0, upper = 14>[n_plots] ph; // pH of the soil measured with CaCl2
 	real<lower = 0, upper = 14> ph_mu; // To standardise the pH
 	real<lower = 0> ph_sd; // To standardise the pH
 
