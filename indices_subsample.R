@@ -109,6 +109,10 @@ indices_subsample = function(species_id, run_id, treeData, savingPath, mainFolde
 	## Add an index per plot
 	indices[, plot_index := .GRP, by = plot_id]
 
+	## Add an index per country
+	indices[, nfi := stri_sub(plot_id, to = stri_locate_first(plot_id, regex = "_")[, "start"] - 1)]
+	indices[, nfi_index := .GRP, by = nfi]
+
 	## Saving indices for the chosen species
 	saveRDS(indices, paste0(savingPath, run_id, "_indices.rds"))
 	return (indices)
