@@ -12,11 +12,11 @@
 
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
-	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope,
+	real growth(real dbh0, real precip, real temperature /*, real ph*/, real standBasalArea, real averageGrowth, real dbh_slope,
 		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2 /* , real ph_slope, real ph_slope2 */, real competition_slope)
 	{
 		return (exp(averageGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
-			tas_slope*temperature + tas_slope2*temperature^2 /* + ph_slope*ph + ph_slope2*ph^2 +*/ competition_slope*standBasalArea));
+			tas_slope*temperature + tas_slope2*temperature^2 /* + ph_slope*ph + ph_slope2*ph^2 */ + competition_slope*standBasalArea));
 	}
 }
 
@@ -37,10 +37,7 @@ data {
 	array [n_children] int<lower = 2> latent_children_index; // Index of children in the 'latent space'
 	array [n_indiv] int<lower = 1, upper = n_climate - 1> climate_index; // Index of the climate associated to each parent
 	
-	array [n_inventories] int<lower = 1, upper = n_indiv - 1> start_nfi_parents; // Starting point of each NFI for parents
-	array [n_inventories] int<lower = 2, upper = n_indiv> end_nfi_parents; // Ending point of each NFI for parents
-	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_children; // Starting point of each NFI for children
-	array [n_inventories] int<lower = 1, upper = n_children> end_nfi_children; // Ending point of each NFI for children
+	array [n_indiv] int<lower = 1, upper = n_inventories> nfi_id; // Indicates to which NFI individuals belong to
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
@@ -59,9 +56,9 @@ data {
 	real tas_mu; // To standardise the temperature
 	real<lower = 0> tas_sd; // To standardise the temperature
 
-	vector[n_plots]<lower = 0, upper = 14> ph; // pH of the soil measured with CaCl2
-	real<lower = 0, upper = 14> ph_mu; // To standardise the pH
-	real<lower = 0> ph_sd; // To standardise the pH
+	// vector<lower = 0, upper = 14>[n_plots] ph; // pH of the soil measured with CaCl2
+	// real<lower = 0, upper = 14> ph_mu; // To standardise the pH
+	// real<lower = 0> ph_sd; // To standardise the pH
 
 	vector<lower = 0>[n_indiv] standBasalArea; // Sum of the tree basal area for a given plot at a given time
 }
@@ -104,7 +101,8 @@ parameters {
 	// --- Extreme error, by default at least twice the observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
 	
-	array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
+	// CHANGE p TO proba LATER !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	array [n_inventories] real<lower = 0, upper = 1> p; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
 	// Latent states
 	// --- Parent (i.e., primary) dbh
@@ -126,7 +124,11 @@ generated quantities {
 		real current_latent_dbh;
 		int growth_counter = 1;
 		int dbh_counter = 1;
+		int children_counter = 1;
 		real expected_growth;
+
+		array [n_children] real temporary_children; // To store the children, will be added to latent_dbh_parentsChildren
+		array [n_children] real temporary_observation; // To store the children, will be added to newObservations
 
 		for (i in 1:n_indiv) // Loop over all the individuals
 		{
@@ -135,7 +137,8 @@ generated quantities {
 			yearly_latent_dbh[dbh_counter] = latent_dbh_parents[i];
 
 			// Generate the parent observation conditional on the parent state
-			newObservations[parents_index[i]] = normal_rng(latent_dbh_parents[i], sigmaObs);
+			newObservations[parents_index[i]] = (1 - p[nfi_id[i]]) * normal_rng(latent_dbh_parents[i], sigmaObs[nfi_id[i]]) +
+				p[nfi_id[i]] * normal_rng(latent_dbh_parents[i], etaObs[nfi_id[i]]);
 
 			// Starting point to compute latent dbh child
 			current_latent_dbh = latent_dbh_parents[i];
@@ -144,8 +147,9 @@ generated quantities {
 			{
 				// Process model
 				expected_growth = growth(current_latent_dbh, normalised_precip[climate_index[i] + j - 1],
-					normalised_tas[climate_index[i] + j - 1], normalised_totalTreeWeight[i],
-					averageGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, competition_slope);
+					normalised_tas[climate_index[i] + j - 1] /*, normalised_ph[plot_index[i]]*/, normalised_standBasalArea[i],
+					averageGrowth[plot_index[i]], dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2 /*, ph_slope, ph_slope2 */,
+					competition_slope);
 
 				// Record difference expected growth versus latent growth
 				procError_sim[growth_counter] = expected_growth - latent_growth[growth_counter];
@@ -155,12 +159,20 @@ generated quantities {
 				growth_counter += 1;
 				dbh_counter += 1;
 				yearly_latent_dbh[dbh_counter] = current_latent_dbh;
-			}
 
-			// The last current_latent_dbh corresponds to the child latent dbh
-			latent_dbh_parentsChildren[children_index[i]] = current_latent_dbh;
-			newObservations[children_index[i]] = normal_rng(latent_dbh_parentsChildren[children_index[i]], sigmaObs);
+				// Recording the children dbh
+				if (dbh_counter == latent_children_index[children_counter])
+				{
+					temporary_children[children_counter] = current_latent_dbh;
+					temporary_observation[children_counter] = (1 - p[nfi_id[i]]) * normal_rng(current_latent_dbh, sigmaObs[nfi_id[i]]) +
+						p[nfi_id[i]] * normal_rng(current_latent_dbh, etaObs[nfi_id[i]]);
+					children_counter += 1;
+				}
+			}
 			dbh_counter += 1;
 		}
+		// Merging
+		latent_dbh_parentsChildren[children_index] = temporary_children;
+		newObservations[children_index] = temporary_observation;
 	}
 }
