@@ -12,11 +12,11 @@
 
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
-	real growth(real dbh0, real precip, real temperature /*, real ph*/, real standBasalArea, real averageGrowth, real dbh_slope,
+	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope,
 		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2 /* , real ph_slope, real ph_slope2 */, real competition_slope)
 	{
 		return (exp(averageGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
-			tas_slope*temperature + tas_slope2*temperature^2 /* + ph_slope*ph + ph_slope2*ph^2 */ + competition_slope*standBasalArea));
+			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea));
 	}
 }
 
@@ -56,9 +56,9 @@ data {
 	real tas_mu; // To standardise the temperature
 	real<lower = 0> tas_sd; // To standardise the temperature
 
-	// vector<lower = 0, upper = 14>[n_plots] ph; // pH of the soil measured with CaCl2
-	// real<lower = 0, upper = 14> ph_mu; // To standardise the pH
-	// real<lower = 0> ph_sd; // To standardise the pH
+	vector<lower = 0, upper = 14>[n_plots] ph; // pH of the soil measured with CaCl2
+	real<lower = 0, upper = 14> ph_mu; // To standardise the pH
+	real<lower = 0> ph_sd; // To standardise the pH
 
 	vector<lower = 0>[n_indiv] standBasalArea; // Sum of the tree basal area for a given plot at a given time
 }
@@ -82,8 +82,8 @@ parameters {
 	real tas_slope;
 	real tas_slope2;
 
-	// real ph_slope;
-	// real ph_slope2;
+	real ph_slope;
+	real ph_slope2;
 
 	real competition_slope;
 
@@ -101,8 +101,7 @@ parameters {
 	// --- Extreme error, by default at least twice the observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
 	
-	// CHANGE p TO proba LATER !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-	array [n_inventories] real<lower = 0, upper = 1> p; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
+	array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
 	// Latent states
 	// --- Parent (i.e., primary) dbh
@@ -116,7 +115,7 @@ generated quantities {
 	// Declaration output variables
 	array [n_obs] real newObservations;
 	array [n_obs] real latent_dbh_parentsChildren;
-	array [n_latentGrowth] real procError_sim;
+	array [n_latentGrowth] real latentG_residuals;
 	array [n_latentGrowth + n_indiv] real yearly_latent_dbh;
 	
 	{
@@ -151,8 +150,8 @@ generated quantities {
 					averageGrowth[plot_index[i]], dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2 /*, ph_slope, ph_slope2 */,
 					competition_slope);
 
-				// Record difference expected growth versus latent growth
-				procError_sim[growth_counter] = expected_growth - latent_growth[growth_counter];
+				// Record difference expected growth minus latent growth
+				latentG_residuals[growth_counter] = expected_growth - latent_growth[growth_counter];
 
 				// Dbh at time t + 1
 				current_latent_dbh += latent_growth[growth_counter]; // Or should it be += gamma(mean = latent_growth, var = sigmaProc)?
