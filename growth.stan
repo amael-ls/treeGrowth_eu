@@ -175,7 +175,7 @@ model {
 
 		For instance, for the routine measure error, which is the standard deviation of the observation around the latent state, we have:
 		m = sqrt(3)
-		v = 0.15
+		v = 0.025
 
 		Then, because I work on standardised dbh, I need to divide m by sd(dbh), and v by sd(dbh)^2. Therefore, we get the following:
 		shape = (m/sd(dbh))^2 / (v/sd(dbh)^2) = m^2/v
@@ -186,7 +186,7 @@ model {
 		rate = (m/var(dbh))    / (v/var(dbh)^2) = var(dbh) * m/v
 	*/
 	target += gamma_lpdf(sigmaProc | 5.0^2/1, variance(Yobs)*5.0/1); // Remember that sigmaProc is a variance, not a sd!
-	target += gamma_lpdf(sigmaObs | 3.0/0.15, sd_dbh*sqrt(3)/0.15); // <=> routine measurement error (sd) = sqrt(3) mm
+	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
 	target += beta_lpdf(proba | 48.67, 1714.84);

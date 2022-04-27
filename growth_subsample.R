@@ -17,8 +17,8 @@ args = commandArgs(trailingOnly = TRUE)
 if (length(args) != 3)
   stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
-species_id = as.integer(args[1]) # 17
-run_id = as.integer(args[2]) # 1
+species_id = as.integer(args[1]) # 17, 48
+run_id = as.integer(args[2]) # 1, 2, 3, 4
 max_indiv = as.integer(args[3]) # 8000
 
 set.seed(run_id)
