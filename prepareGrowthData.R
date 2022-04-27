@@ -435,9 +435,22 @@ coords = vect(treeCoords[, .(plot_id, x, y)], crs = std_epsg[, standardised], ge
 soil = project(x = soil, y = crs(coords))
 
 # Extract values
-soil_values = extract(x = soil, y = coords)
+soil_values = extract(x = soil, y = coords, xy = TRUE, cell = TRUE)
+sum(is.na(soil_values))
 setDT(soil_values)
-soil_values[, ID := NULL]
+
+# Few values are NA (the offset of some forest plots fall into the ocean, river, lakes...)
+problematicPlots = soil_values[is.na(ph_cacl2)]
+
+if (problematicPlots[, .N] != 0)
+{
+	for (i in 1:problematicPlots[, .N])
+		problematicPlots[i, ph_cacl2 := mean(soil[adjacent(x = soil, cells = problematicPlots[i, cell])]$ph_cacl2, na.rm = TRUE)]
+
+	sum(is.na(problematicPlots))
+	soil_values[problematicPlots[, ID], ph_cacl2 := problematicPlots[, ph_cacl2]]
+}
+
 soil_values[, plot_id := coords$plot_id]
 
 setorder(soil_values, plot_id)
