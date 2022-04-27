@@ -278,22 +278,14 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 
 #### Read data
 ## Common variables
-species = "Fagus sylvatica" # "Tilia platyphyllos"
+species = "Tilia platyphyllos" # "Tilia platyphyllos", "Fagus sylvatica"
 path = paste0("./", species, "/")
-run = 3
+run = 1
 info_lastRun = getLastRun(path = path, run = run)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
 
-# isClimate_normalised = TRUE
 isDBH_normalised = TRUE
-
-# if (isClimate_normalised)
-# {
-# 	print("Climate parameter must be transformed when working on the real climate scale")
-# 	norm_clim_dt = readRDS(paste0(path, ifelse(is.null(run), "", paste0(run, "_")), "climate_normalisation.rds"))
-# }
-
 if (isDBH_normalised)
 {
 	print("DBH must be transformed when working on the real DBH scale")
@@ -382,6 +374,13 @@ stanData$nfi_id = unique(indices[, .(plot_id, tree_id, nfi_index)])[, nfi_index]
 if (length(stanData$nfi_id) != stanData$n_indiv)
 	stop("Dimensions mismatch")
 
+# for (i in 1:length(stanData))
+# 	if (sum(is.na(stanData[[i]])) != 0)
+# 		print(i) #! THERE ARE NA IN THE pH!!!!!
+
+# names(stanData)
+# stanData = stanData[-27]
+
 # Simulations
 generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
 dim(generate_quantities$draws()) # iter_sampling * n_chains * (2*n_obs + n_latentGrowth + n_hiddenState)
@@ -400,6 +399,7 @@ sum(is.na(newObservations_array))
 
 latent_dbh_array = generate_quantities$draws("latent_dbh_parentsChildren")
 dim(latent_dbh_array) # iter_sampling * n_chains * n_obs
+sum(is.na(latent_dbh_array))
 
 dt_dharma[, simulated_observations := reshapeDraws(newObservations_array, rep_id, regex = "newObservations"), by = rep_id]
 dt_dharma[, simulated_observations := sd_dbh*simulated_observations]
@@ -414,20 +414,24 @@ dt_dharma[rep_id %in% stanData$children_index, type := "children"]
 
 setorderv(x = dt_dharma, cols = c("type", "rep_id"), order = c(-1, 1)) # The -1 is to have parents first
 
-jpeg(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "residuals_obs_scatter.jpg"), quality = 50)
-plot(dt_dharma[, rep_id], dt_dharma[, residuals_obs], pch = '.', col = "#A1A1A122")
-abline(v = stanData$n_indiv, lwd = 2, col = "#CD212A")
-axis(3, at = n_obs/4, "Parents", las = 1)
-axis(3, at = 3*n_obs/4, "Children", las = 1)
-dev.off()
+dt_dharma[, mean(residuals_obs), by = type]
+print(paste("The residuals' variance is", round(var(dt_dharma[, residuals_obs]), 3)))
 
-mpl <- import("matplotlib")
+# jpeg(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "residuals_obs_scatter.jpg"), quality = 50)
+# plot(dt_dharma[, rep_id], dt_dharma[, residuals_obs], pch = '.', col = "#A1A1A122")
+# abline(v = stanData$n_indiv, lwd = 2, col = "#CD212A")
+# axis(3, at = n_obs/4, "Parents", las = 1)
+# axis(3, at = 3*n_obs/4, "Children", las = 1)
+# dev.off()
+
+mpl = import("matplotlib")
 mpl$use("Agg") # Stable non interactive back-end
-plt <- import("matplotlib.pyplot")
+plt = import("matplotlib.pyplot")
 mpl$rcParams['agg.path.chunksize'] = 0 # Disable error check on too many points
 
 plt$figure()
 plt$plot(dt_dharma[, rep_id], dt_dharma[, residuals_obs], '.', c = "#A1A1A122", markersize = 1)
+plt$axvline(x = stanData$n_indiv, linewidth = 2, color = "#CD212A")
 plt$savefig(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "residuals_obs_scatter.png"))
 plt$close(plt$gcf())
 
@@ -443,32 +447,45 @@ qqline(dt_dharma[, residuals_obs], col = "#34568B", lwd = 3)
 dev.off()
 
 ## Check that the process error does not show any pattern with any predictor
-sigmaProc_array = generate_quantities$draws("procError_sim")
-mean(sigmaProc_array)
+latentG_residuals_array = generate_quantities$draws("latentG_residuals") #! Used to be procError_sim
+mean(latentG_residuals_array)
 
-dim(sigmaProc_array) # iter_sampling * n_chains * n_latentGrowth
+dim(latentG_residuals_array) # iter_sampling * n_chains * n_latentGrowth
 
-sigmaProc_vec = as.vector(sigmaProc_array) # The order is array[,1,1], array[,2,1], ..., array[,n_chain,1], array[,2,1], ...
-length(sigmaProc_vec)
+latentG_residuals_vec = as.vector(latentG_residuals_array) # The order is array[,1,1], array[,2,1], ..., array[,n_chain,1], array[,2,1], ...
+length(latentG_residuals_vec)
 
-pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "sigmaProc_check_hist.pdf"))
-hist(sigmaProc_vec)
+pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "latentG_residuals_check_hist.pdf"))
+hist(latentG_residuals_vec)
 dev.off()
 
-sigmaProc_avg = apply(sigmaProc_array, 3, mean) # Average sigmaProc for each latent growth (or dbh)
-length(sigmaProc_avg)
+latentG_residuals_avg = apply(latentG_residuals_array, 3, mean) # Average latentG_residuals for each latent growth (or dbh)
+length(latentG_residuals_avg)
 
 index_notLastMeasure = 1:n_hiddenState
 index_notLastMeasure = index_notLastMeasure[!(index_notLastMeasure %in% indices[stanData$last_child_index, index_gen])]
 
-if (length(index_notLastMeasure) != length(sigmaProc_avg))
-	stop("Dimension mismatch between sigmaProc_avg and index_notLastMeasure")
+if (length(index_notLastMeasure) != length(latentG_residuals_avg))
+	stop("Dimension mismatch between latentG_residuals_avg and index_notLastMeasure")
 
 latent_dbh = apply(generate_quantities$draws("yearly_latent_dbh"), 3, mean)
 latent_dbh = latent_dbh[index_notLastMeasure]
 
-jpeg(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "sigmaProc_vs_dbh_check.jpg"), quality = 50)
-plot(latent_dbh, sigmaProc_avg, type = "l")
+jpeg(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "latentG_residuals_vs_dbh_check.jpg"), quality = 50)
+plot(latent_dbh, latentG_residuals_avg, type = "l")
 dev.off()
 
-cor(latent_dbh, sigmaProc_avg)
+cor(latent_dbh, latentG_residuals_avg)
+
+# #### Crash test zone
+# dt_dharma[which.min(dt_dharma[, residuals_obs])]
+# mainFolder = "/home/amael/project_ssm/inventories/growth/"
+# treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshaped.rds"))
+# treeData = treeData[speciesName_sci == species]
+# treeData[(75.7577 < dbh) & (dbh < 75.7578), .(plot_id, tree_id, year)]
+
+# treeData[plot_id %in% c("france_1327882", "france_743874") & tree_id %in% c(9, 4)]
+
+# 3: Tilia platyphyllos FR IFN  france_743874       4  2007 85.92677 2.492116 45.32078      21.073138  france wfo-0000456948
+# 4: Tilia platyphyllos FR IFN  france_743874       4  2012 89.12677 2.492116 45.32078      22.557006  france wfo-0000456948
+# 5: Tilia platyphyllos FR IFN  france_743874       4  2017 75.75775 2.492116 45.32078      22.931993  france wfo-0000456948
