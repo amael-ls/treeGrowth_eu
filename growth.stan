@@ -86,7 +86,9 @@ data {
 	real<lower = 0, upper = 14> ph_mu; // To standardise the pH
 	real<lower = 0> ph_sd; // To standardise the pH
 
-	vector<lower = 0>[n_indiv] standBasalArea; // Sum of the tree basal area for a given plot at a given time
+	vector<lower = 0>[n_climate] standBasalArea; // Sum of the tree basal area for a given plot at a given time (interpolation for NA data)
+	real ba_mu; // To standardise the basal area
+	real<lower = 0> ba_sd; // To standardise the basal area
 }
 
 transformed data {
@@ -94,7 +96,7 @@ transformed data {
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
 	vector[n_plots] normalised_ph = (ph - ph_mu)/ph_sd; // Normalised and centred pH
-	vector[n_indiv] normalised_standBasalArea = (standBasalArea - mean(standBasalArea))/sd(standBasalArea); // Normalised and centred BA
+	vector[n_climate] normalised_standBasalArea = (standBasalArea - ba_mu)/ba_sd; // Normalised and centred BA
 }
 
 parameters {
@@ -199,7 +201,7 @@ model {
 		{
 			// Process model
 			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
-				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[i],
+				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[climate_index[i] + j - 1],
 				averageGrowth[plot_index[i]], dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
 
