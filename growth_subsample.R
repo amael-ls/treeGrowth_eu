@@ -239,8 +239,12 @@ if (!dir.exists(clim_folder))
 	stop(paste0("Folder\n\t", clim_folder, "\ndoes not exist"))
 
 soil_folder = "/home/amael/project_ssm/inventories/growth/"
-if (!dir.exists(clim_folder))
+if (!dir.exists(soil_folder))
 	stop(paste0("Folder\n\t", soil_folder, "\ndoes not exist"))
+
+standBasalArea_folder = "/home/amael/project_ssm/inventories/growth/"
+if (!dir.exists(standBasalArea_folder))
+	stop(paste0("Folder\n\t", standBasalArea_folder, "\ndoes not exist"))
 
 ## Tree inventories data
 treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshaped.rds"))
@@ -291,7 +295,10 @@ n_inventories = length(treeData[, unique(nfi_id)])
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
 
 ## Read soil data (pH)
-soil = readRDS(paste0(clim_folder, "europe_reshaped_soil.rds"))
+soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
+
+## Read interpolated basal area data
+standBasalArea = readRDS(paste0(standBasalArea_folder, "europe_reshaped_standBasalArea.rds"))
 
 ## Set-up indices
 indices = indices_subsample(species_id, run_id, treeData, savingPath, mainFolder, clim_folder)
@@ -365,9 +372,12 @@ normalisation(dt = treeData, colnames = "dbh", folder = savingPath, filename = p
 normalisation(dt = climate, colnames = c("pr", "tas"), folder = savingPath, filename = paste0(run_id, "_climate_normalisation.rds"),
 	indices = indices, col_ind_start = "index_clim_start", col_ind_end = "index_clim_end")
 normalisation(dt = soil, colnames = "ph", folder = savingPath, filename = paste0(run_id, "_ph_normalisation.rds"))
+normalisation(dt = standBasalArea, colnames = "standBasalArea_interp", folder = savingPath,
+	filename = paste0(run_id, "_ba_normalisation.rds"))
 
 climate_mu_sd = readRDS(paste0(savingPath, run_id, "_climate_normalisation.rds"))
 ph_mu_sd = readRDS(paste0(savingPath, run_id, "_ph_normalisation.rds"))
+ba_mu_sd = readRDS(paste0(savingPath, run_id, "_ba_normalisation.rds"))
 
 #### Stan model
 ## Define stan variables
@@ -430,11 +440,13 @@ stanData = list(
 	tas_mu = climate_mu_sd[variable == "tas", mu],
 	tas_sd = climate_mu_sd[variable == "tas", sd],
 
-	ph = soil[, ph], # pH of the soil measured with CaCl2
+	ph = soil[plot_id %in% treeData[, plot_id], ph], # pH of the soil measured with CaCl2. In the same order than treeData's plots!
 	ph_mu = ph_mu_sd[variable == "ph", mu],
 	ph_sd = ph_mu_sd[variable == "ph", sd],
 
-	standBasalArea = treeData[parents_index, standBasalArea] # Computed accounting for all the species!
+	standBasalArea = standBasalArea[, standBasalArea_interp], # Computed accounting for all the species! This data are interpolated
+	ba_mu = ba_mu_sd[variable == "standBasalArea_interp", mu],
+	ba_sd = ba_mu_sd[variable == "standBasalArea_interp", sd]
 )
 
 saveRDS(object = stanData, file = paste0(savingPath, run_id, "_stanData.rds"))
