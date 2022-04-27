@@ -503,4 +503,15 @@ for (i in 1:treeCoords[, .N])
 if (end_ind != clim_dt[, .N])
 	warning("Dimensions mismatch between basal area and clim_dt")
 
+if (any(stand_BA_filled[, standBasalArea_interp < 0]))
+{
+	warning("Some plots have negative basal areas!")
+	max_ba_neg = stand_BA_filled[standBasalArea_interp < 0, max(abs(standBasalArea_interp))]
+	if (max_ba_neg < 1e-7)
+	{
+		warning("The previous warning is probably due to rounding errors from the interpolation function. Set values to 0")
+		stand_BA_filled[standBasalArea_interp < 0, standBasalArea_interp := 0]
+	}
+}
+
 saveRDS(stand_BA_filled, paste0(outputFolder, "europe_reshaped_standBasalArea.rds"))
