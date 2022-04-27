@@ -92,8 +92,6 @@ growthData = rbindlist(data_ls, idcol = "nfi_id", use.names = TRUE)
 growthData[, country := NFI_ls[NFI == nfi_id, country], by = nfi_id]
 growthData[, plot_id := paste(country, plot_id, sep = "_")]
 
-
-
 #? --------------------------------------------------------------------------------------------------------
 ######## PART II: Standardisation of the species names among country, keep only most abundant
 #? --------------------------------------------------------------------------------------------------------
@@ -339,9 +337,9 @@ saveRDS(growthData, paste0(outputFolder, "standardised_european_growth_data_resh
 
 ## Save time-space (i.e., time interval covered per plot)
 treeCoords = unique(growthData[, .(plot_id, x, y)])
-index_min = unique(growthData[growthData[, .I[year == min(year)], by = c("plot_id", "x", "y")]$V1,
+index_min = unique(growthData[growthData[, .(m = .I[year == min(year)]), by = c("plot_id", "x", "y")]$m,
 	.(plot_id, x, y, year)])
-index_max = unique(growthData[growthData[, .I[year == max(year)], by = c("plot_id", "x", "y")]$V1,
+index_max = unique(growthData[growthData[, .(M = .I[year == max(year)]), by = c("plot_id", "x", "y")]$M,
 	.(plot_id, x, y, year)])
 
 treeCoords[index_min, on = "plot_id", min_year := i.year]
@@ -452,8 +450,57 @@ if (problematicPlots[, .N] != 0)
 }
 
 soil_values[, plot_id := coords$plot_id]
+soil_values[, c("ID", "cell", "x", "y") := NULL]
 
-setorder(soil_values, plot_id)
 setnames(soil_values, old = "ph_cacl2", new = "ph")
+setcolorder(soil_values, c("plot_id", "ph"))
+setorder(soil_values, plot_id)
 
 saveRDS(soil_values, paste0(outputFolder, "europe_reshaped_soil.rds"))
+
+#? --------------------------------------------------------------------------------------------------------
+######## PART V: Linearly interpolate stand basal area (it will use the same index as climate)
+#? --------------------------------------------------------------------------------------------------------
+#### Tool function
+## Function to linearly interpolate
+linearInterp = function(t, t0, t1, y0, y1)
+	return ((y1 - y0)/(t1 - t0)*(t - t0) + y0)
+
+#### Compute intermediate basal area
+## Common variables
+stand_BA_dt = unique(growthData[, .(plot_id, year, standBasalArea)])
+stand_BA_filled = clim_dt[, .(plot_id, year)]
+stand_BA_filled[, standBasalArea_interp := 0]
+setorder(stand_BA_filled, plot_id, year)
+
+setindex(stand_BA_dt, plot_id, year)
+setindex(stand_BA_filled, plot_id, year)
+setindex(treeCoords, plot_id)
+
+start_ind = 1
+count = 0
+
+## Fill the gaps
+for (i in 1:treeCoords[, .N])
+{
+	count = count + 1
+	min_year = treeCoords[i, min_year]
+	max_year = treeCoords[i, max_year]
+	loc = treeCoords[i, plot_id]
+	BA_0 = stand_BA_dt[.(loc, min_year), standBasalArea, on = c("plot_id", "year")]
+	BA_1 = stand_BA_dt[.(loc, max_year), standBasalArea, on = c("plot_id", "year")]
+
+	interpValues = linearInterp(min_year:max_year, min_year, max_year, BA_0, BA_1)
+	end_ind = start_ind + length(interpValues) - 1
+	
+	stand_BA_filled[start_ind:end_ind, standBasalArea_interp := interpValues]
+
+	start_ind = end_ind + 1
+	if (count %% 2000 == 0)
+		print(paste0(round(count*100/treeCoords[, .N], 2), "% done"))
+}
+
+if (end_ind != clim_dt[, .N])
+	warning("Dimensions mismatch between basal area and clim_dt")
+
+saveRDS(stand_BA_filled, paste0(outputFolder, "europe_reshaped_standBasalArea.rds"))
