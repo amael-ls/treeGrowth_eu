@@ -13,7 +13,7 @@
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
 	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope,
-		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2 /* , real ph_slope, real ph_slope2 */, real competition_slope)
+		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real ph_slope, real ph_slope2, real competition_slope)
 	{
 		return (exp(averageGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
 			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea));
@@ -60,15 +60,17 @@ data {
 	real<lower = 0, upper = 14> ph_mu; // To standardise the pH
 	real<lower = 0> ph_sd; // To standardise the pH
 
-	vector<lower = 0>[n_indiv] standBasalArea; // Sum of the tree basal area for a given plot at a given time
+	vector<lower = 0>[n_climate] standBasalArea; // Sum of the tree basal area for a given plot at a given time (interpolation for NA data)
+	real ba_mu; // To standardise the basal area
+	real<lower = 0> ba_sd; // To standardise the basal area
 }
 
 transformed data {
 	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
-	// vector[n_plots] normalised_ph = (ph - ph_mu)/ph_sd; // Normalised and centred pH
-	vector[n_indiv] normalised_standBasalArea = (standBasalArea - mean(standBasalArea))/sd(standBasalArea); // Normalised and centred BA
+	vector[n_plots] normalised_ph = (ph - ph_mu)/ph_sd; // Normalised and centred pH
+	vector[n_climate] normalised_standBasalArea = (standBasalArea - ba_mu)/ba_sd; // Normalised and centred BA
 }
 
 parameters {
@@ -136,8 +138,8 @@ generated quantities {
 			yearly_latent_dbh[dbh_counter] = latent_dbh_parents[i];
 
 			// Generate the parent observation conditional on the parent state
-			newObservations[parents_index[i]] = (1 - p[nfi_id[i]]) * normal_rng(latent_dbh_parents[i], sigmaObs[nfi_id[i]]) +
-				p[nfi_id[i]] * normal_rng(latent_dbh_parents[i], etaObs[nfi_id[i]]);
+			newObservations[parents_index[i]] = (1 - proba[nfi_id[i]]) * normal_rng(latent_dbh_parents[i], sigmaObs[nfi_id[i]]) +
+				proba[nfi_id[i]] * normal_rng(latent_dbh_parents[i], etaObs[nfi_id[i]]);
 
 			// Starting point to compute latent dbh child
 			current_latent_dbh = latent_dbh_parents[i];
@@ -146,9 +148,9 @@ generated quantities {
 			{
 				// Process model
 				expected_growth = growth(current_latent_dbh, normalised_precip[climate_index[i] + j - 1],
-					normalised_tas[climate_index[i] + j - 1] /*, normalised_ph[plot_index[i]]*/, normalised_standBasalArea[i],
-					averageGrowth[plot_index[i]], dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2 /*, ph_slope, ph_slope2 */,
-					competition_slope);
+					normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]],
+					normalised_standBasalArea[climate_index[i] + j - 1], averageGrowth[plot_index[i]],
+					dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 
 				// Record difference expected growth minus latent growth
 				latentG_residuals[growth_counter] = expected_growth - latent_growth[growth_counter];
@@ -163,8 +165,8 @@ generated quantities {
 				if (dbh_counter == latent_children_index[children_counter])
 				{
 					temporary_children[children_counter] = current_latent_dbh;
-					temporary_observation[children_counter] = (1 - p[nfi_id[i]]) * normal_rng(current_latent_dbh, sigmaObs[nfi_id[i]]) +
-						p[nfi_id[i]] * normal_rng(current_latent_dbh, etaObs[nfi_id[i]]);
+					temporary_observation[children_counter] = (1 - proba[nfi_id[i]]) * normal_rng(current_latent_dbh, sigmaObs[nfi_id[i]]) +
+						proba[nfi_id[i]] * normal_rng(current_latent_dbh, etaObs[nfi_id[i]]);
 					children_counter += 1;
 				}
 			}
