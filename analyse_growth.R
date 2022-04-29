@@ -278,7 +278,7 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 
 #### Read data
 ## Common variables
-species = "Tilia platyphyllos" # "Tilia platyphyllos", "Fagus sylvatica"
+species = "Abies grandis" #"Abies grandis", "Acer monspessulanum", "Fagus sylvatica", "Tilia platyphyllos"
 path = paste0("./", species, "/")
 run = 1
 info_lastRun = getLastRun(path = path, run = run)
@@ -296,6 +296,29 @@ if (isDBH_normalised)
 ## Load results and associated data set
 results = readRDS(paste0(path, lastRun))
 stanData = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
+
+## Print results
+results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
+
+#### Pairs plot of parameters versus energy
+## Extract energy 
+energy = as.vector(results$sampler_diagnostics(inc_warmup = FALSE)[, , "energy__"])
+length(energy)
+
+## Set plot layout
+n_rows = 3
+n_cols = 6
+
+params_names = c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs[1]", "sigmaObs[2]", "etaObs[1]", "etaObs[2]", "proba[1]", "proba[2]",
+	"sigmaProc")
+
+pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "pairs.pdf"), height = 10, width = 10)
+par(mfrow = c(n_rows, n_cols))
+for (i in 1:length(params_names))
+	smoothScatter(x = energy, y = as.vector(results$draws(params_names[i])), ylab = params_names[i])
+dev.off()
 
 #### Plot prior and posterior
 ## For process error (sigmaProc), it is a variance (of a gamma distrib)
@@ -321,7 +344,7 @@ for (i in 1:stanData$n_inventories)
 		params = paste0("extreme obs error[", i, "]"), shape = 25.6^2/6.2, rate = sd_dbh*25.6/6.2)
 
 	# ... and its associated probability of occurrence
-	proba_array = results$draws(paste0("p[", i, "]")) #! Renamed proba, to change in the future !!!
+	proba_array = results$draws(paste0("proba[", i, "]"))
 	lazyPosterior(draws = proba_array, fun = dbeta, filename = paste0(path, "proba_posterior[", i, "]"), run = run,
 		params = paste0("probability extreme obs error[", i, "]"), shape1 = 48.67, shape2 = 1714.84)
 
@@ -343,12 +366,6 @@ lazyTrace(draws = results$draws("tas_slope", inc_warmup = FALSE), filename = pas
 lazyTrace(draws = results$draws("tas_slope2", inc_warmup = FALSE), filename = paste0(path, "tas_slope2"), run = run)
 
 lazyTrace(draws = results$draws("competition_slope", inc_warmup = FALSE), filename = paste0(path, "competition_slope"), run = run)
-
-# results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-	# "ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"))
-
-results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-	"competition_slope", "sigmaObs", "etaObs", "p", "sigmaProc"), max_rows = 20)
 
 #### Posterior predictive checking: Can the model give rise to new observations that properly resemble the original data?
 ## Script to generate new data. Note that 'model' is an unnecessary block here as restart from results. gq stands for generated quantities
@@ -373,13 +390,6 @@ stanData$nfi_id = unique(indices[, .(plot_id, tree_id, nfi_index)])[, nfi_index]
 
 if (length(stanData$nfi_id) != stanData$n_indiv)
 	stop("Dimensions mismatch")
-
-# for (i in 1:length(stanData))
-# 	if (sum(is.na(stanData[[i]])) != 0)
-# 		print(i) #! THERE ARE NA IN THE pH!!!!!
-
-# names(stanData)
-# stanData = stanData[-27]
 
 # Simulations
 generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
@@ -447,7 +457,7 @@ qqline(dt_dharma[, residuals_obs], col = "#34568B", lwd = 3)
 dev.off()
 
 ## Check that the process error does not show any pattern with any predictor
-latentG_residuals_array = generate_quantities$draws("latentG_residuals") #! Used to be procError_sim
+latentG_residuals_array = generate_quantities$draws("latentG_residuals")
 mean(latentG_residuals_array)
 
 dim(latentG_residuals_array) # iter_sampling * n_chains * n_latentGrowth
@@ -471,8 +481,8 @@ if (length(index_notLastMeasure) != length(latentG_residuals_avg))
 latent_dbh = apply(generate_quantities$draws("yearly_latent_dbh"), 3, mean)
 latent_dbh = latent_dbh[index_notLastMeasure]
 
-jpeg(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "latentG_residuals_vs_dbh_check.jpg"), quality = 50)
-plot(latent_dbh, latentG_residuals_avg, type = "l")
+pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "latentG_residuals_vs_dbh_check.pdf"), height = 6, width = 6)
+smoothScatter(x = latent_dbh, y = latentG_residuals_avg)
 dev.off()
 
 cor(latent_dbh, latentG_residuals_avg)
