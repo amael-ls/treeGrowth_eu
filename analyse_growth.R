@@ -301,9 +301,40 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 	max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
 
 	if (isTRUE(all.equal(fun, dnorm)))
+	{
 		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, mean = arg1, sd = arg2)[["objective"]]
+		check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 100*min_x, -100*min_x), upper = min_x, mean = arg1, sd = arg2)
+		while (check_min_bound$value > 0.1)
+		{
+			min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+			check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 100*min_x, -100*min_x), upper = min_x, mean = arg1, sd = arg2)
+		}
+
+		check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -100*max_x, 100*max_x), mean = arg1, sd = arg2)
+		while (check_max_bound$value > 0.1)
+		{
+			max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -100*max_x, 100*max_x), mean = arg1, sd = arg2)
+		}
+	}
+
 	if (isTRUE(all.equal(fun, dgamma)))
+	{
 		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, shape = arg1, rate = arg2)[["objective"]]
+		check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 100*min_x, -100*min_x), upper = min_x, shape = arg1, rate = arg2)
+		while (check_min_bound$value > 0.1)
+		{
+			min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+			check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 100*min_x, -100*min_x), upper = min_x, shape = arg1, rate = arg2)
+		}
+
+		check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -100*max_x, 100*max_x), shape = arg1, rate = arg2)
+		while (check_max_bound$value > 0.1)
+		{
+			max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -100*max_x, 100*max_x), shape = arg1, rate = arg2)
+		}
+	}
 	max_y = max(max_y, max_y_prior)
 	max_y = ifelse (max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
 
@@ -320,7 +351,7 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 	{
 		colours = MetBrewer::met.brewer("Hokusai3", length_params)
 		colours_str = grDevices::colorRampPalette(colours)(length_params)
-		colours_str_pol = paste0(colours_str, "22")
+		colours_str_pol = paste0(colours_str, "66")
 		plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), ylab = "frequence", main = paste("Prior and posterior", params),
 			xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""))
 		for (i in 1:length_params)
@@ -330,12 +361,12 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 		}
 	} else {
 		plot(density_from_draws, xlim = c(min_x, max_x), col = "#295384", lwd = 2, main = paste("Prior and posterior", params))
-		polygon(density_from_draws, col = "#29538422")
+		polygon(density_from_draws, col = "#29538466")
 	}
 
 	# Plot prior
 	curve(fun(x, arg1, arg2), add = TRUE, lwd = 2, col = "#F4C430")
-	DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#F4C43022", density = NA)
+	DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#F4C43066", density = NA)
 
 	# Add legend
 	if (multi & !is.null(ls_nfi))
@@ -363,9 +394,9 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 
 #### Read data
 ## Common variables
-species = "Abies grandis" #"Abies grandis", "Acer monspessulanum", "Fagus sylvatica", "Tilia platyphyllos"
+species = "Fagus sylvatica" #"Abies grandis", "Acer monspessulanum", "Fagus sylvatica", "Tilia platyphyllos"
 path = paste0("./", species, "/")
-run = 1
+run = 2
 info_lastRun = getLastRun(path = path, run = run)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
@@ -402,7 +433,12 @@ params_names = c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "p
 pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "pairs.pdf"), height = 10, width = 10)
 par(mfrow = c(n_rows, n_cols))
 for (i in 1:length(params_names))
+{
 	smoothScatter(x = energy, y = as.vector(results$draws(params_names[i])), ylab = params_names[i])
+	correl = cor(energy, as.vector(results$draws(params_names[i])))
+	if (abs(correl) > 0.1)
+		print(paste0("Correlation for ", params_names[i],": ", round(correl, 3)))
+}
 dev.off()
 
 #### Plot prior and posterior
@@ -417,7 +453,7 @@ print(paste("The sd of growth is +/-", round(sd_dbh*sqrt(mean(sigmaProc_array)),
 # For routine measurement error (sigmaObs), it is a sd (of a normal distrib)
 sigmaObs_array = results$draws("sigmaObs")
 lazyPosterior(draws = sigmaObs_array, fun = dgamma, filename = paste0(path, "sigmaObs_posterior"), run = run, xlab = "Error in mm",
-	shape = 3.0/0.075, rate = sd_dbh*sqrt(3.0)/0.075, params = "routine obs error", multi = TRUE, scaling = sd_dbh, ls_nfi = c("Fr", "De"))
+	shape = 3.0/0.025, rate = sd_dbh*sqrt(3.0)/0.025, params = "routine obs error", multi = TRUE, scaling = sd_dbh, ls_nfi = c("Fr", "De"))
 
 # Extreme error (etaObs)...
 etaObs_array = results$draws("etaObs")
