@@ -15,7 +15,7 @@ library(png)
 
 use_python("/usr/bin/python3")
 
-#### Tool function
+#### Tool functions
 ## Get fixed values parameters
 getParams = function(model_cmdstan, params_names, type = "mean")
 {
@@ -165,7 +165,7 @@ reshapeDraws = function(draws_array, id_latent, regex = "latent_dbh")
 }
 
 ## Function to plot the prior and posterior of a parameter
-lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
+lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi = FALSE, ls_nfi = NULL, ...)
 {
 	# Check-up
 	if (!is.array(draws))
@@ -189,10 +189,18 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 		print(paste0("Using n = ", n, " for the density plot"))
 	}
 
+	# Get the parameter's name if provided
 	params = ""
 	params_ind = (ls_names == "params")
 	if (any(params_ind))
 		params = providedArgs[["params"]]
+
+	# Get the index of the x-axis label
+	xlab_ind = (ls_names == "xlab")
+
+	# Get the scaling on the x-axis if provided
+	scaling_ind = (ls_names == "scaling")
+	if (any(scaling_ind)) scaling = providedArgs[["scaling"]] else scaling = 1
 
 	# Get parameters for prior
 	if (isTRUE(all.equal(fun, dnorm)))
@@ -201,7 +209,7 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 			stop("You must provide mean and sd for dnorm")
 		
 		arg1 = providedArgs[["mean"]]
-		arg2 = providedArgs[["sd"]]
+		arg2 = scaling*providedArgs[["sd"]]
 	}
 
 	if (isTRUE(all.equal(fun, dgamma)))
@@ -212,7 +220,7 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 		if (all(c("mean", "var") %in% names(providedArgs)))
 		{
 			temp1 = providedArgs[["mean"]]
-			temp2 = providedArgs[["var"]]
+			temp2 = scaling^2*providedArgs[["var"]] # Squared because in this case it is a variance, not a std. dev.
 
 			arg1 = temp1^2/temp2 # shape
 			arg2 = temp1/temp2 # rate
@@ -221,7 +229,7 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 		if (all(c("shape", "rate") %in% names(providedArgs)))
 		{
 			arg1 = providedArgs[["shape"]]
-			arg2 = providedArgs[["rate"]]
+			arg2 = providedArgs[["rate"]]/scaling
 		}
 	}
 
@@ -229,13 +237,16 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 	{
 		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape1", "shape2") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape1 and shape2 for dbeta")
+
+		if (scaling != 1)
+			warning("I have not coded the scaling for the beta distribution. Your plot might be out of the window")
 		
 		if (all(c("mean", "var") %in% names(providedArgs)))
 		{
 			temp1 = providedArgs[["mean"]]
 			temp2 = providedArgs[["var"]]
 
-			arg1 = ((1 - temp1)/temp2 - 1/temp1)*temp1 ^ 2 # shape 1
+			arg1 = ((1 - temp1)/temp2 - 1/temp1)*temp1^2 # shape 1
 			arg2 = arg1*(1/temp1 - 1) # shape 2
 		}
 
@@ -244,16 +255,49 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 			arg1 = providedArgs[["shape1"]]
 			arg2 = providedArgs[["shape2"]]
 		}
+		max_y_prior = optimise(f = fun, interval = c(0, 1), maximum = TRUE, shape1 = arg1, shape2 = arg2)[["objective"]]
 	}
 
 	# Get posterior
-	density_from_draws = density(draws, n = n)
-	x = density_from_draws$x
-	min_x = min(x)
-	max_x = max(x)
+	if (multi)
+	{
+		info = summary(draws)
+		setDT(info)
+		length_params = info[, .N]
+		density_from_draws = vector(mode = "list", length = length_params)
+		x = vector(mode = "list", length = length_params)
+		y = vector(mode = "list", length = length_params)
+		names(density_from_draws) = info[, variable]
+		names(x) = info[, variable]
+		names(y) = info[, variable]
+		for (varName in info[, variable])
+		{
+			density_from_draws[[varName]] = density(scaling*draws[, , varName], n = n)
+			x[[varName]] = density_from_draws[[varName]]$x
+			y[[varName]] = density_from_draws[[varName]]$y
+		}
+		min_x = min(sapply(x, min))
+		max_x = max(sapply(x, max))
+		max_y = max(sapply(y, max))
+	
+	} else {
+		density_from_draws = density(draws, n = n)
+		x = density_from_draws$x
+		y = density_from_draws$y
+		min_x = min(x)
+		max_x = max(x)
+		max_y = max(y)
+	}
 
 	min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
 	max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+
+	if (isTRUE(all.equal(fun, dnorm)))
+		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, mean = arg1, sd = arg2)[["objective"]]
+	if (isTRUE(all.equal(fun, dgamma)))
+		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, shape = arg1, rate = arg2)[["objective"]]
+	max_y = max(max_y, max_y_prior)
+	max_y = ifelse (max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
 
 	# Plot
 	if (!is.null(filename))
@@ -263,17 +307,49 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, ...)
 	}
 	
 	# Plot posterior
-	plot(density_from_draws, xlim = c(min_x, max_x), col = "#34568B", lwd = 2, main = paste("Prior and posterior", params))
-	polygon(density_from_draws, col = "#34568B22")
+	if (multi)
+	{
+		colours = MetBrewer::met.brewer("Hokusai3", length_params)
+		colours_str = grDevices::colorRampPalette(colours)(length_params)
+		colours_str_pol = paste0(colours_str, "22")
+		plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), ylab = "frequence", main = paste("Prior and posterior", params),
+			xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""))
+		for (i in 1:length_params)
+		{
+			lines(x = density_from_draws[[i]]$x, y = density_from_draws[[i]]$y, col = colours_str[i], lwd = 2)
+			polygon(density_from_draws[[i]], col = colours_str_pol[i])
+		}
+	} else {
+		plot(density_from_draws, xlim = c(min_x, max_x), col = "#295384", lwd = 2, main = paste("Prior and posterior", params))
+		polygon(density_from_draws, col = "#29538422")
+	}
 
 	# Plot prior
 	curve(fun(x, arg1, arg2), add = TRUE, lwd = 2, col = "#F4C430")
 	DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#F4C43022", density = NA)
 
-	legend(x = "topleft", legend = c("Prior", "Posterior"), fill = c("#F4C430", "#34568B"), box.lwd = 0)
+	# Add legend
+	if (multi & !is.null(ls_nfi))
+		if (length(ls_nfi) != length_params)
+			warning("Dimension mismatch between ls_nfi and length_params! The legend might not be correctly printed")
+
+	if (!multi & !is.null(ls_nfi))
+		if (length(ls_nfi) != 1)
+			warning("To many NFI provided in ls_nfi! The legend might not be correctly printed")
+
+	if (multi)
+	{
+		legend(x = "topleft", legend = c("Prior", paste("Posterior", if (!is.null(ls_nfi)) ls_nfi else 1:length_params)),
+			fill = c("#F4C430", colours_str), box.lwd = 0)
+	} else {
+		legend(x = "topleft", legend = c("Prior", paste("Posterior", ifelse(!is.null(ls_nfi), ls_nfi, ""))),
+			fill = c("#F4C430", "#295384"), box.lwd = 0)
+	}
 
 	if (!is.null(filename))
 		dev.off()
+
+	return(list(arg1 = arg1, arg2 = arg2, min_x = min_x, max_x = max_x, max_y = max_y, max_y_prior = max_y_prior, filename = filename))
 }
 
 #### Read data
@@ -329,6 +405,24 @@ lazyPosterior(draws = sigmaProc_array, fun = dgamma, filename = paste0(path, "si
 print(paste("The sd of growth is +/-", round(sd_dbh*sqrt(mean(sigmaProc_array)), 3), "mm"))
 
 ## For measurement error
+# For routine measurement error (sigmaObs), it is a sd (of a normal distrib)
+sigmaObs_array = results$draws("sigmaObs")
+lazyPosterior(draws = sigmaObs_array, fun = dgamma, filename = paste0(path, "sigmaObs_posterior"), run = run, xlab = "Error in mm",
+	shape = 3.0/0.075, rate = sd_dbh*sqrt(3.0)/0.075, params = "routine obs error", multi = TRUE, scaling = sd_dbh, ls_nfi = c("Fr", "De"))
+
+# Extreme error (etaObs)...
+etaObs_array = results$draws("etaObs")
+lazyPosterior(draws = etaObs_array, fun = dgamma, filename = paste0(path, "etaObs_posterior"), run = run, xlab = "Error in mm",
+	shape = 25.6^2/6.2, rate = sd_dbh*25.6/6.2, params = "extreme obs error", multi = TRUE, scaling = sd_dbh, ls_nfi = c("Fr", "De"))
+
+# ... and its associated probability of occurrence
+proba_array = results$draws("proba")
+lazyPosterior(draws = proba_array, fun = dbeta, filename = paste0(path, "proba_posterior"), run = run, xlab = "Probability",
+	shape1 = 48.67, shape2 = 1714.84, params = "probability extreme obs error", multi = TRUE, ls_nfi = c("Fr", "De"))
+
+print(paste("The extreme error is", round(sd_dbh*mean(etaObs_array), 3), "mm. It occurs with a probability p =",
+	round(mean(proba_array), 4)))
+
 for (i in 1:stanData$n_inventories)
 {
 	# For routine measurement error (sigmaObs), it is a sd (of a normal distrib)
