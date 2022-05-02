@@ -34,7 +34,7 @@ getParams = function(model_cmdstan, params_names, type = "mean")
 }
 
 ## Get name of the last run
-getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd", run = NULL, getAll = FALSE)
+getLastRun = function(path, begin = "^growth-", extension = ".rds$", format = "ymd", run = NULL, getAll = FALSE, hour = TRUE)
 {
 	if (format != "ymd")
 		stop("Format is not recognised. For now only year-month-day alias ymd works")
@@ -45,7 +45,7 @@ getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd
 		begin = paste0(begin, "run=", run, "-")
 	}
 	
-	ls_files = list.files(path = path, pattern = paste0("^", begin, ".*", extension, "$"))
+	ls_files = list.files(path = path, pattern = paste0(begin, ".*", extension))
 
 	if (length(ls_files) == 0)
 	{
@@ -61,13 +61,21 @@ getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd
 			from = stri_locate(ls_files, regex = begin)[, "end"] + 1,
 			to = stri_locate_last(ls_files, regex = "_[[:digit:]].*.rds")[, "start"] - 1),
 		regex = "-", simplify = TRUE)
-	n = length(ls_files)
 	
 	if (format == "ymd") # year month day
 		dt = data.table(file = ls_files, year = ls_files_split[, 1], month = ls_files_split[, 2], day = ls_files_split[, 3])
 
+	if (hour)
+	{
+		dt[, c("hour", "minute") := as.list(stri_split(str = stri_sub(str = file,
+				from = stri_locate_last(file, regex = "_")[, "end"] + 1,
+				to = stri_locate_last(file, regex = ".rds")[, "start"] - 1),
+			regex = "h", simplify = TRUE)), by = file]
+	}
+
 	dt[stri_detect(str = day, regex = extension), day := stri_sub(str = day, to = stri_locate_first(str = day, regex = "_")[,"start"] - 1)]
-	setorder(dt, year, month, day)
+
+	setorder(dt, year, month, day, hour, minute)
 	if (getAll)
 		return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-"), allFiles = dt))
 	return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-")))
@@ -302,8 +310,9 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 	# Plot
 	if (!is.null(filename))
 	{
-		pdf(paste0(filename, ifelse(!is.null(run), paste0("_", run), ""), ".pdf"))
-		print(paste0("Figure saved under the name:", filename, ifelse(!is.null(run), paste0("_", run), ""), ".pdf"))
+		filename = paste0(filename, ifelse(!is.null(run), paste0("_", run), ""), ".pdf")
+		pdf(filename)
+		print(paste0("Figure saved under the name:", filename))
 	}
 	
 	# Plot posterior
