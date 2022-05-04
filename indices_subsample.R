@@ -9,7 +9,7 @@
 #	tree x is measured in 2000 and in 2005. The index in the data are for instance 4 and 5.
 #	However, the yearly time-step state space model will fill the missing years, so that the year 2005 will be in position 9!
 
-indices_subsample = function(species_id, run_id, treeData, savingPath, mainFolder, climFolder)
+indices_subsample = function(run_id, treeData, savingPath, mainFolder, climFolder)
 {
 	#### Tool functions
 	## Function to fill the gap between two years and get the index of the provided years
@@ -42,21 +42,24 @@ indices_subsample = function(species_id, run_id, treeData, savingPath, mainFolde
 		nbIndiv = unique(trees_NFI[, .(plot_id, tree_id)])[, .N]
 		length_filled_years = sum(trees_NFI[, max(year) - min(year) + 1, by = .(plot_id, tree_id)][, V1])
 
-		indices = data.table(year = integer(length_filled_years), tree_id = integer(length_filled_years),
-			plot_id = character(length_filled_years), index_gen = integer(length_filled_years),
-			index_clim_start = integer(length_filled_years), index_clim_end = integer(length_filled_years))
+		indices = data.table(year = integer(trees_NFI[, .N]), tree_id = integer(trees_NFI[, .N]),
+			plot_id = character(trees_NFI[, .N]), index_gen = integer(trees_NFI[, .N]),
+			index_clim_start = integer(trees_NFI[, .N]), index_clim_end = integer(trees_NFI[, .N]))
 
 		for (plot in trees_NFI[, unique(plot_id)])
 		{
 			for (indiv in trees_NFI[plot_id == plot, unique(tree_id)])
 			{
 				years_indices = fillYears(trees_NFI[plot_id == plot & tree_id == indiv, year])
+				
 				start = end + 1
-				end = end + length(years_indices[["fill_years"]])
-				indices[start:end, year := years_indices[["fill_years"]]]
+				end = start + length(years_indices[["indices"]]) - 1
+				
+				indices[start:end, year := years_indices[["fill_years"]][years_indices[["indices"]]]]
 				indices[start:end, tree_id := indiv]
 				indices[start:end, plot_id := plot]
-				indices[years_indices[["indices"]] + count, index_gen := years_indices[["indices"]] + count]
+				indices[start:end, index_gen := years_indices[["indices"]] + count]
+
 				count = count + years_indices[["indices"]][length(years_indices[["indices"]])]
 				iter = iter + 1
 				if (iter %% 1000 == 0)
@@ -93,7 +96,7 @@ indices_subsample = function(species_id, run_id, treeData, savingPath, mainFolde
 	climate = readRDS(paste0(climFolder, "europe_reshaped_climate.rds"))
 	climate[, row_id := 1:.N]
 
-	## Time space coordinates (combination of where and whem)
+	## Time space coordinates (combination of where and when)
 	time_space = readRDS(paste0(mainFolder, "time_coordinates_growth.rds"))
 
 	#### Create indices
@@ -102,9 +105,6 @@ indices_subsample = function(species_id, run_id, treeData, savingPath, mainFolde
 
 	## For the climate
 	indices_climate(indices, climate, time_space)
-
-	## Remove the zeros #! (because of a quick and dirty solution in indices_state_space, I might optimise this code later)
-	indices = indices[index_gen != 0]
 
 	## Add an index per plot
 	indices[, plot_index := .GRP, by = plot_id]
