@@ -10,19 +10,22 @@ library(data.table)
 library(stringi)
 library(terra)
 
+#? --------------------------------------------------------------------------------------------------------
+######## PART I: Spatial plot of the data (plot location)
+#? --------------------------------------------------------------------------------------------------------
 #### Load data
-## Common variables
+## Folders
 treeData_folder = "/home/amael/project_ssm/inventories/growth/"
 shapefile_folder = "/home/amael/shapefiles/europe/"
 
+## Tree data and shapefile
 treeData = readRDS(paste0(treeData_folder, "standardised_european_growth_data_reshaped.rds"))
 coords = vect(unique(treeData[, .(x, y)]), geom = c("x", "y"), crs = "EPSG:4326")
 
 europe = vect(paste0(shapefile_folder, "europe.shp"))
 
+#### Plot
 pdf("plots_location_growth.pdf", height = 10, width = 10)
-# plot(0, pch = "", xlim = ext(europe)[1:2], ylim = ext(europe)[3:4], axes = FALSE, bg = "transparent",
-	# xlab = "", ylab = "", asp = NA, type = "n")
 plot(europe, col = "#C4AC7C44", border = "#9E391A", axes = FALSE)
 plot(coords, pch = 19, cex = 0.025, col = "#354536", add = TRUE)
 plot(europe, col = NA, border = "#9E391A", add = TRUE)
@@ -30,7 +33,93 @@ dev.off()
 
 
 
+#? --------------------------------------------------------------------------------------------------------
+######## PART II: Plot of the data in the climate and ph space
+#? --------------------------------------------------------------------------------------------------------
+#### Tool function
+## Create a colour gradient
+gradColours = function(x, colours, n)
+  return(colorRampPalette(colours) (n) [findInterval(x, seq(min(x), max(x), length.out = n))])
 
+#### Load data
+## Folders
+climate_folder = "/home/amael/project_ssm/inventories/growth/"
+ph_folder = "/home/amael/project_ssm/inventories/growth/"
+
+## Climate and pH data
+climate = readRDS(paste0(climate_folder, "europe_reshaped_climate.rds"))
+ph = readRDS(paste0(ph_folder, "europe_reshaped_soil.rds"))
+
+## Load species table
+infoSpecies = readRDS("./speciesInformations.rds")
+
+## Load function
+source("./extractClimate.R")
+
+#### For loop for each species
+for (i in 1:infoSpecies[, .N])
+{
+	species = infoSpecies[i, speciesName_sci]
+	path = paste0("./", species, "/")
+	if (!dir.exists(path))
+		next;
+	
+	indices = readRDS(paste0(path, "full_indices.rds"))
+	predictors_data = extractClimate(climate = climate, ph = ph, indices = indices)[["extracted_predictors"]]
+	subset_trees = treeData[speciesName_sci == species, .(plot_id, tree_id, year, dbh)]
+
+	# Compute growth. It is assumed that the data set is ordered by plot_id, tree_id, year!
+	subset_trees[, prev_dbh := shift(dbh, 1, NA), by = .(plot_id, tree_id)]
+	subset_trees[, prev_year := shift(year, 1, NA), by = .(plot_id, tree_id)]
+	subset_trees[, annual_growth := (dbh - prev_dbh)/(year - prev_year)]
+
+	# Cleaning data
+	subset_trees[, c("prev_dbh", "prev_year") := NULL]
+	subset_trees = subset_trees[!is.na(annual_growth)]
+
+	cols = c("pr", "tas", "tasmin", "tasmax")
+	predictors_data[, paste0(cols, "_avg") := lapply(.SD, mean), .SDcols = cols, by = plot_id]
+
+	subset_trees = merge.data.table(subset_trees, predictors_data, by = c("plot_id", "year"))
+
+	#### Plot
+	## Set plot layout
+	pdf(paste0(path, "growth_vs_precip.pdf"), height = 10, width = 10)
+	layout(mat = matrix(c(2, 1, 0, 3, 0, 4), nrow = 2, ncol = 3),
+		heights = c(1, 2), # Heights of the two rows
+		widths = c(2, 1, 1)) # Widths of the three columns
+
+	## Colours
+	colours = MetBrewer::met.brewer("Hiroshige", direction = -1)
+	colours_str = gradColours(subset_trees[, tas_avg], colours, 30)
+
+	# Plot 1: Scatter plot growth versus precip, with temperature as colour
+	par(mar = c(5, 4, 2, 0))
+	plot(x = subset_trees[, pr_avg], y = subset_trees[, annual_growth], xlab = "Averaged annual precipitation over the growing years",
+		ylab = "Growth in mm", pch = 19, col = paste0(colours_str, "66"))
+
+	# Plot 2: Top (precipitation) boxplot
+	par(mar = c(0, 4, 0, 0))
+	boxplot(subset_trees[, pr_avg], xaxt = "n", yaxt = "n", bty = "n", col = "white", frame = FALSE, horizontal = TRUE)
+
+	# Plot 3: Right (growth) boxplot
+	par(mar = c(5, 0, 0, 0))
+	boxplot(subset_trees[, annual_growth], xaxt = "n", yaxt = "n", bty = "n", col = "white", frame = FALSE)
+
+	# Plot 4: Middle right (temperature) matrix gradient
+	par(mar = c(5, 2, 2, 0))
+
+	t_min = round(min(floor(subset_trees[, tas_avg])))
+	t_max = round(max(ceiling(subset_trees[, tas_avg])))
+
+	legend_image = as.raster(matrix(colorRampPalette(MetBrewer::met.brewer("Hiroshige")) (30), ncol = 1))
+	plot(c(0, 2), c(t_min, t_max), type = "n", axes = FALSE, xlab = "", ylab = "", main = "Avg temperature")
+	text(x = 1, y = seq(t_min, t_max, by = 3), labels = seq(t_min, t_max, by = 3))
+	rasterImage(legend_image, 0, t_min, 0.5, t_max) # xleft, ybottom, xright, ytop
+
+	dev.off()
+	print(paste(species, "done"))
+}
 
 
 #* -------------------------------------------------------------------------------------------
