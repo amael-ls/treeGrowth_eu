@@ -1,5 +1,5 @@
 
-#### Aim of prog: To list some useful informations about each species of the data set
+#### Aims of prog: To list some useful informations about each species of the data set and to run indices_subsample without subsampling
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -34,3 +34,10 @@ info[, ls_countries := paste(treeData[speciesName_sci, unique(country), on = "sp
 
 #### Save informations
 saveRDS(info, "./speciesInformations.rds")
+
+#### Run for each species the function indices_subsample with run = "full" (i.e., no subsampling)
+source("./indices_subsample.R")
+clim_folder = treeData_folder
+
+for (species in info[c(1:5, 17, 48), speciesName_sci]) # Do it for all species later!
+	indices_subsample("full", treeData[speciesName_sci == species], paste0("./", species, "/"), treeData_folder, clim_folder)
