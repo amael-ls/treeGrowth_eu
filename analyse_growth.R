@@ -392,11 +392,62 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 	return(list(arg1 = arg1, arg2 = arg2, min_x = min_x, max_x = max_x, max_y = max_y, max_y_prior = max_y_prior, filename = filename))
 }
 
+## Function to expand the basic names when there is more than one NFI
+expand = function(base_names, nb_nfi, patterns = c("Obs", "proba"))
+{
+	if (nb_nfi < 1)
+		stop("Nothing to expand")
+	
+	new_names = vector(mode = "list", length = length(patterns))
+	old_names = base_names
+	for (i in 1:length(patterns))
+	{
+		reg = patterns[i]
+		toModify = base_names[stri_detect(base_names, regex = reg)]
+		base_names = base_names[!stri_detect(base_names, regex = reg)]
+		new_names[[i]] = character(length = nb_nfi*length(toModify))
+		for (j in 1:length(toModify))
+			new_names[[i]][((j - 1)*nb_nfi + 1):(j*nb_nfi)] = paste0(toModify[j], "[", 1:nb_nfi, "]")
+	}
+
+	combined_names = c(base_names, unlist(new_names))
+	return(list(old_names = old_names, new_names = combined_names))
+}
+
+## Function to do a pair plot of parameters versus energy
+energyPairs = function(path, run, results, nb_nfi, energy, rm_names = "latent", n_rows = 3, n_cols = 6, filename = "pairs.pdf", tol = 0.15)
+{
+	filename = paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "pairs.pdf")
+
+	params_names = results$metadata()$stan_variables
+	params_names = params_names[params_names != "averageGrowth"]
+	for (i in 1:length(rm_names))
+		params_names = params_names[!stri_detect(params_names, regex = rm_names[i])]
+	
+	if (nb_nfi > 1)
+		params_names = expand(params_names, nb_nfi)[["new_names"]]
+
+	if (length(params_names) > n_rows*n_cols)
+		warning("Not enough rows or cols for the number of provided parameters")
+	
+	pdf(filename, height = 10, width = 10)
+	par(mfrow = c(n_rows, n_cols))
+	for (i in 1:length(params_names))
+	{
+		smoothScatter(x = energy, y = as.vector(results$draws(params_names[i])), ylab = params_names[i])
+		correl = cor(energy, as.vector(results$draws(params_names[i])))
+		if (abs(correl) > tol)
+			print(paste0("Correlation for ", params_names[i],": ", round(correl, 3)))
+	}
+	dev.off()
+	return (filename)
+}
+
 #### Read data
 ## Common variables
-species = "Fagus sylvatica" #"Abies grandis", "Acer monspessulanum", "Fagus sylvatica", "Tilia platyphyllos"
+species = "Acer monspessulanum" #"Abies grandis", "Acer monspessulanum", "Acer opalus", "Fagus sylvatica", "Tilia platyphyllos"
 path = paste0("./", species, "/")
-run = 2
+run = 1
 info_lastRun = getLastRun(path = path, run = run)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
@@ -422,24 +473,8 @@ results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr
 energy = as.vector(results$sampler_diagnostics(inc_warmup = FALSE)[, , "energy__"])
 length(energy)
 
-## Set plot layout
-n_rows = 3
-n_cols = 6
-
-params_names = c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs[1]", "sigmaObs[2]", "etaObs[1]", "etaObs[2]", "proba[1]", "proba[2]",
-	"sigmaProc")
-
-pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "pairs.pdf"), height = 10, width = 10)
-par(mfrow = c(n_rows, n_cols))
-for (i in 1:length(params_names))
-{
-	smoothScatter(x = energy, y = as.vector(results$draws(params_names[i])), ylab = params_names[i])
-	correl = cor(energy, as.vector(results$draws(params_names[i])))
-	if (abs(correl) > 0.1)
-		print(paste0("Correlation for ", params_names[i],": ", round(correl, 3)))
-}
-dev.off()
+## Plot
+energyPairs(path, run = 1, results, nb_nfi = 1, energy)
 
 #### Plot prior and posterior
 ## For process error (sigmaProc), it is a variance (of a gamma distrib)
@@ -453,17 +488,17 @@ print(paste("The sd of growth is +/-", round(sd_dbh*sqrt(mean(sigmaProc_array)),
 # For routine measurement error (sigmaObs), it is a sd (of a normal distrib)
 sigmaObs_array = results$draws("sigmaObs")
 lazyPosterior(draws = sigmaObs_array, fun = dgamma, filename = paste0(path, "sigmaObs_posterior"), run = run, xlab = "Error in mm",
-	shape = 3.0/0.025, rate = sd_dbh*sqrt(3.0)/0.025, params = "routine obs error", multi = TRUE, scaling = sd_dbh, ls_nfi = c("Fr", "De"))
+	shape = 3.0/0.025, rate = sd_dbh*sqrt(3.0)/0.025, params = "routine obs error", multi = TRUE, scaling = sd_dbh, ls_nfi = c("Fr"))
 
 # Extreme error (etaObs)...
 etaObs_array = results$draws("etaObs")
 lazyPosterior(draws = etaObs_array, fun = dgamma, filename = paste0(path, "etaObs_posterior"), run = run, xlab = "Error in mm",
-	shape = 25.6^2/6.2, rate = sd_dbh*25.6/6.2, params = "extreme obs error", multi = TRUE, scaling = sd_dbh, ls_nfi = c("Fr", "De"))
+	shape = 25.6^2/6.2, rate = sd_dbh*25.6/6.2, params = "extreme obs error", multi = TRUE, scaling = sd_dbh, ls_nfi = c("Fr"))
 
 # ... and its associated probability of occurrence
 proba_array = results$draws("proba")
 lazyPosterior(draws = proba_array, fun = dbeta, filename = paste0(path, "proba_posterior"), run = run, xlab = "Probability",
-	shape1 = 48.67, shape2 = 1714.84, params = "probability extreme obs error", multi = TRUE, ls_nfi = c("Fr", "De"))
+	shape1 = 48.67, shape2 = 1714.84, params = "probability extreme obs error", multi = TRUE, ls_nfi = c("Fr"))
 
 print(paste("The extreme error is", round(sd_dbh*mean(etaObs_array), 3), "mm. It occurs with a probability p =",
 	round(mean(proba_array), 4)))
@@ -503,8 +538,12 @@ lazyTrace(draws = results$draws("pr_slope", inc_warmup = FALSE), filename = past
 lazyTrace(draws = results$draws("pr_slope2", inc_warmup = FALSE), filename = paste0(path, "pr_slope2"), run = run)
 lazyTrace(draws = results$draws("tas_slope", inc_warmup = FALSE), filename = paste0(path, "tas_slope"), run = run)
 lazyTrace(draws = results$draws("tas_slope2", inc_warmup = FALSE), filename = paste0(path, "tas_slope2"), run = run)
+lazyTrace(draws = results$draws("ph_slope", inc_warmup = FALSE), filename = paste0(path, "ph_slope"), run = run)
+lazyTrace(draws = results$draws("ph_slope2", inc_warmup = FALSE), filename = paste0(path, "ph_slope2"), run = run)
 
 lazyTrace(draws = results$draws("competition_slope", inc_warmup = FALSE), filename = paste0(path, "competition_slope"), run = run)
+
+lazyTrace(draws = results$draws("sigmaProc", inc_warmup = FALSE), filename = paste0(path, "sigmaProc"), run = run)
 
 #### Posterior predictive checking: Can the model give rise to new observations that properly resemble the original data?
 ## Script to generate new data. Note that 'model' is an unnecessary block here as restart from results. gq stands for generated quantities
@@ -584,29 +623,30 @@ plt$axvline(x = stanData$n_indiv, linewidth = 2, color = "#CD212A")
 plt$savefig(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "residuals_obs_scatter.png"))
 plt$close(plt$gcf())
 
-pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "residuals_obs_hist.pdf"))
-hist(dt_dharma[, residuals_obs])
-dev.off()
+# pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "residuals_obs_hist.pdf"))
+# hist(dt_dharma[, residuals_obs])
+# dev.off()
 
-qq = qqnorm(dt_dharma[, residuals_obs], pch = 1, frame = FALSE, plot.it = FALSE)
+# qq = qqnorm(dt_dharma[, residuals_obs], pch = 1, frame = FALSE, plot.it = FALSE)
 
-jpeg(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "qqplot.jpg"))
-plot(qq)
-qqline(dt_dharma[, residuals_obs], col = "#34568B", lwd = 3)
-dev.off()
+# jpeg(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "qqplot.jpg"))
+# plot(qq)
+# qqline(dt_dharma[, residuals_obs], col = "#34568B", lwd = 3)
+# dev.off()
 
 ## Check that the process error does not show any pattern with any predictor
 latentG_residuals_array = generate_quantities$draws("latentG_residuals")
 mean(latentG_residuals_array)
+sd_dbh^2*mean(latentG_residuals_array)
 
 dim(latentG_residuals_array) # iter_sampling * n_chains * n_latentGrowth
 
-latentG_residuals_vec = as.vector(latentG_residuals_array) # The order is array[,1,1], array[,2,1], ..., array[,n_chain,1], array[,2,1], ...
-length(latentG_residuals_vec)
+# latentG_residuals_vec = as.vector(latentG_residuals_array) # The order is array[,1,1], array[,2,1], ..., array[,n_chain,1], array[,2,1], ...
+# length(latentG_residuals_vec)
 
-pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "latentG_residuals_check_hist.pdf"))
-hist(latentG_residuals_vec)
-dev.off()
+# pdf(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "latentG_residuals_check_hist.pdf"))
+# hist(latentG_residuals_vec)
+# dev.off()
 
 latentG_residuals_avg = apply(latentG_residuals_array, 3, mean) # Average latentG_residuals for each latent growth (or dbh)
 length(latentG_residuals_avg)
