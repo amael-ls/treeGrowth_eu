@@ -301,7 +301,7 @@ soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
 standBasalArea = readRDS(paste0(standBasalArea_folder, "europe_reshaped_standBasalArea.rds"))
 
 ## Set-up indices
-indices = indices_subsample(species_id, run_id, treeData, savingPath, mainFolder, clim_folder)
+indices = indices_subsample(run_id, treeData, savingPath, mainFolder, clim_folder)
 
 if (indices[, .N] != treeData[, .N])
 	stop(paste0("Dimension mismatch between indices and treeData for species `", species, "`"))
@@ -382,7 +382,7 @@ ba_mu_sd = readRDS(paste0(savingPath, run_id, "_ba_normalisation.rds"))
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 1500
+maxIter = 2000
 n_chains = 3
 
 # Initial values for states only
@@ -456,7 +456,7 @@ model = cmdstan_model("./growth.stan")
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
-	iter_warmup = round(1*maxIter/3), iter_sampling = round(2*maxIter/3), save_warmup = TRUE, init = initVal_Y_gen,
+	iter_warmup = round(maxIter/2), iter_sampling = round(maxIter/2), save_warmup = TRUE, init = initVal_Y_gen,
 	max_treedepth = 13, adapt_delta = 0.9)
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
@@ -466,7 +466,7 @@ results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_e
 results$cmdstan_diagnose()
 
 results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"))
+	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
 
 
 # The following parameters had split R-hat greater than 1.05:
