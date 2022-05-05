@@ -5,7 +5,6 @@ extractClimate = function(...)
 	# Get list of arguments
 	providedArgs = list(...)
 	ls_names = names(providedArgs)
-	nbArgs = length(providedArgs)
 
 	isConform = FALSE
 
