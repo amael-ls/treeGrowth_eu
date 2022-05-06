@@ -516,7 +516,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 			correl_ls[[i]] = temporary[["correl_energy"]]
 		}
 		error_dt = rbindlist(error_ls) # , idcol = "run_id"
-		correl_dt = rbindlist(correl_ls) # , idcol = "run_id"
+		correl_energy = rbindlist(correl_ls) # , idcol = "run_id"
 	} else {
 		# Get inf last run
 		info_lastRun = getLastRun(path = path, run = run)
@@ -626,7 +626,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 
 		## Add run id to data tables
 		error_dt[, run_id := run]
-		correl_dt[, run_id := run]
+		correl_energy[, run_id := run]
 	}
 	return (list(error_dt = error_dt, correl_energy = correl_energy))
 }
@@ -647,13 +647,13 @@ plot_correl_error = function(error_dt, correl_dt, threshold_correl = 0.1, rm_cor
 		ls_params = current_correl[speciesName_sci == species, unique(parameters)]
 		nb_params = length(ls_params)
 
+		# Plot correlations parameters versus energy
 		pdf(paste0(path, "correlations_energy.pdf"), height = 10, width = 10)
 		par(mar = c(5, 10, 0, 0))
 		plot(0, type = "n", xlim = c(-1, 1), ylim = c(0, nb_params + 1), ylab = "", xlab = "Correlation with energy",
 			axes = FALSE, xaxt = "n", yaxt = "n")
 
 		param_counter = 1
-		current_param = "dbh_slope"
 		for (current_param in ls_params)
 		{
 			mean_value = current_correl[parameters == current_param, mean(correlation_energy)]
@@ -686,6 +686,7 @@ plot_correl_error = function(error_dt, correl_dt, threshold_correl = 0.1, rm_cor
 		axis(side = 1, at = c(-1, -0.5, -threshold_correl, 0, threshold_correl, 0.5, 1))
 		axis(side = 2, at = 1:nb_params, labels = ls_params, las = 1)
 		dev.off()
+		print(paste(species, "done"))
 	}
 }
 
@@ -723,7 +724,7 @@ correl_dt = rbindlist(correl_ls, idcol = "speciesName_sci")
 saveRDS(error_dt, "./error_species.rds")
 saveRDS(correl_dt, "./correlation_energy_species.rds")
 
-
+plot_correl_error(error_dt, correl_dt, threshold_correl = 0.1, rm_correl = "lp__")
 
 
 #* --------------------------------------------------------------------------------------------
