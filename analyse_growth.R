@@ -493,19 +493,30 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 	path = paste0("./", species, "/")
 	n_nfi = length(ls_nfi)
 	error_dt = data.table(nfi = rep(c(ls_nfi, "all")), sigmaProc = numeric(n_nfi + 1), sigmaObs = numeric(n_nfi + 1),
-		etaObs = numeric(n_nfi + 1), proba = numeric(n_nfi + 1), correl = numeric(n_nfi + 1))
+		etaObs = numeric(n_nfi + 1), proba = numeric(n_nfi + 1), correl_sigma_eta = numeric(n_nfi + 1),
+		correl_sigma_proba = numeric(n_nfi + 1), correl_eta_proba = numeric(n_nfi + 1))
 	setkey(error_dt, nfi)
 	
 	if (multi & !is.null(run))
 	{
 		print(paste0("Run = ", run, "; multi and n_runs parameters ignored"))
-		centralised_fct(species, FALSE, n_runs, run) # Recursive call
+		temporary = centralised_fct(species, FALSE, n_runs, run) # Recursive call
+		error_dt = temporary[["error_dt"]]
+		correl_energy = temporary[["correl_energy"]]
 	}
 
-	if (multi)
+	if (multi & is.null(run))
 	{
+		error_ls = vector(mode = "list", length = n_runs)
+		correl_ls = vector(mode = "list", length = n_runs)
 		for (i in 1:n_runs)
-			centralised_fct(species, FALSE, n_runs, i) # Recursive call
+		{
+			temporary = centralised_fct(species, FALSE, n_runs, i) # Recursive call
+			error_ls[[i]] = temporary[["error_dt"]]
+			correl_ls[[i]] = temporary[["correl_energy"]]
+		}
+		error_dt = rbindlist(error_ls, idcol = "run_id")
+		correl_dt = rbindlist(correl_ls, idcol = "run_id")
 	} else {
 		# Get inf last run
 		info_lastRun = getLastRun(path = path, run = run)
@@ -567,7 +578,9 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 		error_dt["all", sigmaObs := sd_dbh*mean(sigmaObs_array)]
 		error_dt["all", etaObs := sd_dbh*mean(etaObs_array)]
 		error_dt["all", proba := mean(proba_array)]
-		error_dt["all", correl := cor(sigmaObs_array, etaObs_array)]
+		error_dt["all", correl_sigma_eta := cor(sigmaObs_array, etaObs_array)]
+		error_dt["all", correl_sigma_proba := cor(sigmaObs_array, proba_array)]
+		error_dt["all", correl_eta_proba := cor(etaObs_array, proba_array)]
 
 		count = 0
 
@@ -578,10 +591,13 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 			etaObs_array = results$draws(paste0("etaObs[", count, "]"))
 			proba_array = results$draws(paste0("proba[", count, "]"))
 
+			error_dt[nfi, sigmaProc := NA]
 			error_dt[nfi, sigmaObs := sd_dbh*mean(sigmaObs_array)]
 			error_dt[nfi, etaObs := sd_dbh*mean(etaObs_array)]
 			error_dt[nfi, proba := mean(proba_array)]
-			error_dt[nfi, correl := cor(sigmaObs_array, etaObs_array)]
+			error_dt[nfi, correl_sigma_eta := cor(sigmaObs_array, etaObs_array)]
+			error_dt[nfi, correl_sigma_proba := cor(sigmaObs_array, proba_array)]
+			error_dt[nfi, correl_eta_proba := cor(etaObs_array, proba_array)]
 		}
 
 		## Plot prior and posterior for main parameters
