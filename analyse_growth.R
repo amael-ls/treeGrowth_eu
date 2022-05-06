@@ -631,6 +631,64 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 	return (list(error_dt = error_dt, correl_energy = correl_energy))
 }
 
+## Function to plot the correlations energy <--> parameters for each species, and to plot rescaled error values
+plot_correl_error = function(error_dt, correl_dt, threshold_correl = 0.1, rm_correl = "lp__")
+{
+	correl_dt = correl_dt[!(parameters %in% rm_correl)]
+	
+	ls_species = correl_dt[, unique(speciesName_sci)] # Should be the same species in error
+
+	for (species in ls_species)
+	{
+		path = paste0("./", species, "/")
+		current_correl = correl_dt[speciesName_sci == species]
+		ls_runs = current_correl[speciesName_sci == species, unique(run_id)]
+		species_runs = length(ls_runs)
+		ls_params = current_correl[speciesName_sci == species, unique(parameters)]
+		nb_params = length(ls_params)
+
+		pdf(paste0(path, "correlations_energy.pdf"), height = 10, width = 10)
+		par(mar = c(5, 10, 0, 0))
+		plot(0, type = "n", xlim = c(-1, 1), ylim = c(0, nb_params + 1), ylab = "", xlab = "Correlation with energy",
+			axes = FALSE, xaxt = "n", yaxt = "n")
+
+		param_counter = 1
+		current_param = "dbh_slope"
+		for (current_param in ls_params)
+		{
+			mean_value = current_correl[parameters == current_param, mean(correlation_energy)]
+			# "#72BCD5"
+			segments(x0 = 0, y0 = param_counter, x1 = mean_value, y1 = param_counter, lty = 1, lwd = 2,
+				col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
+			points(mean_value, y = param_counter, pch = 15, cex = 1,
+				col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
+			run_counter = 1
+			if (species_runs %% 2 == 0) # Note that this since species_runs > 0, it also implies species_runs > 1 in this case
+			{
+				intercept_vec = seq(-species_runs/2, species_runs/2, by = 1)
+				intercept_vec = intercept_vec[intercept_vec != 0]
+				for (i in intercept_vec)
+				{
+					value = current_correl[parameters == current_param & run_id == run, correlation_energy]
+					intercept = param_counter + 0.1*i
+					segments(x0 = 0, y0 = intercept, x1 = value, y1 = intercept, lty = run + 1,
+						col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
+					points(value, y = param_counter, pch = 20, cex = 0.2,
+						col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
+				}
+			}
+			param_counter = param_counter + 1
+		}
+		x = c(-threshold_correl, threshold_correl)
+		y = c(nb_params, nb_params)
+		lines(rep(x, each = 3), t(matrix(c(y, rep(c(par()$usr[3], NA), each = 2)), ncol = 3)), lwd = 0.5, lty = "dashed")
+		lines(rep(0, each = 3), t(matrix(c(nb_params, rep(c(par()$usr[3], NA), each = 1)), ncol = 3)), lwd = 2)
+		axis(side = 1, at = c(-1, -0.5, -threshold_correl, 0, threshold_correl, 0.5, 1))
+		axis(side = 2, at = 1:nb_params, labels = ls_params, las = 1)
+		dev.off()
+	}
+}
+
 #### Common variables
 ## Species informations
 infoSpecies = readRDS("./speciesInformations.rds")
