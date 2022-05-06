@@ -515,8 +515,8 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 			error_ls[[i]] = temporary[["error_dt"]]
 			correl_ls[[i]] = temporary[["correl_energy"]]
 		}
-		error_dt = rbindlist(error_ls, idcol = "run_id")
-		correl_dt = rbindlist(correl_ls, idcol = "run_id")
+		error_dt = rbindlist(error_ls) # , idcol = "run_id"
+		correl_dt = rbindlist(correl_ls) # , idcol = "run_id"
 	} else {
 		# Get inf last run
 		info_lastRun = getLastRun(path = path, run = run)
@@ -623,6 +623,10 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 
 		lazyPosterior(draws = results$draws("competition_slope", inc_warmup = FALSE), fun = dnorm,
 			filename = paste0(path, "competition_slope"), run = run, params = "Competition slope", mean = 0, sd = 5)
+
+		## Add run id to data tables
+		error_dt[, run_id := run]
+		correl_dt[, run_id := run]
 	}
 	return (list(error_dt = error_dt, correl_energy = correl_energy))
 }
