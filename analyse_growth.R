@@ -500,7 +500,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 	if (multi & !is.null(run))
 	{
 		print(paste0("Run = ", run, "; multi and n_runs parameters ignored"))
-		temporary = centralised_fct(species, FALSE, n_runs, run) # Recursive call
+		temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, run) # Recursive call
 		error_dt = temporary[["error_dt"]]
 		correl_energy = temporary[["correl_energy"]]
 	}
@@ -511,7 +511,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 		correl_ls = vector(mode = "list", length = n_runs)
 		for (i in 1:n_runs)
 		{
-			temporary = centralised_fct(species, FALSE, n_runs, i) # Recursive call
+			temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, i) # Recursive call
 			error_ls[[i]] = temporary[["error_dt"]]
 			correl_ls[[i]] = temporary[["correl_energy"]]
 		}
@@ -663,7 +663,7 @@ plot_correl_error = function(error_dt, correl_dt, threshold_correl = 0.1, rm_cor
 			points(mean_value, y = param_counter, pch = 15, cex = 1,
 				col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
 			run_counter = 1
-			if (species_runs %% 2 == 0) # Note that this since species_runs > 0, it also implies species_runs > 1 in this case
+			if (species_runs %% 2 == 0) # Note that since species_runs > 0, this also implies that species_runs > 1
 			{
 				intercept_vec = seq(-species_runs/2, species_runs/2, by = 1)
 				intercept_vec = intercept_vec[intercept_vec != 0]
