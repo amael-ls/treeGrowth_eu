@@ -669,22 +669,120 @@ plot_correl_error = function(error_dt, correl_dt, threshold_correl = 0.1, rm_cor
 				intercept_vec = intercept_vec[intercept_vec != 0]
 				for (i in intercept_vec)
 				{
-					value = current_correl[parameters == current_param & run_id == run, correlation_energy]
+					value = current_correl[parameters == current_param & run_id == run_counter, correlation_energy]
 					intercept = param_counter + 0.1*i
-					segments(x0 = 0, y0 = intercept, x1 = value, y1 = intercept, lty = run + 1,
-						col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
-					points(value, y = param_counter, pch = 20, cex = 0.2,
-						col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
+					segments(x0 = 0, y0 = intercept, x1 = value, y1 = intercept, lty = 2, lwd = 0.75,
+						col = if (abs(value) > threshold_correl) "#EF8A47" else "#34568B")
+					points(value, y = intercept, pch = 20, cex = 0.75,
+						col = if (abs(value) > threshold_correl) "#EF8A47" else "#34568B")
+					run_counter = run_counter + 1
 				}
 			}
 			param_counter = param_counter + 1
 		}
 		x = c(-threshold_correl, threshold_correl)
-		y = c(nb_params, nb_params)
+		y = c(nb_params + species_runs/2*0.1, nb_params + species_runs/2*0.1)
 		lines(rep(x, each = 3), t(matrix(c(y, rep(c(par()$usr[3], NA), each = 2)), ncol = 3)), lwd = 0.5, lty = "dashed")
-		lines(rep(0, each = 3), t(matrix(c(nb_params, rep(c(par()$usr[3], NA), each = 1)), ncol = 3)), lwd = 2)
+		lines(rep(0, each = 3), t(matrix(c(nb_params + species_runs/2*0.1, rep(c(par()$usr[3], NA), each = 1)), ncol = 3)), lwd = 2)
 		axis(side = 1, at = c(-1, -0.5, -threshold_correl, 0, threshold_correl, 0.5, 1))
 		axis(side = 2, at = 1:nb_params, labels = ls_params, las = 1)
+		dev.off()
+
+		# Plot correlations among errors and proba
+		current_error = error_dt[speciesName_sci == species]
+		ls_cols = c("correl_sigma_eta", "correl_sigma_proba", "correl_eta_proba")
+		ls_nfi = current_error[nfi != "all", unique(nfi)]
+		n_nfi = length(ls_nfi)
+		col_counter = 1
+		pdf(paste0(path, "correlations_errors_proba.pdf"), height = 10, width = 10)
+		if (n_nfi > 1)
+		{
+			layout(mat = matrix(c(1, 2), nrow = 1, ncol = 2))
+			par(mar = c(5, 10, 0, 0))
+			plot(0, type = "n", xlim = c(-1, 1), ylim = c(0, length(ls_cols)*n_nfi + 1), ylab = "", xlab = "Correlation",
+				axes = FALSE, xaxt = "n", yaxt = "n")
+			current_col = ls_cols[1]
+			for (current_col in ls_cols)
+			{
+				for (nfi_id in 1:n_nfi)
+				{
+					mean_value = mean(unlist(current_error[nfi == ls_nfi[nfi_id], ..current_col]))
+					segments(x0 = 0, y0 = col_counter, x1 = mean_value, y1 = col_counter, lty = 1, lwd = 2,
+						col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
+					points(mean_value, y = col_counter, pch = 15, cex = 1,
+						col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
+					run_counter = 1
+					if (species_runs %% 2 == 0) # Note that this since species_runs > 0, it also implies species_runs > 1 in this case
+					{
+						intercept_vec = seq(-species_runs/2, species_runs/2, by = 1)
+						intercept_vec = intercept_vec[intercept_vec != 0]
+						for (i in intercept_vec)
+						{
+							value = unlist(current_error[nfi == ls_nfi[nfi_id] & run_id == run_counter, ..current_col])
+							intercept = col_counter + 0.1*i
+							segments(x0 = 0, y0 = intercept, x1 = value, y1 = intercept, lty = 2, lwd = 0.75,
+								col = if (abs(value) > threshold_correl) "#EF8A47" else "#34568B")
+							points(value, y = intercept, pch = 20, cex = 0.75,
+								col = if (abs(value) > threshold_correl) "#EF8A47" else "#34568B")
+							run_counter = run_counter + 1
+						}
+					}
+					col_counter = col_counter + 1
+				}
+			}
+			x = c(-threshold_correl, threshold_correl)
+			y = c(length(ls_cols)*n_nfi, length(ls_cols)*n_nfi) + species_runs/2*0.1
+			lines(rep(x, each = 3), t(matrix(c(y, rep(c(par()$usr[3], NA), each = 2)), ncol = 3)), lwd = 0.5, lty = "dashed")
+			lines(rep(0, each = 3), t(matrix(c(length(ls_cols)*n_nfi + species_runs/2*0.1,
+				rep(c(par()$usr[3], NA), each = 1)), ncol = 3)), lwd = 2)
+			axis(side = 1, at = c(-1, -0.5, -threshold_correl, 0, threshold_correl, 0.5, 1))
+
+			y_labels = expand.grid(c("sigma - eta", "sigma - proba", "eta - proba"), ls_nfi, stringsAsFactors = FALSE)
+			setDT(y_labels)
+			setorder(y_labels)
+			order_according_cols = c((n_nfi + 1):(2*n_nfi), (2*n_nfi + 1):(3*n_nfi), 1:n_nfi)
+			axis(side = 2, at = 1:(length(ls_cols)*n_nfi), las = 1,
+				labels = do.call(paste, y_labels[order_according_cols]))
+		}
+		col_counter = 1
+		par(mar = c(5, 10, 2, 0))
+		plot(0, type = "n", xlim = c(-1, 1), ylim = c(0, length(ls_cols)*n_nfi + 1), ylab = "", xlab = "Correlation",
+			axes = FALSE, xaxt = "n", yaxt = "n")
+		current_col = ls_cols[1]
+		for (current_col in ls_cols)
+		{
+			mean_value = mean(unlist(current_error[nfi == "all", ..current_col]))
+			segments(x0 = 0, y0 = 1.5*col_counter, x1 = mean_value, y1 = 1.5*col_counter, lty = 1, lwd = 2,
+				col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
+			points(mean_value, y = 1.5*col_counter, pch = 15, cex = 1,
+				col = if (abs(mean_value) > threshold_correl) "#EF8A47" else "#34568B")
+			run_counter = 1
+			if (species_runs %% 2 == 0) # Note that this since species_runs > 0, it also implies species_runs > 1 in this case
+			{
+				intercept_vec = seq(-species_runs/2, species_runs/2, by = 1)
+				intercept_vec = intercept_vec[intercept_vec != 0]
+				for (i in intercept_vec)
+				{
+					value = unlist(current_error[nfi == "all" & run_id == run_counter, ..current_col])
+					intercept = 1.5*col_counter + 0.1*i
+					segments(x0 = 0, y0 = intercept, x1 = value, y1 = intercept, lty = 2, lwd = 0.75,
+						col = if (abs(value) > threshold_correl) "#EF8A47" else "#34568B")
+					points(value, y = intercept, pch = 20, cex = 0.75,
+						col = if (abs(value) > threshold_correl) "#EF8A47" else "#34568B")
+					run_counter = run_counter + 1
+				}
+			}
+			col_counter = col_counter + 1
+		}
+		x = c(-threshold_correl, threshold_correl)
+		y = c(length(ls_cols)*n_nfi, length(ls_cols)*n_nfi) + species_runs/2*0.1
+		lines(rep(x, each = 3), t(matrix(c(y, rep(c(par()$usr[3], NA), each = 2)), ncol = 3)), lwd = 0.5, lty = "dashed")
+		lines(rep(0, each = 3), t(matrix(c(length(ls_cols)*n_nfi + species_runs/2*0.1,
+			rep(c(par()$usr[3], NA), each = 1)), ncol = 3)), lwd = 2)
+		axis(side = 1, at = c(-1, -0.5, -threshold_correl, 0, threshold_correl, 0.5, 1))
+		axis(side = 2, at = 1.5*1:3, las = 1,
+			labels = c("sigma - eta", "sigma - proba", "eta - proba"))
+
 		dev.off()
 		print(paste(species, "done"))
 	}
@@ -724,7 +822,7 @@ correl_dt = rbindlist(correl_ls, idcol = "speciesName_sci")
 saveRDS(error_dt, "./error_species.rds")
 saveRDS(correl_dt, "./correlation_energy_species.rds")
 
-plot_correl_error(error_dt, correl_dt, threshold_correl = 0.1, rm_correl = "lp__")
+plot_correl_error(error_dt, correl_dt, threshold_correl = 0.2, rm_correl = "lp__")
 
 
 #* --------------------------------------------------------------------------------------------
