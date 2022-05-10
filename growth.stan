@@ -101,7 +101,7 @@ transformed data {
 
 parameters {
 	// Parameters for growth function
-	array [n_plots] real averageGrowth; // Growth (grouped by plots) when all the explanatory variables are set to 0
+	vector [n_plots] plotEffect; // Growth (grouped by plots) when all the explanatory variables are set to 0
 	real dbh_slope;
 
 	real pr_slope;
@@ -139,6 +139,12 @@ parameters {
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
+transformed parameters {
+	// Growth (grouped by plots) when all the explanatory variables are set to 0
+	vector [n_plots] averageGrowth;
+	averageGrowth = averageGrowth_mu + averageGrowth_sd * plotEffect; // <=> averageGrowth ~ normal(averageGrowth_mu, averageGrowth_sd)
+}
+
 model {
 	// Declare variables
 	int growth_counter = 1; // Counter in the latent space
@@ -150,7 +156,7 @@ model {
 
 	// Priors
 	// --- Growth parameters
-	target += normal_lpdf(averageGrowth | averageGrowth_mu, averageGrowth_sd);
+	target += std_normal_lpdf(plotEffect); // <=> normal_lpdf(plotEffect | 0, 1);
 	
 	target += normal_lpdf(dbh_slope | 0, 5);
 	
@@ -166,7 +172,7 @@ model {
 	target += normal_lpdf(competition_slope | 0, 5);
 
 	// --- Hyper parameters
-	target += normal_lpdf(averageGrowth_mu | 0, 1000);
+	target += normal_lpdf(averageGrowth_mu | -4, 10); // sd_dbh * exp(-4) is around 2 to 3 mm, which is a reasonable average growth
 	target += gamma_lpdf(averageGrowth_sd | 1.0/100, 1.0/100);
 
 	// --- Errors
@@ -187,11 +193,12 @@ model {
 		shape = (m/var(dbh))^2 / (v/var(dbh)^2) = m^2/v
 		rate = (m/var(dbh))    / (v/var(dbh)^2) = var(dbh) * m/v
 	*/
-	target += gamma_lpdf(sigmaProc | 5.0^2/1, variance(Yobs)*5.0/1); // Remember that sigmaProc is a variance, not a sd!
+	target += gamma_lpdf(sigmaProc | 5.0^2/1, sd_dbh^2*5.0/1); // Remember that sigmaProc is a variance, not a sd!
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
-	target += beta_lpdf(proba | 48.67, 1714.84);
+	// Previous prior, from Rüger et al 2011: beta_lpdf(proba | 48.67, 1714.84)
+	target += beta_lpdf(proba | 0.0296, 2.9304); // This corresponds to a 1 % chance extrem error, ± 0.5 %
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
