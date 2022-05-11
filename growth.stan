@@ -198,7 +198,7 @@ model {
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
 	// Previous prior, from Rüger et al 2011: beta_lpdf(proba | 48.67, 1714.84)
-	target += beta_lpdf(proba | 0.0296, 2.9304); // This corresponds to a 1 % chance extrem error, ± 0.5 %
+	target += beta_lpdf(proba | 3.95, 391.05); // This corresponds to a 1 % chance extrem error, ± 0.5 %
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
