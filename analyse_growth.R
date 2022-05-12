@@ -89,7 +89,9 @@ lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 	
 	n_chains = dim(draws)[2]
 	n_iter = dim(draws)[1]
-	cols = c("#845D29", "#D8C29D", "#178F92", "#1D1F54")
+	colours = MetBrewer::met.brewer("Hokusai3", n_chains)
+	colours_str = grDevices::colorRampPalette(colours)(n_chains)
+	# cols = c("#845D29", "#D8C29D", "#178F92", "#1D1F54")
 
 	min_val = min(draws)
 	max_val = max(draws)
@@ -126,9 +128,9 @@ lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 	for (chain in 1:n_chains)
 	{
 		if (all(class(draws) %in% c("draws_array", "draws", "array")))
-			lines(1:n_iter, scaling*draws[, chain,], type = "l", col = cols[chain])
+			lines(1:n_iter, scaling*draws[, chain,], type = "l", col = colours_str[chain])
 		if (is.array(draws) & !all(class(draws) %in% c("draws_array", "draws", "array")))
-			lines(1:n_iter, scaling*draws[, chain], type = "l", col = cols[chain])
+			lines(1:n_iter, scaling*draws[, chain], type = "l", col = colours_str[chain])
 	}
 
 	if (any(val_ind))
@@ -173,7 +175,7 @@ reshapeDraws = function(draws_array, id_latent, regex = "latent_dbh")
 }
 
 ## Function to plot the prior and posterior of a parameter
-lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi = FALSE, ls_nfi = NULL, ...)
+lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = NULL, run = NULL, multi = FALSE, ls_nfi = NULL, ...)
 {
 	# Check-up
 	if (!is.array(draws))
@@ -213,16 +215,23 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 	# Get parameters for prior
 	if (isTRUE(all.equal(fun, dnorm)))
 	{
-		if (!all(c("mean", "sd") %in% names(providedArgs)))
+		if ((!all(c("mean", "sd") %in% names(providedArgs))) & (!all(c("arg1", "arg2") %in% names(providedArgs))))
 			stop("You must provide mean and sd for dnorm")
 		
-		arg1 = providedArgs[["mean"]]
-		arg2 = scaling*providedArgs[["sd"]]
+		if (all(c("mean", "sd") %in% names(providedArgs)))
+		{
+			arg1 = providedArgs[["mean"]]
+			arg2 = scaling*providedArgs[["sd"]]
+		} else {
+			arg1 = providedArgs[["arg1"]]
+			arg2 = scaling*providedArgs[["arg2"]]
+		}
 	}
 
 	if (isTRUE(all.equal(fun, dgamma)))
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "rate") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "rate") %in% names(providedArgs)))
+			& (!all(c("arg1", "arg2") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape and rate for dgamma")
 		
 		if (all(c("mean", "var") %in% names(providedArgs)))
@@ -239,11 +248,19 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 			arg1 = providedArgs[["shape"]]
 			arg2 = providedArgs[["rate"]]/scaling
 		}
+
+		if (all(c("arg1", "arg2") %in% names(providedArgs)))
+		{
+			print("args 1 and 2 provided; it is assumed they are shape and rate")
+			arg1 = providedArgs[["arg1"]]
+			arg2 = scaling*providedArgs[["arg2"]]/scaling
+		}
 	}
 
 	if (isTRUE(all.equal(fun, dbeta)))
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape1", "shape2") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape1", "shape2") %in% names(providedArgs)))
+			& (!all(c("arg1", "arg2") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape1 and shape2 for dbeta")
 
 		if (scaling != 1)
@@ -263,6 +280,14 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 			arg1 = providedArgs[["shape1"]]
 			arg2 = providedArgs[["shape2"]]
 		}
+
+		if (all(c("arg1", "arg2") %in% names(providedArgs)))
+		{
+			print("args 1 and 2 provided; it is assumed they are shape1 and shape2")
+			arg1 = providedArgs[["shape1"]]
+			arg2 = providedArgs[["shape2"]]
+		}
+
 		max_y_prior = optimise(f = fun, interval = c(0, 1), maximum = TRUE, shape1 = arg1, shape2 = arg2)[["objective"]]
 	}
 
@@ -303,44 +328,50 @@ lazyPosterior = function(draws, fun = dnorm, filename = NULL, run = NULL, multi 
 	if (isTRUE(all.equal(fun, dnorm)))
 	{
 		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, mean = arg1, sd = arg2)[["objective"]]
-		check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, mean = arg1, sd = arg2,
-			subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-		while (check_min_bound$value > 0.1)
+		if (expand_bounds)
 		{
-			min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
 			check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, mean = arg1, sd = arg2,
 				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-		}
+			while (check_min_bound$value > 0.1)
+			{
+				min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+				check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, mean = arg1, sd = arg2,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
 
-		check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
-			subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-		while (check_max_bound$value > 0.1)
-		{
-			max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
 			check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
 				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_max_bound$value > 0.1)
+			{
+				max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
 		}
 	}
 
 	if (isTRUE(all.equal(fun, dgamma)))
 	{
 		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, shape = arg1, rate = arg2)[["objective"]]
-		check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, shape = arg1, rate = arg2,
-			subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-		while (check_min_bound$value > 0.1)
+		if (expand_bounds)
 		{
-			min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
 			check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, shape = arg1, rate = arg2,
 				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-		}
+			while (check_min_bound$value > 0.1)
+			{
+				min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+				check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, shape = arg1, rate = arg2,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
 
-		check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), shape = arg1, rate = arg2,
-			subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
-		while (check_max_bound$value > 0.1)
-		{
-			max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
 			check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), shape = arg1, rate = arg2,
 				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_max_bound$value > 0.1)
+			{
+				max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), shape = arg1, rate = arg2,
+					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
 		}
 	}
 	max_y = max(max_y, max_y_prior)
@@ -423,7 +454,7 @@ expand = function(base_names, nb_nfi, patterns = c("Obs", "proba"))
 }
 
 ## Function to do a pair plot of parameters versus energy
-energyPairs = function(path, run, results, nb_nfi, energy, rm_names = "latent", n_rows = 3, n_cols = 6, filename = "pairs.pdf")
+energyPairs = function(path, run, results, nb_nfi, energy, rm_names = c("latent", "Effect"), n_rows = 3, n_cols = 6, filename = "pairs.pdf")
 {
 	filename = paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "pairs.pdf")
 
@@ -488,7 +519,7 @@ isProcessed = function(path, multi, lim_time, begin = "^growth-", extension = ".
 }
 
 ## Function to call all the other plot functions and to gather informations on the runs
-centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_normalised = TRUE)
+centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL, isDBH_normalised = TRUE)
 {
 	path = paste0("./", species, "/")
 	n_nfi = length(ls_nfi)
@@ -500,7 +531,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 	if (multi & !is.null(run))
 	{
 		print(paste0("Run = ", run, "; multi and n_runs parameters ignored"))
-		temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, run) # Recursive call
+		temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, params_dt, run) # Recursive call
 		error_dt = temporary[["error_dt"]]
 		correl_energy = temporary[["correl_energy"]]
 	}
@@ -511,7 +542,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 		correl_ls = vector(mode = "list", length = n_runs)
 		for (i in 1:n_runs)
 		{
-			temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, i) # Recursive call
+			temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, params_dt, i) # Recursive call
 			error_ls[[i]] = temporary[["error_dt"]]
 			correl_ls[[i]] = temporary[["correl_energy"]]
 		}
@@ -535,8 +566,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 		results = readRDS(paste0(path, lastRun))
 		# stanData = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 
-		results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-			"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
+		results$print(c("lp__", params_dt[, parameters], "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
 
 		## Pairs plot of parameters versus energy
 		# Extract energy 
@@ -552,6 +582,8 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 		lazyPosterior(draws = sigmaProc_array, fun = dgamma, filename = paste0(path, "sigmaProc_posterior"), params = "process error",
 			shape = 5.0^2/1, rate = sd_dbh^2*5.0/1, run = run)
 
+		lazyTrace(draws = sigmaProc_array, filename = paste0(path, "sigmaProc_traces"), run = run)
+
 		error_dt["all", sigmaProc := sd_dbh*sqrt(mean(sigmaProc_array))]
 
 		# For measurement error:
@@ -561,19 +593,29 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 		sigmaObs_array = results$draws("sigmaObs")
 		lazyPosterior(draws = sigmaObs_array, fun = dgamma, filename = paste0(path, "sigmaObs_posterior"), run = run, xlab = "Error in mm",
 			shape = 3.0/0.025, rate = sd_dbh*sqrt(3.0)/0.025, params = "routine obs error", multi = multi_NFI, scaling = sd_dbh,
-			ls_nfi = ls_nfi)
+			ls_nfi = ls_nfi, expand_bounds = TRUE)
 
 		# --- Extreme error (etaObs), it is a sd (of a normal distrib)...
 		etaObs_array = results$draws("etaObs")
 		lazyPosterior(draws = etaObs_array, fun = dgamma, filename = paste0(path, "etaObs_posterior"), run = run, xlab = "Error in mm",
 			shape = 25.6^2/6.2, rate = sd_dbh*25.6/6.2, params = "extreme obs error", multi = multi_NFI, scaling = sd_dbh,
-			ls_nfi = ls_nfi)
+			ls_nfi = ls_nfi, expand_bounds = TRUE)
 
 		# --- ... and its associated probability of occurrence
 		proba_array = results$draws("proba")
 		lazyPosterior(draws = proba_array, fun = dbeta, filename = paste0(path, "proba_posterior"), run = run, xlab = "Probability",
 			shape1 = 48.67, shape2 = 1714.84, params = "probability extreme obs error", multi = multi_NFI,
 			ls_nfi = ls_nfi)
+		
+		for (i in 1:n_nfi)
+		{
+			lazyTrace(draws = results$draws(paste0("sigmaObs[", i, "]"), inc_warmup = FALSE),
+				filename = paste0(path, "sigmaObs[", i, "]_traces"), run = run)
+			lazyTrace(draws = results$draws(paste0("etaObs[", i, "]"), inc_warmup = FALSE),
+				filename = paste0(path, "etaObs[", i, "]_traces"), run = run)
+			lazyTrace(draws = results$draws(paste0("proba[", i, "]"), inc_warmup = FALSE),
+				filename = paste0(path, "proba[", i, "]_traces"), run = run)
+		}
 
 		error_dt["all", sigmaObs := sd_dbh*mean(sigmaObs_array)]
 		error_dt["all", etaObs := sd_dbh*mean(etaObs_array)]
@@ -600,29 +642,15 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, run = NULL, isDBH_nor
 			error_dt[nfi, correl_eta_proba := cor(etaObs_array, proba_array)]
 		}
 
-		## Plot prior and posterior for main parameters
-		lazyPosterior(draws = results$draws("averageGrowth_mu", inc_warmup = FALSE), fun = dnorm,
-			filename = paste0(path, "averageGrowth_mu"), run = run, params = "Average growth (mu)", mean = 0, sd = 1000)
-		lazyPosterior(draws = results$draws("averageGrowth_sd", inc_warmup = FALSE), fun = dgamma,
-			filename = paste0(path, "averageGrowth_sd"), run = run, params = "Average growth (sd)", shape = 1/100, rate = 1/100)
-		
-		lazyPosterior(draws = results$draws("dbh_slope", inc_warmup = FALSE), fun = dnorm, filename = paste0(path, "dbh_slope"),
-			run = run, params = "Dbh slope", mean = 0, sd = 5)
-		lazyPosterior(draws = results$draws("pr_slope", inc_warmup = FALSE), fun = dnorm, filename = paste0(path, "pr_slope"),
-			run = run, params = "Precipitation slope", mean = 0, sd = 5)
-		lazyPosterior(draws = results$draws("pr_slope2", inc_warmup = FALSE), fun = dnorm, filename = paste0(path, "pr_slope2"),
-			run = run, params = "Precipitation slope (quadratic term)", mean = 0, sd = 5)
-		lazyPosterior(draws = results$draws("tas_slope", inc_warmup = FALSE), fun = dnorm, filename = paste0(path, "tas_slope"),
-			run = run, params = "Temperature slope", mean = 0, sd = 5)
-		lazyPosterior(draws = results$draws("tas_slope2", inc_warmup = FALSE), fun = dnorm, filename = paste0(path, "tas_slope2"),
-			run = run, params = "Temperature slope (quadratic term)", mean = 0, sd = 5)
-		lazyPosterior(draws = results$draws("ph_slope", inc_warmup = FALSE), fun = dnorm, filename = paste0(path, "ph_slope"),
-			run = run, params = "Soil acidity slope (pH)", mean = 0, sd = 5)
-		lazyPosterior(draws = results$draws("ph_slope2", inc_warmup = FALSE), fun = dnorm, filename = paste0(path, "ph_slope2"),
-			run = run, params = "Soil acidity slope (pH, quadratic term)", mean = 0, sd = 5)
+		## Plot prior and posterior for main parameters (i.e., slopes and random effects, not the errors nor proba)
+		for (param in params_dt[, parameters])
+		{
+			lazyPosterior(draws = results$draws(param, inc_warmup = FALSE), fun = params_dt[param, priors][[1]], run = run,
+				expand_bounds = params_dt[param, expand_bounds], filename = paste0(path, param, "_posterior"),
+				params = params_dt[param, title], arg1 = params_dt[param, arg1], arg2 = params_dt[param, arg2])
 
-		lazyPosterior(draws = results$draws("competition_slope", inc_warmup = FALSE), fun = dnorm,
-			filename = paste0(path, "competition_slope"), run = run, params = "Competition slope", mean = 0, sd = 5)
+			lazyTrace(draws = results$draws(param, inc_warmup = FALSE), filename = paste0(path, param, "_traces"), run = run)
+		}
 
 		## Add run id to data tables
 		error_dt[, run_id := run]
@@ -806,12 +834,24 @@ names(error_ls) = infoSpecies[, speciesName_sci]
 correl_ls = vector(mode = "list", length = infoSpecies[, .N])
 names(correl_ls) = infoSpecies[, speciesName_sci]
 
+params_dt = data.table(parameters = c("averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2",
+	"tas_slope", "tas_slope2", "ph_slope", "ph_slope2", "competition_slope"),
+	priors = c(dnorm, dgamma, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm),
+	arg1 = c(-4, 1/100, 0, 0, 0, 0, 0, 0, 0, 0),
+	arg2 = c(10, 1/100, 5, 5, 5, 5, 5, 5, 5, 5),
+	title = c("Average growth (mean)", "Random effect (sd)", "Dbh slope", "Precipitation slope", "Precipitation slope (quadratic term)",
+		"Temperature slope", "Temperature slope (quadratic term)", "Soil acidity slope (pH)", "Soil acidity slope (pH, quadratic term)",
+		"Competition slope"),
+	expand_bounds = c(FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE))
+
+setkey(params_dt, parameters)
+
 #### For loop on processed species, to plot posteriors of the main parameters (errors, intercept, and slopes)
 for (species in infoSpecies[, speciesName_sci])
 {
 	multi = infoSpecies[species, multiRun]
 	ls_nfi = unlist(stri_split(infoSpecies[species, ls_nfi], regex = ", "))
-	summary_dt = centralised_fct(species, multi, n_runs, ls_nfi, run = if (multi) NULL else 1)
+	summary_dt = centralised_fct(species, multi, n_runs, ls_nfi, params_dt, run = if (multi) NULL else 1)
 	error_ls[[species]] = summary_dt[["error_dt"]]
 	correl_ls[[species]] = summary_dt[["correl_energy"]]
 }
