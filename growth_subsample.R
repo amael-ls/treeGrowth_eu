@@ -382,7 +382,7 @@ ba_mu_sd = readRDS(paste0(savingPath, run_id, "_ba_normalisation.rds"))
 #### Stan model
 ## Define stan variables
 # Common variables
-maxIter = 2000
+maxIter = 2500
 n_chains = 3
 
 # Initial values for states only
@@ -456,8 +456,8 @@ model = cmdstan_model("./growth.stan")
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
-	iter_warmup = round(maxIter/2), iter_sampling = round(maxIter/2), save_warmup = TRUE, init = initVal_Y_gen,
-	max_treedepth = 13, adapt_delta = 0.9)
+	iter_warmup = 1500, iter_sampling = 1000, save_warmup = TRUE, init = initVal_Y_gen,
+	max_treedepth = 13, adapt_delta = 0.95)
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
