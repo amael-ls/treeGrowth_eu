@@ -9,6 +9,7 @@ options(max.print = 500)
 library(data.table)
 library(stringi)
 library(terra)
+library(mgcv)
 
 #? --------------------------------------------------------------------------------------------------------
 ######## PART I: Spatial plot of the data (plot location)
@@ -27,31 +28,37 @@ europe = vect(paste0(shapefile_folder, "europe.shp"))
 #### Plot
 pdf("plots_location_growth.pdf", height = 10, width = 10)
 plot(europe, col = "#C4AC7C44", border = "#9E391A", axes = FALSE)
-plot(coords, pch = 19, cex = 0.025, col = "#354536", add = TRUE)
+plot(coords, pch = 20, cex = 0.025, col = "#354536", add = TRUE)
 plot(europe, col = NA, border = "#9E391A", add = TRUE)
 dev.off()
 
 
 
 #? --------------------------------------------------------------------------------------------------------
-######## PART II: Plot of the data in the climate and ph space
+######## PART II: Plot of the data in the climate and ph space, with gam models as a fit
 #? --------------------------------------------------------------------------------------------------------
 #### Tool function
 ## Create a colour gradient
 gradColours = function(x, colours, n)
   return(colorRampPalette(colours) (n) [findInterval(x, seq(min(x), max(x), length.out = n))])
 
-#### Load data
+#### Common variables
 ## Folders
 climate_folder = "/home/amael/project_ssm/inventories/growth/"
 ph_folder = "/home/amael/project_ssm/inventories/growth/"
 
-## Climate and pH data
+## Load climate and pH data
 climate = readRDS(paste0(climate_folder, "europe_reshaped_climate.rds"))
 ph = readRDS(paste0(ph_folder, "europe_reshaped_soil.rds"))
 
 ## Load species table
 infoSpecies = readRDS("./speciesInformations.rds")
+
+## Create explanatory data table for predictors
+predictors_dt = data.table(predictors = c("pr", "tas", "tasmin", "tasmax"),
+	explanation = c("annual precipitation", "mean annual temperature", "annual minimal temperature", "annual maximal temperature"))
+predictors_dt[, complementary := ifelse(stri_detect(predictors, regex = "^tas"), "pr", "tas")]
+setkey(predictors_dt, predictors)
 
 ## Load function
 source("./extractClimate.R")
@@ -77,47 +84,70 @@ for (i in 1:infoSpecies[, .N])
 	subset_trees[, c("prev_dbh", "prev_year") := NULL]
 	subset_trees = subset_trees[!is.na(annual_growth)]
 
-	cols = c("pr", "tas", "tasmin", "tasmax")
-	predictors_data[, paste0(cols, "_avg") := lapply(.SD, mean), .SDcols = cols, by = plot_id]
+	predictors_data[, paste0(predictors_dt[, predictors], "_avg") := lapply(.SD, mean), .SDcols = predictors_dt[, predictors], by = plot_id]
 
 	subset_trees = merge.data.table(subset_trees, predictors_data, by = c("plot_id", "year"))
 
 	#### Plot
 	## Set plot layout
-	pdf(paste0(path, "growth_vs_precip.pdf"), height = 10, width = 10)
-	layout(mat = matrix(c(2, 1, 0, 3, 0, 4), nrow = 2, ncol = 3),
-		heights = c(1, 2), # Heights of the two rows
-		widths = c(2, 1, 1)) # Widths of the three columns
+	for (predictor in predictors_dt[, predictors])
+	{
+		pdf(paste0(path, "growth_vs_", predictor,".pdf"), height = 10, width = 10)
+		layout(mat = matrix(c(2, 1, 0, 3, 0, 4), nrow = 2, ncol = 3),
+			heights = c(1, 2), # Heights of the two rows
+			widths = c(2, 1, 1)) # Widths of the three columns
 
-	## Colours
-	colours = MetBrewer::met.brewer("Hiroshige", direction = -1)
-	colours_str = gradColours(subset_trees[, tas_avg], colours, 30)
+		## Variables
+		predictor_avg = paste0(predictor, "_avg")
+		complementary_avg = paste0(predictors_dt[predictor, complementary], "_avg")
 
-	# Plot 1: Scatter plot growth versus precip, with temperature as colour
-	par(mar = c(5, 4, 2, 0))
-	plot(x = subset_trees[, pr_avg], y = subset_trees[, annual_growth], xlab = "Averaged annual precipitation over the growing years",
-		ylab = "Growth in mm", pch = 19, col = paste0(colours_str, "66"))
+		## Colours
+		colours = MetBrewer::met.brewer("Hiroshige", direction = ifelse(stri_detect(complementary_avg, regex = "^tas"), -1, 1))
+		colours_str = gradColours(unlist(subset_trees[, ..complementary_avg]), colours, 30)
 
-	# Plot 2: Top (precipitation) boxplot
-	par(mar = c(0, 4, 0, 0))
-	boxplot(subset_trees[, pr_avg], xaxt = "n", yaxt = "n", bty = "n", col = "white", frame = FALSE, horizontal = TRUE)
+		# gradColours(seq(500, 1500, by = 100), colours, 30)
 
-	# Plot 3: Right (growth) boxplot
-	par(mar = c(5, 0, 0, 0))
-	boxplot(subset_trees[, annual_growth], xaxt = "n", yaxt = "n", bty = "n", col = "white", frame = FALSE)
+		# Plot 1: Scatter plot growth versus precip, with temperature as colour
+		par(mar = c(5, 4, 2, 0))
+		plot(x = unlist(subset_trees[, ..predictor_avg]), y = subset_trees[, annual_growth], ylim = c(0, 10),
+			xlab = paste("Averaged", predictors_dt[predictor, explanation], "over the growing years"),
+			ylab = "Growth in mm", pch = 20, col = paste0(colours_str, "66"))
 
-	# Plot 4: Middle right (temperature) matrix gradient
-	par(mar = c(5, 2, 2, 0))
+		
+		explanatory_var = unlist(subset_trees[, ..predictor_avg])
+		m = gam(subset_trees[, annual_growth] ~ s(explanatory_var))
+		pred = cbind(x = sort(explanatory_var),
+			as.data.frame(mgcv::predict.gam(m, se.fit = TRUE))[order(explanatory_var), ])
+		lines(pred[, c("x", "fit")], col = "#9E391A", lwd = 2)
+		polygon(c(pred$x, rev(pred$x)), c(pred$fit-1.96*pred$se.fit, rev(pred$fit+1.96*pred$se.fit)), col = "#354536", border = NA)
 
-	t_min = round(min(floor(subset_trees[, tas_avg])))
-	t_max = round(max(ceiling(subset_trees[, tas_avg])))
+		# Plot 2: Top (precipitation) boxplot
+		par(mar = c(0, 4, 0, 0))
+		boxplot(subset_trees[, ..predictor_avg], xaxt = "n", yaxt = "n", bty = "n", col = "white", frame = FALSE, horizontal = TRUE)
 
-	legend_image = as.raster(matrix(colorRampPalette(MetBrewer::met.brewer("Hiroshige")) (30), ncol = 1))
-	plot(c(0, 2), c(t_min, t_max), type = "n", axes = FALSE, xlab = "", ylab = "", main = "Avg temperature")
-	text(x = 1, y = seq(t_min, t_max, by = 3), labels = seq(t_min, t_max, by = 3))
-	rasterImage(legend_image, 0, t_min, 0.5, t_max) # xleft, ybottom, xright, ytop
+		# Plot 3: Right (growth) boxplot
+		par(mar = c(5, 0, 0, 0))
+		boxplot(subset_trees[, annual_growth], xaxt = "n", yaxt = "n", bty = "n", col = "white", frame = FALSE)
 
-	dev.off()
+		# Plot 4: Middle right (temperature) matrix gradient
+		par(mar = c(5, 2, 2, 0))
+
+		comp_min = round(min(floor(subset_trees[, ..complementary_avg]))) # Complementary min
+		comp_max = round(max(ceiling(subset_trees[, ..complementary_avg]))) # Complementary max
+
+		legend_image = grDevices::as.raster(matrix(gradColours(30:1, colours, 30), ncol = 1)) # 30:1 because raster starts from the top!
+		plot(c(0, 2), c(comp_min, comp_max), type = "n", axes = FALSE, xlab = "", ylab = "",
+			main = ifelse(predictors_dt[predictor, complementary] == "tas", "Avg temperature", "Avg precipitations"))
+		if (predictors_dt[predictor, complementary] == "tas")
+		{
+			text(x = 1, y = seq(comp_min, comp_max, by = 3), labels = seq(comp_min, comp_max, by = 3))
+		} else {
+			text(x = 1, y = seq(comp_min, comp_max, by = 200), labels = seq(comp_min, comp_max, by = 200))
+		}
+		rasterImage(legend_image, 0, comp_min, 0.5, comp_max) # xleft, ybottom, xright, ytop
+
+		dev.off()
+	}
 	print(paste(species, "done"))
 }
 
