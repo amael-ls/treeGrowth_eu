@@ -454,10 +454,13 @@ saveRDS(object = stanData, file = paste0(savingPath, run_id, "_stanData.rds"))
 ## Compile model
 model = cmdstan_model("./growth.stan")
 
+start_time = Sys.time()
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
 	iter_warmup = 1500, iter_sampling = 1000, save_warmup = TRUE, init = initVal_Y_gen,
 	max_treedepth = 13, adapt_delta = 0.95)
+
+end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
@@ -465,6 +468,7 @@ results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_e
 
 results$cmdstan_diagnose()
 
+print(end_time - start_time)
 results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
 
