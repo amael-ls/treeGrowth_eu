@@ -197,8 +197,8 @@ model {
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
-	// Previous prior, from Rüger et al 2011: beta_lpdf(proba | 48.67, 1714.84)
-	target += beta_lpdf(proba | 3.95, 391.05); // This corresponds to a 1 % chance extrem error, ± 0.5 %
+	// target += beta_lpdf(proba | 3.95, 391.05); // This corresponds to a 1 % chance extrem error, ± 0.5 %
+	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
@@ -235,15 +235,14 @@ model {
 	for (k in 1:n_inventories)
 	{
 		// Compare true (i.e., hidden or latent) parents with observed parents per chunk (i.e. per country/NFI)
-		target += (1 - proba[k]) * normal_lpdf(normalised_Yobs[parents_index[start_nfi_parents[k]:end_nfi_parents[k]]] |
-				latent_dbh_parents[start_nfi_parents[k]:end_nfi_parents[k]], sigmaObs[k]) +
-			proba[k] * normal_lpdf(normalised_Yobs[parents_index[start_nfi_parents[k]:end_nfi_parents[k]]] |
-				latent_dbh_parents[start_nfi_parents[k]:end_nfi_parents[k]], etaObs[k]);
+		// Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
+		for (i in start_nfi_parents[k]:end_nfi_parents[k])
+			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]),
+				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]));
 
 		// Compare true (i.e., hidden or latent) children with observed children per chunk (i.e. per country/NFI)
-		target += (1 - proba[k]) * normal_lpdf(normalised_Yobs[children_index[start_nfi_children[k]:end_nfi_children[k]]] |
-				latent_dbh_children[start_nfi_children[k]:end_nfi_children[k]], sigmaObs[k]) +
-			proba[k] * normal_lpdf(normalised_Yobs[children_index[start_nfi_children[k]:end_nfi_children[k]]] |
-				latent_dbh_children[start_nfi_children[k]:end_nfi_children[k]], etaObs[k]);
+		for (i in start_nfi_children[k]:end_nfi_children[k])
+			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], etaObs[k]),
+				normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], sigmaObs[k]));
 	}
 }
