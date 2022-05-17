@@ -450,11 +450,13 @@ stanData = list(
 )
 
 saveRDS(object = stanData, file = paste0(savingPath, run_id, "_stanData.rds"))
+saveRDS(object = treeData, file = paste0(savingPath, run_id, "_treeData.rds"))
 
 ## Compile model
 model = cmdstan_model("./growth.stan")
 
 start_time = Sys.time()
+
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
 	iter_warmup = 1500, iter_sampling = 1000, save_warmup = TRUE, init = initVal_Y_gen,
@@ -471,11 +473,3 @@ results$cmdstan_diagnose()
 print(end_time - start_time)
 results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
-
-
-# The following parameters had split R-hat greater than 1.05:
-#   averageGrowth[216], averageGrowth[311], averageGrowth[445], averageGrowth[522], averageGrowth[619], averageGrowth[866], averageGrowth[898], averageGrowth[1145], pr_slope2, sigmaProc, sigmaObs[1], latent_growth[4575]
-# Such high values indicate incomplete mixing and biased estimation.
-# You should consider regularizating your model with additional prior information or a more effective parameterization.
-
-# Processing complete.

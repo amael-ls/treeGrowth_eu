@@ -9,7 +9,6 @@ options(max.print = 500)
 library(data.table)
 library(stringi)
 library(terra)
-library(mgcv)
 
 #? --------------------------------------------------------------------------------------------------------
 ######## PART I: Spatial plot of the data (plot location)
@@ -40,7 +39,7 @@ dev.off()
 #### Tool function
 ## Create a colour gradient
 gradColours = function(x, colours, n)
-  return(colorRampPalette(colours) (n) [findInterval(x, seq(min(x), max(x), length.out = n))])
+	return(colorRampPalette(colours) (n) [findInterval(x, seq(min(x), max(x), length.out = n))])
 
 #### Common variables
 ## Folders
@@ -115,7 +114,7 @@ for (i in 1:infoSpecies[, .N])
 
 		
 		explanatory_var = unlist(subset_trees[, ..predictor_avg])
-		m = gam(subset_trees[, annual_growth] ~ s(explanatory_var))
+		m = mgcv::gam(subset_trees[, annual_growth] ~ s(explanatory_var))
 		pred = cbind(x = sort(explanatory_var),
 			as.data.frame(mgcv::predict.gam(m, se.fit = TRUE))[order(explanatory_var), ])
 		lines(pred[, c("x", "fit")], col = "#9E391A", lwd = 2)

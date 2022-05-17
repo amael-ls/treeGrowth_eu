@@ -534,10 +534,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, params_dt, run) # Recursive call
 		error_dt = temporary[["error_dt"]]
 		correl_energy = temporary[["correl_energy"]]
-	}
-
-	if (multi & is.null(run))
-	{
+	} else if (multi & is.null(run)) {
 		error_ls = vector(mode = "list", length = n_runs)
 		correl_ls = vector(mode = "list", length = n_runs)
 		for (i in 1:n_runs)
@@ -589,6 +586,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		# For measurement error:
 		# --- Common variable
 		multi_NFI = if (n_nfi > 1) TRUE else FALSE
+
 		# --- Routine measurement error (sigmaObs), it is a sd (of a normal distrib)
 		sigmaObs_array = results$draws("sigmaObs")
 		lazyPosterior(draws = sigmaObs_array, fun = dgamma, filename = paste0(path, "sigmaObs_posterior"), run = run, xlab = "Error in mm",
@@ -1010,16 +1008,3 @@ smoothScatter(x = latent_dbh, y = latentG_residuals_avg)
 dev.off()
 
 cor(latent_dbh, latentG_residuals_avg)
-
-# #### Crash test zone
-# dt_dharma[which.min(dt_dharma[, residuals_obs])]
-# mainFolder = "/home/amael/project_ssm/inventories/growth/"
-# treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshaped.rds"))
-# treeData = treeData[speciesName_sci == species]
-# treeData[(75.7577 < dbh) & (dbh < 75.7578), .(plot_id, tree_id, year)]
-
-# treeData[plot_id %in% c("france_1327882", "france_743874") & tree_id %in% c(9, 4)]
-
-# 3: Tilia platyphyllos FR IFN  france_743874       4  2007 85.92677 2.492116 45.32078      21.073138  france wfo-0000456948
-# 4: Tilia platyphyllos FR IFN  france_743874       4  2012 89.12677 2.492116 45.32078      22.557006  france wfo-0000456948
-# 5: Tilia platyphyllos FR IFN  france_743874       4  2017 75.75775 2.492116 45.32078      22.931993  france wfo-0000456948
