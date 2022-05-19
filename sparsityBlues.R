@@ -32,7 +32,7 @@ set.seed(58533858)
 
 ## data
 K = 9
-theta_true = c(-0.09604655,	0.02063505,  0.01246716, -0.04487767, -0.13519031,  0.09421304, -29.449233,  32.997172,  18.517443)
+theta_true = c(-0.09604655,	0.02063505, 0.01246716, -0.04487767, -0.13519031, 0.09421304, -29.449233, 32.997172, 18.517443)
 
 N = K
 sigma = 0.5
@@ -42,7 +42,7 @@ y = rnorm(K, theta_true[context_idx], sigma)
 
 data = list("N" = N, "K" = K, "context_idx" = context_idx, "y" = y, "sigma" = sigma)
 
-#### Section 2.1
+#### Section 2.1: The Limitations of Normal Population Models
 ## Common data
 n_chains = 4
 
@@ -98,6 +98,7 @@ results = model_sec2.1_hier$sample(data = data, parallel_chains = n_chains, refr
 results$cmdstan_diagnose()
 
 samples = results$draws("tau")
+samples[samples > 50] = 50
 
 par(mfrow=c(1, 1))
 
@@ -122,4 +123,52 @@ for (k in 1:9)
 	abline(v = theta_true[k], col = "black", lwd = 1)
 }
 
-#### Section 2.2
+#### Section 2.2: Mixture Population Models
+## Common variables
+n_chains = 4
+
+## Fit data (discrete mixture model)
+model_sec2.2_discrete_mixture = cmdstan_model("./normal_hierarchical_discrete_mixture.stan")
+
+results = model_sec2.2_discrete_mixture$sample(data = data, parallel_chains = n_chains, refresh = 100, chains = n_chains,
+	iter_warmup = 1000, iter_sampling = 1000, save_warmup = TRUE, max_treedepth = 13, adapt_delta = 0.8, seed = 4938483)
+
+results$cmdstan_diagnose()
+
+## Divergence ruins the party
+theta_array = results$draws("theta")
+tau_1_array = results$draws("tau1")
+tau_2_array = results$draws("tau2")
+
+divergences = which(results$sampler_diagnostics()[, , "divergent__"] == 1)
+
+par(mfrow=c(3, 3))
+
+for (k in 1:9)
+{
+	plot(theta_array[, , k], log(tau_1_array), col = c_dark_trans, pch = 16, main = paste("k = ", k),
+		xlab = paste0("theta[", k, "]"), xlim = c(theta_true[k] - 3, theta_true[k] + 3),
+		ylab = "log(tau1)", ylim = c(-7, 0))
+
+	points(as.vector(theta_array[, , k])[divergences], as.vector(log(tau_1_array))[divergences],
+		col = c_green_trans, pch = 16)
+}
+
+par(mfrow=c(3, 3))
+
+for (k in 1:9)
+{
+	plot(theta_array[, , k], log(tau_2_array), col = c_dark_trans, pch = 16, main = paste("k = ", k),
+		xlab = paste0("theta[", k, "]"), xlim = c(theta_true[k] - 3, theta_true[k] + 3),
+		ylab = "log(tau1)", ylim = c(1.5, 4.5))
+
+	points(as.vector(theta_array[, , k])[divergences], as.vector(log(tau_2_array))[divergences],
+		col = c_green_trans, pch = 16)
+}
+
+# Why are the funnels manifesting only in the parameters with small true values? Recall that a centred parameterization of an individual
+# parameter is optimal when the corresponding individual likelihood function is more informative than the population model, and a
+# non-centred parameterization is optimal when the population model is more informative. When the population model is specified by a single
+# normal probability density function the dominant contribution is largely determined by the width of the individual likelihood function
+# relative to the width of the normal population model, but not its location.
+
