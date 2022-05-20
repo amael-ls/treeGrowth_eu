@@ -11,6 +11,7 @@
 #	- isProcessed: Detect if a species has been processed or not
 #	- centralised_fct: Wrapping function to call all the other plot functions and to gather informations on the runs
 #	- plot_correl_error: Function to plot the correlations energy <--> parameters for each species, and to plot rescaled error values
+#	- checkFunnels: Function to check if plotting one parameter against others shows some funnel structures
 #
 ## Comments
 # This R file contains tool functions only that help me to analyse the results and do some check-up. Note that some functions are quite
@@ -814,4 +815,42 @@ plot_correl_error = function(error_dt, correl_dt, threshold_correl = 0.1, rm_cor
 		dev.off()
 		print(paste(species, "done"))
 	}
+}
+
+## Function to check if plotting one parameter against others shows some funnel structures
+checkFunnels = function(results, param, nb_nfi, rm_names = c("latent", "Effect", "lp__"), n_rows = 3, n_cols = 6, filename = NULL)
+{
+	params_names = results$metadata()$stan_variables
+	params_names = params_names[params_names != "averageGrowth"]
+	
+	for (i in 1:length(rm_names))
+		params_names = params_names[!stri_detect(params_names, regex = rm_names[i])]
+
+	if (nb_nfi > 1)
+		params_names = expand(params_names, nb_nfi)[["new_names"]]
+	
+	params_names = params_names[params_names != param]
+	length_params = length(params_names)
+	if (length(params_names) > n_rows*n_cols)
+		warning("Not enough rows or cols for the number of provided parameters")
+
+	divergences = which(results$sampler_diagnostics()[, , "divergent__"] == 1)
+
+	if (!is.null(filename))
+		pdf(filename, height = 10, width = 10)
+	
+	par(mfrow = c(n_rows, n_cols))
+
+	for (i in 1:length_params)
+	{
+		x_array = results$draws(params_names[i])
+		y_array = results$draws(param)
+		smoothScatter(x = x_array, y = y_array, xlab = params_names[i], ylab = param, pch = 16)
+
+		points(as.vector(x_array)[divergences], as.vector(y_array)[divergences],
+			col = "#EF8A47", pch = 16)
+	}
+
+	if (!is.null(filename))
+		dev.off()
 }
