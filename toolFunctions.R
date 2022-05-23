@@ -854,3 +854,163 @@ checkFunnels = function(results, param, nb_nfi, rm_names = c("latent", "Effect",
 	if (!is.null(filename))
 		dev.off()
 }
+
+## Function to plot latent dbh states trajectories (requires generated quantities)
+dbhTrajectories = function(draws, data, plotMean = TRUE, divergences = NULL, filename = NULL, ...)
+{
+	# Check-up
+	if (!is.array(draws))
+		stop("Draws should be an array extracted from a CmdStanMCMC object")
+
+	if (!all(c("dbh", "year") %in% names(data)))
+		stop("data must contain at least dbh and year")
+
+	# Get list of extra arguments
+	providedArgs = list(...)
+
+	ls_names = names(providedArgs)
+	
+	highlight_ind = stri_detect(str = ls_names, regex = "highlight")
+
+	# Info data
+	n_iter = dim(draws)[1]
+	n_chains = dim(draws)[2]
+	n_states = dim(draws)[3]
+
+	# Plot range
+	min_yr = data[, min(year)]
+	max_yr = data[, max(year)]
+
+	max_val = max(draws)
+	min_val = min(draws)
+
+	output = list(infoData = c(n_iter = n_iter, n_chains = n_chains, n_states = n_states),
+		boundaries = c(min_yr = min_yr, max_yr = max_yr, max_val = max_val, min_val = min_val))
+
+	# Plot
+	if (!is.null(filename))
+	{
+		pdf(filename, height = 11.25, width = 20)
+		print(paste0("Figure saved under the name: ", filename))
+	}
+
+	plot(0, pch = "", xlim = c(min_yr, max_yr), ylim = c(min_val, max_val), axes = TRUE, bg = "transparent",
+		xlab = "Year",
+		ylab = "Diameter at breast height")
+
+	for (iter in 1:n_iter)
+	{
+		for (chain in 1:n_chains)
+			lines(x = min_yr:max_yr, y = draws[iter, chain, ], col = "#3A3A3A55", lwd = 0.1)
+	}
+
+	if (!is.null(divergences))
+	{
+		iter_div = divergences %% n_iter
+		iter_div[iter_div == 0] = n_iter
+		chain_div = (divergences - iter_div) %% n_chains + 1
+		for (i in 1:length(divergences))
+			lines(x = min_yr:max_yr, y = draws[iter, chain, ], col = "#EF8A47", lwd = 0.75)
+		output = append(output, list(divergences = c(iter_div = iter_div, chain_div = chain_div)))
+	}
+
+	if (plotMean)
+	{
+		avg = apply(draws, 3, mean)
+		lines(x = min_yr:max_yr, y = avg, col = "#11AED9", lwd = 3)
+	}
+
+	print("Plot first part done")
+	if (any(highlight_ind))
+	{
+		h_names = ls_names[highlight_ind]
+		for (highlight in h_names)
+		{
+			if (highlight == "highlight_min_start") # highlight lowest starting trajectory
+			{
+				if (providedArgs[["highlight_min_start"]])
+				{
+					iter_id = which.min(draws[, , 1])
+					traj = if (iter_id %% n_iter == 0) n_iter else iter_id %% n_iter
+					chain_id = (iter_id - traj) %% n_chains + 1
+					lines(x = min_yr:max_yr, y = draws[traj, chain_id, ], col = "#CD212A", lwd = 3)
+					output = append(output, list(highlight_min_start = c(iter_id = iter_id, traj = traj, chain_id = chain_id)))
+				}
+			}
+			
+			if (highlight == "highlight_max_start") # highlight highest starting trajectory
+			{
+				if (providedArgs[["highlight_max_start"]])
+				{
+					iter_id = which.max(draws[, , 1])
+					traj = if (iter_id %% n_iter == 0) n_iter else iter_id %% n_iter
+					chain_id = (iter_id - traj) %% n_chains + 1
+					lines(x = min_yr:max_yr, y = draws[traj, chain_id, ], col = "#34568B", lwd = 3)
+					output = append(output, list(highlight_max_start = c(iter_id = iter_id, traj = traj, chain_id = chain_id)))
+				}
+			}
+			
+			if (highlight == "highlight_min_end") # highlight lowest ending trajectory
+			{
+				if (providedArgs[["highlight_min_end"]])
+				{
+					iter_id = which.min(draws[, , n_states])
+					traj = if (iter_id %% n_iter == 0) n_iter else iter_id %% n_iter
+					chain_id = (iter_id - traj) %% n_chains + 1
+					lines(x = min_yr:max_yr, y = draws[traj, chain_id, ], col = "#34568B", lwd = 3)
+					output = append(output, list(highlight_min_end = c(iter_id = iter_id, traj = traj, chain_id = chain_id)))
+				}
+			}
+			
+			if (highlight == "highlight_max_end") # highlight highest ending trajectory
+			{
+				if (providedArgs[["highlight_max_end"]])
+				{
+					iter_id = which.max(draws[, , n_states])
+					traj = if (iter_id %% n_iter == 0) n_iter else iter_id %% n_iter
+					chain_id = (iter_id - traj) %% n_chains + 1
+					lines(x = min_yr:max_yr, y = draws[traj, chain_id, ], col = "#CD212A", lwd = 3)
+					output = append(output, list(highlight_max_end = c(iter_id = iter_id, traj = traj, chain_id = chain_id)))
+				}
+			}
+			
+			if (highlight %in% c("highlight_max_growth", "highlight_max_growth"))
+			{
+				temporary_dt = data.table(matrix(data = 0, ncol = n_states, nrow = n_iter*n_chains))
+				setnames(temporary_dt, paste0("dbh", 1:n_states))
+				for (state in 1:n_states)
+					temporary_dt[, (paste0("dbh", state)) := as.vector(draws[, , state])]
+
+				for (state in 2:n_states)
+				{
+					dbh_orig = paste0("dbh", state - 1)
+					dbh_end = paste0("dbh", state)
+					current_G = paste0("G_", state - 1)
+					temporary_dt[, (current_G) := unlist(temporary_dt[, ..dbh_end]) - unlist(temporary_dt[, ..dbh_orig])]
+				}
+
+				if (highlight == c("highlight_max_growth")) # highlight trajectory with max yearly growth
+				{
+					g_names = paste0("G_", 1:(n_states - 1))
+					max_G = max(temporary_dt[, ..g_names])
+					iter_id = which(unname(unlist(temporary_dt[, ..g_names]) == max_G))
+					row = if (iter_id %% n_iter == 0) n_iter else iter_id %% n_iter
+					array_num = which.max(unname(unlist(temporary_dt[row, ..g_names])))
+					lines(x = min_yr:max_yr, y = temporary_dt[row, .SD, .SDcols = paste0("dbh", 1:n_states)],
+						col = "#93C372", lwd = 3)
+					output = append(output, list(highlight_max_growth = c(max_G = max_G, iter_id = row, array_num = array_num)))
+				}
+
+				# if (highlight == c("highlight_threshold_growth")) # highlight trajectories with annual growth > threshold
+				# {
+				# 	lala
+				# }
+			}
+		}
+		return (output)
+	}
+
+	points(data[, year], data[, dbh], pch = 20, cex = 2, col = "#CD212A")
+	
+	dev.off()
+}
