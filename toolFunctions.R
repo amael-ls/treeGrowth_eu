@@ -94,7 +94,6 @@ lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 	n_iter = dim(draws)[1]
 	colours = MetBrewer::met.brewer("Hokusai3", n_chains)
 	colours_str = grDevices::colorRampPalette(colours)(n_chains)
-	# cols = c("#845D29", "#D8C29D", "#178F92", "#1D1F54")
 
 	min_val = min(draws)
 	max_val = max(draws)
@@ -104,11 +103,12 @@ lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 
 	ls_names = names(providedArgs)
 
-	val_ind = stri_detect(str = ls_names, regex = "val")
+	val_ind = stri_detect(str = ls_names, regex = "val[[:digit:]]")
 	xlab_ind = (ls_names == "xlab")
 	ylab_ind = (ls_names == "ylab")
 	main_ind = (ls_names == "main")
 	label_ind = stri_detect(str = ls_names, regex = "label")
+	iter_ind = stri_detect(str = ls_names, regex = "iter[[:digit:]]")
 
 	scaling_ind = (ls_names == "scaling")
 	if (any(scaling_ind)) scaling = providedArgs[["scaling"]] else scaling = 1
@@ -151,6 +151,12 @@ lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 				axis(4, at = scaling*providedArgs[[corresponding_val]], providedArgs[[label]], las = 1)
 			}
 		}
+	}
+
+	if (any(iter_ind))
+	{
+		for (iter in ls_names[iter_ind])
+			abline(v = providedArgs[[iter]], col = "#66666644", lwd = 0.2)
 	}
 
 	if (!is.null(filename))
@@ -889,10 +895,7 @@ dbhTrajectories = function(draws, data, plotMean = TRUE, divergences = NULL, fil
 
 	# Plot
 	if (!is.null(filename))
-	{
 		pdf(filename, height = 11.25, width = 20)
-		print(paste0("Figure saved under the name: ", filename))
-	}
 
 	plot(0, pch = "", xlim = c(min_yr, max_yr), ylim = c(min_val, max_val), axes = TRUE, bg = "transparent",
 		xlab = "Year",
@@ -919,8 +922,7 @@ dbhTrajectories = function(draws, data, plotMean = TRUE, divergences = NULL, fil
 		avg = apply(draws, 3, mean)
 		lines(x = min_yr:max_yr, y = avg, col = "#11AED9", lwd = 3)
 	}
-
-	print("Plot first part done")
+	
 	if (any(highlight_ind))
 	{
 		h_names = ls_names[highlight_ind]
@@ -974,7 +976,7 @@ dbhTrajectories = function(draws, data, plotMean = TRUE, divergences = NULL, fil
 				}
 			}
 			
-			if (highlight %in% c("highlight_max_growth", "highlight_max_growth"))
+			if (highlight %in% c("highlight_max_growth", "highlight_threshold_growth"))
 			{
 				temporary_dt = data.table(matrix(data = 0, ncol = n_states, nrow = n_iter*n_chains))
 				setnames(temporary_dt, paste0("dbh", 1:n_states))
@@ -989,7 +991,7 @@ dbhTrajectories = function(draws, data, plotMean = TRUE, divergences = NULL, fil
 					temporary_dt[, (current_G) := unlist(temporary_dt[, ..dbh_end]) - unlist(temporary_dt[, ..dbh_orig])]
 				}
 
-				if (highlight == c("highlight_max_growth")) # highlight trajectory with max yearly growth
+				if (highlight == "highlight_max_growth") # highlight trajectory with max yearly growth
 				{
 					g_names = paste0("G_", 1:(n_states - 1))
 					max_G = max(temporary_dt[, ..g_names])
@@ -1001,16 +1003,26 @@ dbhTrajectories = function(draws, data, plotMean = TRUE, divergences = NULL, fil
 					output = append(output, list(highlight_max_growth = c(max_G = max_G, iter_id = row, array_num = array_num)))
 				}
 
-				# if (highlight == c("highlight_threshold_growth")) # highlight trajectories with annual growth > threshold
-				# {
-				# 	lala
-				# }
+				if (highlight == "highlight_threshold_growth") # highlight trajectories with annual growth > threshold
+				{
+					g_names = paste0("G_", 1:(n_states - 1))
+					threshold = providedArgs[["highlight_threshold_growth"]]
+					row = which(apply(temporary_dt[, ..g_names] > threshold, 1, any))
+					for (i in row)
+						lines(x = min_yr:max_yr, y = temporary_dt[i, .SD, .SDcols = paste0("dbh", 1:n_states)],
+							col = "#93C37233", lwd = 0.1)
+					output = append(output, list(highlight_threshold_growth_rows = row))
+				}
 			}
 		}
-		return (output)
 	}
 
 	points(data[, year], data[, dbh], pch = 20, cex = 2, col = "#CD212A")
 	
-	dev.off()
+	if (!is.null(filename))
+	{
+		dev.off()
+		print(paste0("Figure saved under the name: ", filename))
+	}
+	return (output)
 }
