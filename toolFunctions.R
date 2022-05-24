@@ -1026,3 +1026,21 @@ dbhTrajectories = function(draws, data, plotMean = TRUE, divergences = NULL, fil
 	}
 	return (output)
 }
+
+## Function to rescale parameters (intercept and slopes)
+rescaleParams = function(intercept, slope_dbh, slope_predictors, sd_dbh, mu_predictors, sd_predictors)
+{
+	n = length(slope_predictors)
+	if ((length(mu_predictors) != n) | (length(sd_predictors) != n))
+		stop("Dimensions mismatch between predictors and their mean or sd")
+	
+	# beta_0 = scaled beta_0 - Σ scaled gamma_i * mu_i/sd_i
+	beta_0 = intercept - sum(slope_predictors*mu_predictors/sd_predictors)
+	
+	# beta_1 = scaled beta_1/sd_dbh
+	beta_1 = slope_dbh/sd_dbh
+
+	beta_2 = slope_predictors/sd_predictors
+
+	return (list(intercept = beta_0, slope_dbh = beta_1, slope_predictors = beta_2))
+}
