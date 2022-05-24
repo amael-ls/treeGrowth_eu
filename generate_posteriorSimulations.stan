@@ -75,7 +75,7 @@ transformed data {
 
 parameters {
 	// Parameters for growth function
-	array [n_plots] real averageGrowth; // Growth (grouped by plots) when all the explanatory variables are set to 0
+	vector [n_plots] plotEffect; // Growth (grouped by plots) when all the explanatory variables are set to 0
 	real dbh_slope;
 
 	real pr_slope;
@@ -113,12 +113,19 @@ parameters {
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
+transformed parameters {
+	// Growth (grouped by plots) when all the explanatory variables are set to 0
+	vector [n_plots] averageGrowth;
+	averageGrowth = averageGrowth_mu + averageGrowth_sd * plotEffect; // <=> averageGrowth ~ normal(averageGrowth_mu, averageGrowth_sd)
+}
+
 generated quantities {
 	// Declaration output variables
 	array [n_obs] real newObservations;
 	array [n_obs] real latent_dbh_parentsChildren;
 	array [n_latentGrowth] real latentG_residuals;
 	array [n_latentGrowth + n_indiv] real yearly_latent_dbh;
+	simplex [2] proba_small_large;
 	
 	{
 		// Variables declared in nested blocks are local variables, not generated quantities, and thus won't be printed.
@@ -126,6 +133,8 @@ generated quantities {
 		int growth_counter = 1;
 		int dbh_counter = 1;
 		int children_counter = 1;
+		int groupError; // Random variable to select from which distribution in the mixture the data is from
+		array [2] real obsError_small_large;
 		real expected_growth;
 
 		array [n_children] real temporary_children; // To store the children, will be added to latent_dbh_parentsChildren
@@ -138,8 +147,12 @@ generated quantities {
 			yearly_latent_dbh[dbh_counter] = latent_dbh_parents[i];
 
 			// Generate the parent observation conditional on the parent state
-			newObservations[parents_index[i]] = (1 - proba[nfi_id[i]]) * normal_rng(latent_dbh_parents[i], sigmaObs[nfi_id[i]]) +
-				proba[nfi_id[i]] * normal_rng(latent_dbh_parents[i], etaObs[nfi_id[i]]);
+			proba_small_large[1] = 1 - proba[nfi_id[i]]; // Remember that proba is the probability of committing a LARGE error
+			proba_small_large[2] = proba[nfi_id[i]];
+			obsError_small_large[1] = sigmaObs[nfi_id[i]];
+			obsError_small_large[2] = etaObs[nfi_id[i]];
+			groupError = categorical_rng(proba_small_large);
+			newObservations[parents_index[i]] = normal_rng(latent_dbh_parents[i], obsError_small_large[groupError]);
 
 			// Starting point to compute latent dbh child
 			current_latent_dbh = latent_dbh_parents[i];
@@ -165,8 +178,8 @@ generated quantities {
 				if (dbh_counter == latent_children_index[children_counter])
 				{
 					temporary_children[children_counter] = current_latent_dbh;
-					temporary_observation[children_counter] = (1 - proba[nfi_id[i]]) * normal_rng(current_latent_dbh, sigmaObs[nfi_id[i]]) +
-						proba[nfi_id[i]] * normal_rng(current_latent_dbh, etaObs[nfi_id[i]]);
+					groupError = categorical_rng(proba_small_large);
+					temporary_observation[children_counter] = normal_rng(current_latent_dbh, obsError_small_large[groupError]);
 					children_counter += 1;
 				}
 			}
