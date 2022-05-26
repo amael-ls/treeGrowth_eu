@@ -528,7 +528,7 @@ isProcessed = function(path, multi, lim_time, begin = "^growth-", extension = ".
 }
 
 ## Wrapping function to call all the other plot functions and to gather informations on the runs
-centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL, isDBH_normalised = TRUE)
+centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL, isDBH_normalised = TRUE, simulatePosterior = TRUE)
 {
 	path = paste0("./", species, "/")
 	n_nfi = length(ls_nfi)
@@ -540,7 +540,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 	if (multi & !is.null(run))
 	{
 		print(paste0("Run = ", run, "; multi and n_runs parameters ignored"))
-		temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, params_dt, run) # Recursive call
+		temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, params_dt, run, isDBH_normalised, simulatePosterior) # Recursive call
 		error_dt = temporary[["error_dt"]]
 		correl_energy = temporary[["correl_energy"]]
 	} else if (multi & is.null(run)) {
@@ -548,7 +548,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		correl_ls = vector(mode = "list", length = n_runs)
 		for (i in 1:n_runs)
 		{
-			temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, params_dt, i) # Recursive call
+			temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, params_dt, i, isDBH_normalised, simulatePosterior) # Recursive call
 			error_ls[[i]] = temporary[["error_dt"]]
 			correl_ls[[i]] = temporary[["correl_energy"]]
 		}
@@ -662,8 +662,47 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		## Add run id to data tables
 		error_dt[, run_id := run]
 		correl_energy[, run_id := run]
+
+		output = list(error_dt = error_dt, correl_energy = correl_energy)
+
+		## Posterior predictive checking: Can the model give rise to new observations that properly resemble the original data?
+		if (simulatePosterior)
+		{
+			# Compile simulation generator
+			gq_model = cmdstan_model("./generate_posteriorSimulations.stan")
+
+			# Load data
+			stanData = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
+			indices = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "indices.rds"))
+			
+			dbh_scaling = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "dbh_normalisation.rds"))
+			clim_scaling = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "climate_normalisation.rds"))
+			ph_scaling = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "ph_normalisation.rds"))
+			ba_scaling = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "ba_normalisation.rds"))
+
+			scaling = rbindlist(list(dbh_scaling, clim_scaling, ph_scaling, ba_scaling))
+
+			# Access data
+			n_chains = results$num_chains()
+			iter_sampling = results$metadata()$iter_sampling
+			n_obs = stanData$n_obs
+			n_hiddenState = stanData$n_latentGrowth + stanData$n_indiv
+
+			stanData$nfi_id = unique(indices[, .(plot_id, tree_id, nfi_index)])[, nfi_index]
+
+			if (length(stanData$nfi_id) != stanData$n_indiv)
+				stop("Dimensions mismatch")
+
+			# Simulations
+			generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
+
+			output = append(output, list(posterior = generate_quantities, scaling = scaling, treeData = treeData,
+				info = c(n_chains = n_chains, iter_sampling = iter_sampling, n_obs = n_obs, n_hiddenState = n_hiddenState),
+				divergences = which(results$sampler_diagnostics()[, , "divergent__"] == 1),
+				indices = indices))
+		}
 	}
-	return (list(error_dt = error_dt, correl_energy = correl_energy))
+	return (output)
 }
 
 ## Function to plot the correlations energy <--> parameters for each species, and to plot rescaled error values
