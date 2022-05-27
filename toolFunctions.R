@@ -570,14 +570,12 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 
 		# Load results and associated data set
 		results = readRDS(paste0(path, lastRun))
-		# stanData = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 
 		results$print(c("lp__", params_dt[, parameters], "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
 
 		## Pairs plot of parameters versus energy
 		# Extract energy 
 		energy = as.vector(results$sampler_diagnostics(inc_warmup = FALSE)[, , "energy__"])
-		length(energy)
 
 		# Plot
 		correl_energy = energyPairs(path, run = run, results, nb_nfi = n_nfi, energy)
@@ -674,13 +672,6 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 			# Load data
 			stanData = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 			indices = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "indices.rds"))
-			
-			dbh_scaling = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "dbh_normalisation.rds"))
-			clim_scaling = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "climate_normalisation.rds"))
-			ph_scaling = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "ph_normalisation.rds"))
-			ba_scaling = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "ba_normalisation.rds"))
-
-			scaling = rbindlist(list(dbh_scaling, clim_scaling, ph_scaling, ba_scaling))
 
 			# Access data
 			n_chains = results$num_chains()
@@ -696,10 +687,12 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 			# Simulations
 			generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
 
-			output = append(output, list(posterior = generate_quantities, scaling = scaling, treeData = treeData,
-				info = c(n_chains = n_chains, iter_sampling = iter_sampling, n_obs = n_obs, n_hiddenState = n_hiddenState),
-				divergences = which(results$sampler_diagnostics()[, , "divergent__"] == 1),
-				indices = indices))
+			output = append(output, list(posteriorSim = list(posterior_draws = generate_quantities,
+				info = c(run = run, species = species, path = path, n_chains = n_chains, iter_sampling = iter_sampling,
+					n_obs = n_obs, n_indiv = stanData$n_indiv, n_hiddenState = n_hiddenState),
+				parents_index = stanData$parents_index, children_index = stanData$children_index,
+				last_child_index = stanData$last_child_index,
+				divergences = which(results$sampler_diagnostics()[, , "divergent__"] == 1))))
 		}
 	}
 	return (output)
@@ -900,8 +893,8 @@ checkFunnels = function(results, param, nb_nfi, rm_names = c("latent", "Effect",
 		dev.off()
 }
 
-## Function to plot latent dbh states trajectories (requires generated quantities)
-dbhTrajectories = function(draws, data, plotMean = TRUE, divergences = NULL, filename = NULL, ...)
+## Function to plot latent dbh states time series (requires generated quantities)
+dbh_timeSeries = function(draws, data, plotMean = TRUE, divergences = NULL, filename = NULL, ...)
 {
 	# Check-up
 	if (!is.array(draws))
