@@ -146,6 +146,11 @@ for (i in 1:infoSpecies[, .N])
 		rasterImage(legend_image, 0, comp_min, 0.5, comp_max) # xleft, ybottom, xright, ytop
 
 		dev.off()
+
+		pdf(paste0(path, "hist_", predictor,".pdf"), height = 10, width = 10)
+		scaled_predictor = scale(predictors_data[, ..predictor])
+		hist(x = scaled_predictor, breaks = seq(1.1*min(scaled_predictor), 1.1*max(scaled_predictor), by = 0.2)) # Ok, min < 0 and max > 0
+		dev.off()
 	}
 	print(paste(species, "done"))
 }
