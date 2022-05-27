@@ -16,45 +16,6 @@ library(png)
 #### Tool functions
 source("./toolFunctions.R")
 
-#! CHANGE SIGMA PROC ?????
-
-# params_names = paste0("latent_dbh_parents[", 812:813, "]")
-
-# params_names = results$metadata()$stan_variables
-# params_names = params_names[params_names != "averageGrowth"]
-
-# for (i in 1:length(rm_names))
-# 	params_names = params_names[!stri_detect(params_names, regex = rm_names[i])]
-
-# draws_array = 143.1517*results$draws(params_names)
-# dimnames(draws_array)$variable = 812:813
-# np = nuts_params(results)
-# str(np)
-# levels(np$Parameter)
-
-# color_scheme_set("darkgray")
-# div_style = parcoord_style_np(div_color = "green", div_size = 0.05, div_alpha = 0.4)
-# pdf("test.pdf", height = 11.25, width = 20)
-# bayesplot::mcmc_parcoord(draws_array, size = 0.25, alpha = 0.1, np = np, np_style = div_style)
-# dev.off()
-
-# low_rhat = c("latent_dbh_parents[812]", "latent_dbh_parents[829]", "latent_dbh_parents[861]", "latent_dbh_parents[862]")
-
-#  r$> parents_index[812]
-#  [1] 1729
-#  
-#  r$> indices[1729:1730]
-#      year tree_id       plot_id index_gen index_clim_start index_clim_end plot_index    nfi nfi_index   type nbYearsGrowth
-#     <int>   <int>        <char>     <int>            <int>          <int>      <int> <char>     <int> <char>         <int>
-#? 1:  2008       4 france_818095      5397           525235         525245        188 france         1 parent             5
-#  2:  2013       4 france_818095      5402           525235         525245        188 france         1  child             5
-#  
-#  r$> treeData[1729:1730]
-#     speciesName_sci nfi_id       plot_id tree_id  year      dbh        x        y standBasalArea country        taxonID
-#              <char> <char>        <char>   <int> <int>    <num>    <num>    <num>          <num>  <char>         <char>
-#? 1:   Abies grandis FR IFN france_818095       4  2008 511.2536 1.876306 45.76976       46.76220  france wfo-0000511178
-#  2:   Abies grandis FR IFN france_818095       4  2013 630.2536 1.876306 45.76976       54.71816  france wfo-0000511178
-
 #### Common variables
 ## Species informations
 infoSpecies = readRDS("./speciesInformations.rds")
@@ -72,6 +33,9 @@ names(error_ls) = infoSpecies[, speciesName_sci]
 
 correl_ls = vector(mode = "list", length = infoSpecies[, .N])
 names(correl_ls) = infoSpecies[, speciesName_sci]
+
+posterior_ls = vector(mode = "list", length = infoSpecies[, .N])
+names(posterior_ls) = infoSpecies[, speciesName_sci]
 
 params_dt = data.table(parameters = c("averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2",
 	"tas_slope", "tas_slope2", "ph_slope", "ph_slope2", "competition_slope"),
@@ -93,6 +57,7 @@ for (species in infoSpecies[, speciesName_sci])
 	summary_dt = centralised_fct(species, multi, n_runs, ls_nfi, params_dt, run = if (multi) NULL else 1)
 	error_ls[[species]] = summary_dt[["error_dt"]]
 	correl_ls[[species]] = summary_dt[["correl_energy"]]
+	posterior_ls[[species]] = summary_dt[["posteriorSim"]]
 }
 
 error_dt = rbindlist(error_ls, idcol = "speciesName_sci")
@@ -103,14 +68,34 @@ saveRDS(correl_dt, "./correlation_energy_species.rds")
 
 plot_correl_error(error_dt, correl_dt, threshold_correl = 0.2, rm_correl = "lp__")
 
+selected_indiv = data.table(
+	speciesName_sci = infoSpecies[, speciesName_sci],
+	plot_id = c("france_738952", "france_804256", "france_873749"),
+	tree_id = c(1, 3, 5)
+)
 
-#! TO REMOVE AFTER !!!!!!!!!!!!!!!
-results = readRDS("Abies grandis/growth-run=1-2022-05-18_00h19.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
-stanData = readRDS("Abies grandis/1_stanData.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
-indices = readRDS("Abies grandis/1_indices.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
-treeData = readRDS("Abies grandis/1_treeData.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
-divergences = which(results$sampler_diagnostics()[, , "divergent__"] == 1) #! TO REMOVE AFTER !!!!!!!!!!!!!!!
-sd_dbh = readRDS("Abies grandis/1_dbh_normalisation.rds")[, sd] #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+setkey(selected_indiv, speciesName_sci)
+
+# computeGrowth(dt = treeData, byCols = c("plot_id", "tree_id"))
+abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries.pdf",
+	plot_id = selected_indiv["Abies grandis", plot_id], tree_id = selected_indiv["Abies grandis", tree_id],
+	highlight_threshold_growth = 45)
+
+abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries.pdf",
+	plot_id = "france_725338", tree_id = 16,
+	highlight_threshold_growth = 50)
+
+abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries2.pdf",
+	plot_id = "france_818095", tree_id = 4,
+	highlight_threshold_growth = 50)
+
+acerOpalus = dbh_timeSeries(posterior_ls[["Acer opalus"]], plotMean = TRUE, filename = "timeSeries.pdf", data = treeData,
+	plot_id = selected_indiv["Acer opalus", plot_id], tree_id = selected_indiv["Acer opalus", tree_id],
+	highlight_threshold_growth = 45)
+
+tiliaPlat = dbh_timeSeries(posterior_ls[["Tilia platyphyllos"]], plotMean = TRUE, filename = "timeSeries.pdf", data = treeData,
+	plot_id = selected_indiv["Tilia platyphyllos", plot_id], tree_id = selected_indiv["Tilia platyphyllos", tree_id],
+	highlight_threshold_growth = 45)
 
 #* --------------------------------------------------------------------------------------------
 #! ********************************************************************************************
@@ -120,6 +105,16 @@ sd_dbh = readRDS("Abies grandis/1_dbh_normalisation.rds")[, sd] #! TO REMOVE AFT
 #! ********************************************************************************************
 #* --------------------------------------------------------------------------------------------
 
+#! TO REMOVE AFTER !!!!!!!!!!!!!!!
+results = readRDS("Abies grandis/growth-run=1-2022-05-18_00h19.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+stanData = readRDS("Abies grandis/1_stanData.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+indices = readRDS("Abies grandis/1_indices.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+treeData = readRDS("Abies grandis/1_treeData.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+divergences = which(results$sampler_diagnostics()[, , "divergent__"] == 1) #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+sd_dbh = readRDS("Abies grandis/1_dbh_normalisation.rds")[, sd] #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+clim_scaling = readRDS("Abies grandis/1_climate_normalisation.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+ph_scaling = readRDS("Abies grandis/1_ph_normalisation.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+ba_scaling = readRDS("Abies grandis/1_ba_normalisation.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
 
 #### Posterior predictive checking: Can the model give rise to new observations that properly resemble the original data?
 ## Script to generate new data. Note that 'model' is an unnecessary block here as restart from results. gq stands for generated quantities
@@ -273,47 +268,56 @@ bayesplot::mcmc_parcoord(temporary_array, size = 0.25, alpha = 0.1, np = np, np_
 dev.off()
 
 draws = temporary_array
+data = treeData[1:2]
 data = treeData[1729:1730]
 
-ll = dbhTrajectories(draws, data, plotMean = TRUE, divergences = divergences, filename = "test.pdf", highlight_max_growth = TRUE,
-	highlight_min_start = TRUE, highlight_max_start = TRUE, highlight_min_end = TRUE, highlight_max_end = TRUE,
-	highlight_threshold_growth = 25)
+# r$> selectedIndiv
+# [1] 1
 
-iter_mag_growth = ll[["highlight_max_growth"]]["iter_id"]
+# r$> selectedPlot
+# [1] "france_738952"
 
-params = c("dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2", "ph_slope", "ph_slope2", "competition_slope",
-	"averageGrowth_mu", "averageGrowth_sd", "sigmaProc", "sigmaObs", "etaObs", "proba")
+ll = dbh_timeSeries(posteriorSim, plotMean = TRUE, filename = "test.pdf", plot_id = "france_738952", tree_id = 1,
+	highlight_threshold_growth = 45)
 
-aa = results$draws(params)[664:668,,]
 
-for (param in params)
-	lazyTrace(draws = results$draws(param), filename = paste0("caca_", param, ".pdf"), iter1 = iter_mag_growth)
 
-gq_draws = generate_quantities$draws("latentG_residuals")
-re_draws = results$draws("latent_growth")
+avg_G = results$draws("averageGrowth")
+plotEffect = results$draws("plotEffect")
 
-expectedG = sd_dbh*(gq_draws + re_draws)
-qq = expectedG[664:668,,indices[1729, index_gen]:indices[1730, index_gen]]
+sd_dbh*exp(quantile(avg_G))
+quantile(plotEffect)
 
-qq[,,1:2]
-qq[,,4:6]
+params_dt = data.table(ls_params = c("averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope",
+	"tas_slope2", "ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"), value = 0)
 
-max_state = which.max(expectedG)
-local_iter = max_state %% (dim(expectedG)[1] * dim(expectedG)[2])
-state = (max_state - local_iter)/(dim(expectedG)[1] * dim(expectedG)[2]) + 1
+params_dt[, isPredictor := FALSE]
+params_dt[4:10, isPredictor := TRUE]
 
-expectedG[,,state]
+setkey(params_dt, ls_params)
 
-# r$> indices[1599:1601]
-#     year tree_id       plot_id index_gen index_clim_start index_clim_end plot_index    nfi nfi_index   type nbYearsGrowth
-#    <int>   <int>        <char>     <int>            <int>          <int>      <int> <char>     <int> <char>         <int>
-# 1:  2007       1 france_738952      4979           474738         474748        181 france         1 parent            10
-# 2:  2012       1 france_738952      4984           474738         474748        181 france         1  child            10
-# 3:  2017       1 france_738952      4989           474738         474748        181 france         1  child            10
+for (param in params_dt[, ls_params]) #! A little stupid, there is the getParams function...
+	params_dt[param, value := mean(results$draws(param))]
 
-# r$> treeData[(plot_id == "france_738952") & (tree_id == 1)]
-#    speciesName_sci nfi_id       plot_id tree_id  year      dbh        x        y standBasalArea country        taxonID
-#             <char> <char>        <char>   <int> <int>    <num>    <num>    <num>          <num>  <char>         <char>
-# 1:   Abies grandis FR IFN france_738952       1  2007 284.2423 4.429703 44.95929       35.44518  france wfo-0000511178
-# 2:   Abies grandis FR IFN france_738952       1  2012 331.0423 4.429703 44.95929       48.10560  france wfo-0000511178
-# 3:   Abies grandis FR IFN france_738952       1  2017 401.7071 4.429703 44.95929       30.44573  france wfo-0000511178
+
+setkey(clim_scaling, variable)
+setkey(ph_scaling, variable)
+setkey(ba_scaling, variable)
+
+params_dt[stri_detect(ls_params, regex = "pr_slo"), mu := clim_scaling["pr", mu]]
+params_dt[stri_detect(ls_params, regex = "pr_slo"), sd := clim_scaling["pr", sd]]
+
+params_dt[stri_detect(ls_params, regex = "tas_slo"), mu := clim_scaling["tas", mu]]
+params_dt[stri_detect(ls_params, regex = "tas_slo"), sd := clim_scaling["tas", sd]]
+
+params_dt[stri_detect(ls_params, regex = "ph_slo"), mu := ph_scaling["ph", mu]]
+params_dt[stri_detect(ls_params, regex = "ph_slo"), sd := ph_scaling["ph", sd]]
+
+params_dt[stri_detect(ls_params, regex = "competit"), mu := ba_scaling["standBasalArea_interp", mu]]
+params_dt[stri_detect(ls_params, regex = "competit"), sd := ba_scaling["standBasalArea_interp", sd]]
+
+rescaleParams(intercept = params_dt["averageGrowth_mu", value], slope_dbh = params_dt["dbh_slope", value],
+	slope_predictors = params_dt[(isPredictor), value], sd_dbh = sd_dbh,
+	mu_predictors = params_dt[(isPredictor), mu], sd_predictors = params_dt[(isPredictor), sd])
+
+exp(-0.180316)
