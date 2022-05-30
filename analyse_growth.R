@@ -40,8 +40,8 @@ names(posterior_ls) = infoSpecies[, speciesName_sci]
 params_dt = data.table(parameters = c("averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2",
 	"tas_slope", "tas_slope2", "ph_slope", "ph_slope2", "competition_slope"),
 	priors = c(dnorm, dgamma, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm),
-	arg1 = c(-4, 1/100, 0, 0, 0, 0, 0, 0, 0, 0),
-	arg2 = c(10, 1/100, 5, 5, 5, 5, 5, 5, 5, 5),
+	arg1 = c(-4, 1/10, 0, 0, -1, 0, -1, 0, -1, 0),
+	arg2 = c(2, 1/10, 5, 5, 0.75, 5, 0.75, 5, 0.75, 5),
 	title = c("Average growth (mean)", "Random effect (sd)", "Dbh slope", "Precipitation slope", "Precipitation slope (quadratic term)",
 		"Temperature slope", "Temperature slope (quadratic term)", "Soil acidity slope (pH)", "Soil acidity slope (pH, quadratic term)",
 		"Competition slope"),
@@ -316,8 +316,21 @@ params_dt[stri_detect(ls_params, regex = "ph_slo"), sd := ph_scaling["ph", sd]]
 params_dt[stri_detect(ls_params, regex = "competit"), mu := ba_scaling["standBasalArea_interp", mu]]
 params_dt[stri_detect(ls_params, regex = "competit"), sd := ba_scaling["standBasalArea_interp", sd]]
 
-rescaleParams(intercept = params_dt["averageGrowth_mu", value], slope_dbh = params_dt["dbh_slope", value],
-	slope_predictors = params_dt[(isPredictor), value], sd_dbh = sd_dbh,
-	mu_predictors = params_dt[(isPredictor), mu], sd_predictors = params_dt[(isPredictor), sd])
+# rescaleParams(intercept = params_dt["averageGrowth_mu", value], slope_dbh = params_dt["dbh_slope", value],
+# 	slope_predictors = params_dt[(isPredictor), value], sd_dbh = sd_dbh,
+# 	mu_predictors = params_dt[(isPredictor), mu], sd_predictors = params_dt[(isPredictor), sd])
 
-exp(-0.180316)
+scaling = rbindlist(list(clim_scaling, ph_scaling, ba_scaling))
+setkey(scaling, variable)
+
+params = rescaleParams(params = getParams(results, c("averageGrowth_mu", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope",
+		"tas_slope2", "ph_slope", "ph_slope2", "competition_slope")),
+	sd_dbh = sd_dbh,
+	mu_predictors = c(pr = scaling["pr", mu], tas = scaling["tas", mu], ph = scaling["ph", mu],
+		basalArea = scaling["standBasalArea_interp", mu]),
+	sd_predictors = c(pr = scaling["pr", sd], tas = scaling["tas", sd], ph = scaling["ph", sd],
+		basalArea = scaling["standBasalArea_interp", sd]))
+
+growth_fct(250, 750, 12, 5, 25, params, sd_dbh, rescaled = TRUE)
+growth_fct(500, 500, 12, 5, 25, params, sd_dbh, rescaled = TRUE)
+
