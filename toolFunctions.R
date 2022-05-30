@@ -1132,21 +1132,51 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 }
 
 ## Function to rescale parameters (intercept and slopes)
-rescaleParams = function(intercept, slope_dbh, slope_predictors, sd_dbh, mu_predictors, sd_predictors)
+rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 {
-	n = length(slope_predictors)
-	if ((length(mu_predictors) != n) | (length(sd_predictors) != n))
-		stop("Dimensions mismatch between predictors and their mean or sd")
+	required_params = c("averageGrowth_mu", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope",
+		"tas_slope2", "ph_slope", "ph_slope2", "competition_slope")
 	
-	# beta_0 = scaled beta_0 - Σ scaled gamma_i * mu_i/sd_i
-	beta_0 = intercept - sum(slope_predictors*mu_predictors/sd_predictors)
+	if (!all(names(params) %in% required_params))
+		stop("Some required parameters are missing")
+
+	if (!all(names(mu_predictors) %in% c("pr", "tas", "ph", "basalArea")))
+		stop("Some required mu are missing")
+
+	if (!all(names(sd_predictors) %in% c("pr", "tas", "ph", "basalArea")))
+		stop("Some required sd are missing")
+	
+	# beta_0 = scaled beta_0 - Σ scaled gamma_i * mu_i/sd_i + Σ scaled delta_j * mu_j^2/sd_j^2
+	intercept_rescale = params["averageGrowth_mu"] - params["pr_slope"]*mu_predictors["pr"]/sd_predictors["pr"] -
+		params["tas_slope"]*mu_predictors["tas"]/sd_predictors["tas"] - params["ph_slope"]*mu_predictors["ph"]/sd_predictors["ph"] -
+		params["competition_slope"]*mu_predictors["basalArea"]/sd_predictors["basalArea"] +
+		params["pr_slope2"]*mu_predictors["pr"]^2/sd_predictors["pr"]^2 +
+		params["tas_slope2"]*mu_predictors["tas"]^2/sd_predictors["tas"]^2 +
+		params["ph_slope2"]*mu_predictors["ph"]^2/sd_predictors["ph"]^2
 	
 	# beta_1 = scaled beta_1/sd_dbh
-	beta_1 = slope_dbh/sd_dbh
+	slope_dbh_rescale = params["dbh_slope"]/sd_dbh
 
-	beta_2 = slope_predictors/sd_predictors
+	slope_predictors_rescale = numeric(4)
+	names(slope_predictors_rescale) = c("pr_slope", "tas_slope", "ph_slope", "competition_slope")
 
-	return (list(intercept = beta_0, slope_dbh = beta_1, slope_predictors = beta_2))
+	slope_predictors_rescale["pr_slope"] = params["pr_slope"]/sd_predictors["pr"] -
+		2*mu_predictors["pr"]*params["pr_slope2"]/sd_predictors["pr"]^2
+	slope_predictors_rescale["tas_slope"] = params["tas_slope"]/sd_predictors["tas"] -
+		2*mu_predictors["tas"]*params["tas_slope2"]/sd_predictors["tas"]^2
+	slope_predictors_rescale["ph_slope"] = params["ph_slope"]/sd_predictors["ph"] -
+		2*mu_predictors["ph"]*params["ph_slope2"]/sd_predictors["ph"]^2
+	slope_predictors_rescale["competition_slope"] = params["competition_slope"]/sd_predictors["basalArea"]
+
+	slope_quadratic_predictors_rescale = numeric(3)
+	names(slope_quadratic_predictors_rescale) = c("pr_slope2", "tas_slope2", "ph_slope2")
+
+	slope_quadratic_predictors_rescale["pr_slope2"] = params["pr_slope2"]/sd_predictors["pr"]^2
+	slope_quadratic_predictors_rescale["tas_slope2"] = params["tas_slope2"]/sd_predictors["tas"]^2
+	slope_quadratic_predictors_rescale["ph_slope2"] = params["ph_slope2"]/sd_predictors["ph"]^2
+
+	return (list(intercept_rescale = intercept_rescale, slope_dbh_rescale = slope_dbh_rescale,
+		slope_predictors_rescale = slope_predictors_rescale, slope_quadratic_predictors_rescale = slope_quadratic_predictors_rescale))
 }
 
 ## Function to compute growth, the data table must be sorted by year within tree id and plot id
@@ -1162,4 +1192,31 @@ computeGrowth = function(dt, col = "growth", byCols = c("pointInventory_id", "tr
 
 	if (!("deltaYear" %in% names(dt)))
 		dt[, deltaYear := shift(year, n = 1, type = "lead", fill = NA) - year, by = byCols]
+}
+
+growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, rescaled = TRUE)
+{
+	G = NaN
+	if (rescaled)
+	{
+		if (class(params) != "list")
+			stop("Rescale is true, list created by rescapeParameters expected")
+
+		intercept = params[["intercept_rescale"]]
+
+		dbh_slope = params[["slope_dbh_rescale"]]
+		
+		pr_slope = params[["slope_predictors_rescale"]]["pr_slope"]
+		tas_slope = params[["slope_predictors_rescale"]]["tas_slope"]
+		ph_slope = params[["slope_predictors_rescale"]]["ph_slope"]
+		competition_slope = params[["slope_predictors_rescale"]]["competition_slope"]
+
+		pr_slope2 = params[["slope_quadratic_predictors_rescale"]]["pr_slope2"]
+		tas_slope2 = params[["slope_quadratic_predictors_rescale"]]["tas_slope2"]
+		ph_slope2 = params[["slope_quadratic_predictors_rescale"]]["ph_slope2"]
+		
+		G = sd_dbh * exp(intercept + dbh_slope*dbh + pr_slope*pr + pr_slope2*pr^2 + tas_slope*tas + tas_slope2*tas^2 +
+			ph_slope*ph + ph_slope2*ph^2 + competition_slope*basalArea)
+	}
+	return (G)	
 }
