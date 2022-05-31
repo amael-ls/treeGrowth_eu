@@ -161,19 +161,19 @@ model {
 	target += normal_lpdf(dbh_slope | 0, 5);
 	
 	target += normal_lpdf(pr_slope | 0, 5);
-	target += normal_lpdf(pr_slope2 | -1, 0.75); // Shrinkage towards negative values (to get a maximum growth), 90% chance negative
+	target += normal_lpdf(pr_slope2 | 0, 5);
 
 	target += normal_lpdf(tas_slope | 0, 5);
-	target += normal_lpdf(tas_slope2 | -1, 0.75); // Shrinkage towards negative values (to get a maximum growth), 90% chance negative
+	target += normal_lpdf(tas_slope2 | 0, 5);
 
 	target += normal_lpdf(ph_slope | 0, 5);
-	target += normal_lpdf(ph_slope2 | -1, 0.75); // Shrinkage towards negative values (to get a maximum growth), 90% chance negative
+	target += normal_lpdf(ph_slope2 | 0, 5);
 
 	target += normal_lpdf(competition_slope | 0, 5);
 
 	// --- Hyper parameters
-	target += normal_lpdf(averageGrowth_mu | -4, 2); // sd_dbh * exp(-4) is around 2 to 3 mm, which is a reasonable average growth
-	target += gamma_lpdf(averageGrowth_sd | 1.0/10, 1.0/10);
+	target += normal_lpdf(averageGrowth_mu | -4, 10); // sd_dbh * exp(-4) is around 2 to 3 mm (reasonable average growth) for sd_dbh = 130
+	target += gamma_lpdf(averageGrowth_sd | 1.0/100, 1.0/100);
 
 	// --- Errors
 	/*
