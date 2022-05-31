@@ -63,7 +63,7 @@ data {
 	array [n_inventories] int<lower = 1, upper = n_indiv - 1> start_nfi_parents; // Starting point of each NFI for parents
 	array [n_inventories] int<lower = 2, upper = n_indiv> end_nfi_parents; // Ending point of each NFI for parents
 	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_children; // Starting point of each NFI for children
-	array [n_inventories] int<lower = 1, upper = n_children> end_nfi_children; // Ending point of each NFI for children
+	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_children; // Ending point of each NFI for children
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
@@ -172,7 +172,7 @@ model {
 	target += normal_lpdf(competition_slope | 0, 5);
 
 	// --- Hyper parameters
-	target += normal_lpdf(averageGrowth_mu | -4, 10); // sd_dbh * exp(-4) is around 2 to 3 mm, which is a reasonable average growth
+	target += normal_lpdf(averageGrowth_mu | -4, 10); // sd_dbh * exp(-4) is around 2 to 3 mm (reasonable average growth) for sd_dbh = 130
 	target += gamma_lpdf(averageGrowth_sd | 1.0/100, 1.0/100);
 
 	// --- Errors

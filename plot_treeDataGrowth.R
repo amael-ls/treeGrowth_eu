@@ -118,7 +118,7 @@ for (i in 1:infoSpecies[, .N])
 		pred = cbind(x = sort(explanatory_var),
 			as.data.frame(mgcv::predict.gam(m, se.fit = TRUE))[order(explanatory_var), ])
 		lines(pred[, c("x", "fit")], col = "#9E391A", lwd = 2)
-		polygon(c(pred$x, rev(pred$x)), c(pred$fit-1.96*pred$se.fit, rev(pred$fit+1.96*pred$se.fit)), col = "#354536", border = NA)
+		polygon(c(pred$x, rev(pred$x)), c(pred$fit-1.96*pred$se.fit, rev(pred$fit+1.96*pred$se.fit)), col = "#35453633", border = NA)
 
 		# Plot 2: Top (precipitation) boxplot
 		par(mar = c(0, 4, 0, 0))
@@ -145,6 +145,11 @@ for (i in 1:infoSpecies[, .N])
 		}
 		rasterImage(legend_image, 0, comp_min, 0.5, comp_max) # xleft, ybottom, xright, ytop
 
+		dev.off()
+
+		pdf(paste0(path, "hist_", predictor,".pdf"), height = 10, width = 10)
+		scaled_predictor = scale(predictors_data[, ..predictor])
+		hist(x = scaled_predictor, breaks = seq(1.1*min(scaled_predictor), 1.1*max(scaled_predictor), by = 0.2)) # Ok, min < 0 and max > 0
 		dev.off()
 	}
 	print(paste(species, "done"))
