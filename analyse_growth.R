@@ -22,7 +22,7 @@ infoSpecies = readRDS("./speciesInformations.rds")
 
 n_runs = 4 # Number of runs used in growth_subsample.R
 threshold_indiv = 8000 # Minimal number of individuals required to use multi runs
-threshold_time = as.Date("2022/05/17") # Results anterior to this date will not be considered
+threshold_time = as.Date("2022/05/29") # Results anterior to this date will not be considered
 
 infoSpecies[, multiRun := if (n_indiv > threshold_indiv) TRUE else FALSE, by = speciesName_sci]
 infoSpecies[, processed := isProcessed(speciesName_sci, multiRun, threshold_time, lower = 1, upper = n_runs), by = speciesName_sci]
@@ -40,8 +40,8 @@ names(posterior_ls) = infoSpecies[, speciesName_sci]
 params_dt = data.table(parameters = c("averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2",
 	"tas_slope", "tas_slope2", "ph_slope", "ph_slope2", "competition_slope"),
 	priors = c(dnorm, dgamma, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm),
-	arg1 = c(-4, 1/10, 0, 0, -1, 0, -1, 0, -1, 0),
-	arg2 = c(2, 1/10, 5, 5, 0.75, 5, 0.75, 5, 0.75, 5),
+	arg1 = c(-4, 1/10, 0, 0, 0, 0, 0, 0, 0, 0),
+	arg2 = c(2, 1/10, 5, 5, 5, 5, 5, 5, 5, 5),
 	title = c("Average growth (mean)", "Random effect (sd)", "Dbh slope", "Precipitation slope", "Precipitation slope (quadratic term)",
 		"Temperature slope", "Temperature slope (quadratic term)", "Soil acidity slope (pH)", "Soil acidity slope (pH, quadratic term)",
 		"Competition slope"),
@@ -334,3 +334,14 @@ params = rescaleParams(params = getParams(results, c("averageGrowth_mu", "dbh_sl
 growth_fct(250, 750, 12, 5, 25, params, sd_dbh, rescaled = TRUE)
 growth_fct(500, 500, 12, 5, 25, params, sd_dbh, rescaled = TRUE)
 
+
+## Proba observation from extreme distribution
+proba_extreme_obs_array = exp(generate_quantities$draws("proba_extreme_obs"))
+
+# With first tree
+temporary_array = proba_extreme_obs_array[, , 1:2]
+
+# With tree parent number 812, corresponds to indices[1729]
+temporary_array = proba_extreme_obs_array[, , 1729:1730]
+
+max(proba_extreme_obs_array)
