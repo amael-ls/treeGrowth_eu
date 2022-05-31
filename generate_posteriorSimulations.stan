@@ -159,11 +159,14 @@ generated quantities {
 			// Compute the probability that the parent observation is from extreme part of the mixture
 			shitty_array[1] = normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], obsError_small_large[1]);
 			shitty_array[2] = normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], obsError_small_large[2]);
-			shitty_array[3] = log(obsError_small_large[1]);
-			shitty_array[4] = log(obsError_small_large[2]);
+			shitty_array[3] = gamma_lpdf(obsError_small_large[1] | 3.0/0.025, sd_dbh*sqrt(3)/0.025); //! WRONG, ...
+			//! ... should be [s_n = 1 | obsError_small_large[1]], check
+			//! https://mc-stan.org/docs/2_29/functions-reference/categorical-distribution.html
+			//! There is also softmax, check what it is
+			shitty_array[4] = gamma_lpdf(obsError_small_large[2] | 25.6^2/6.2, sd_dbh*25.6/6.2); //! WRONG
 			proba_extreme_obs[parents_index[i]] =
 				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], obsError_small_large[2]) +
-				log(obsError_small_large[2]) -
+				gamma_lpdf(obsError_small_large[2] | 25.6^2/6.2, sd_dbh*25.6/6.2) -  //! WRONG
 				log_sum_exp(shitty_array);
 
 			// Starting point to compute latent dbh child
@@ -197,12 +200,12 @@ generated quantities {
 						normal_lpdf(normalised_Yobs[children_index[children_counter]] | current_latent_dbh, obsError_small_large[1]);
 					shitty_array[2] =
 						normal_lpdf(normalised_Yobs[children_index[children_counter]] | current_latent_dbh, obsError_small_large[2]);
-					shitty_array[3] = log(obsError_small_large[1]);
-					shitty_array[4] = log(obsError_small_large[2]);
+					shitty_array[3] = gamma_lpdf(obsError_small_large[1] | 3.0/0.025, sd_dbh*sqrt(3)/0.025); //! WRONG
+					shitty_array[4] = gamma_lpdf(obsError_small_large[2] | 25.6^2/6.2, sd_dbh*25.6/6.2); //! WRONG
 
 					proba_extreme_obs[children_index[children_counter]] =
 					normal_lpdf(normalised_Yobs[children_index[children_counter]] | current_latent_dbh, obsError_small_large[2]) +
-					log(obsError_small_large[2]) -
+					gamma_lpdf(obsError_small_large[2] | 25.6^2/6.2, sd_dbh*25.6/6.2) -  //! WRONG
 					log_sum_exp(shitty_array);
 					children_counter += 1;
 				}
