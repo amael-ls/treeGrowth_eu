@@ -336,12 +336,34 @@ growth_fct(500, 500, 12, 5, 25, params, sd_dbh, rescaled = TRUE)
 
 
 ## Proba observation from extreme distribution
-proba_extreme_obs_array = exp(generate_quantities$draws("proba_extreme_obs"))
+proba_extreme_obs_array = generate_quantities$draws("proba_extreme_obs")
+range(proba_extreme_obs_array)
 
 # With first tree
 temporary_array = proba_extreme_obs_array[, , 1:2]
+mean(temporary_array)
 
 # With tree parent number 812, corresponds to indices[1729]
 temporary_array = proba_extreme_obs_array[, , 1729:1730]
+mean(temporary_array)
 
-max(proba_extreme_obs_array)
+dd = dim(temporary_array)
+
+colours = MetBrewer::met.brewer("Hokusai3", dd[2]*dd[3])
+colours_str = grDevices::colorRampPalette(colours)(dd[2]*dd[3])
+
+pdf("chains_proba_extreme.pdf", height = 11.25, width = 20)
+
+plot(0, type = "n", xlim = c(0, dd[1]), ylim = c(0, 1), ylab = "proba extreme error", xlab = "Iterations")
+
+for (param in 1:dd[3])
+{
+	for (chain in 1:dd[2])
+		lines(1:dd[1], temporary_array[, chain, param], col = colours_str[(param - 1)*dd[2] + chain])
+}
+legend(x = "topleft", legend = c(paste("1729 -", 1:dd[2]), paste("1730 -", 1:dd[2])), fill = colours_str, box.lwd = 0)
+
+dev.off()
+
+lazyPosterior(temporary_array[,,1], filename = "1729", mean = 50, sd = 0.1, n = 10000)
+lazyPosterior(temporary_array[,,2], filename = "1730", mean = 50, sd = 0.1, n = 10000)

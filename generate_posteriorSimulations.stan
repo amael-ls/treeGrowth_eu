@@ -137,7 +137,7 @@ generated quantities {
 		int groupError; // Random variable to select from which distribution in the mixture the data is from
 		array [2] real obsError_small_large;
 		real expected_growth;
-		array [4]  real shitty_array;
+		vector [2] shitty_vector;
 
 		array [n_children] real temporary_children; // To store the children, will be added to latent_dbh_parentsChildren
 		array [n_children] real temporary_observation; // To store the children, will be added to newObservations
@@ -157,14 +157,11 @@ generated quantities {
 			newObservations[parents_index[i]] = normal_rng(latent_dbh_parents[i], obsError_small_large[groupError]);
 
 			// Compute the probability that the parent observation is from extreme part of the mixture
-			shitty_array[1] = normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], obsError_small_large[1]);
-			shitty_array[2] = normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], obsError_small_large[2]);
-			shitty_array[3] = log(obsError_small_large[1]);
-			shitty_array[4] = log(obsError_small_large[2]);
-			proba_extreme_obs[parents_index[i]] =
-				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], obsError_small_large[2]) +
-				log(obsError_small_large[2]) -
-				log_sum_exp(shitty_array);
+			shitty_vector[1] = normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], obsError_small_large[1]) +
+				categorical_lpmf(1 | proba_small_large);
+			shitty_vector[2] = normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], obsError_small_large[2]) +
+				categorical_lpmf(2 | proba_small_large);
+			proba_extreme_obs[parents_index[i]] = softmax(shitty_vector)[2];
 
 			// Starting point to compute latent dbh child
 			current_latent_dbh = latent_dbh_parents[i];
@@ -193,17 +190,14 @@ generated quantities {
 					groupError = categorical_rng(proba_small_large);
 					temporary_observation[children_counter] = normal_rng(current_latent_dbh, obsError_small_large[groupError]);
 
-					shitty_array[1] =
-						normal_lpdf(normalised_Yobs[children_index[children_counter]] | current_latent_dbh, obsError_small_large[1]);
-					shitty_array[2] =
-						normal_lpdf(normalised_Yobs[children_index[children_counter]] | current_latent_dbh, obsError_small_large[2]);
-					shitty_array[3] = log(obsError_small_large[1]);
-					shitty_array[4] = log(obsError_small_large[2]);
+					shitty_vector[1] =
+						normal_lpdf(normalised_Yobs[children_index[children_counter]] | current_latent_dbh, obsError_small_large[1]) +
+						categorical_lpmf(1 | proba_small_large);
+					shitty_vector[2] =
+						normal_lpdf(normalised_Yobs[children_index[children_counter]] | current_latent_dbh, obsError_small_large[2]) +
+						categorical_lpmf(2 | proba_small_large);
 
-					proba_extreme_obs[children_index[children_counter]] =
-					normal_lpdf(normalised_Yobs[children_index[children_counter]] | current_latent_dbh, obsError_small_large[2]) +
-					log(obsError_small_large[2]) -
-					log_sum_exp(shitty_array);
+					proba_extreme_obs[children_index[children_counter]] = softmax(shitty_vector)[2];
 					children_counter += 1;
 				}
 			}
