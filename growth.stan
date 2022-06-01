@@ -101,7 +101,7 @@ transformed data {
 
 parameters {
 	// Parameters for growth function
-	vector [n_plots] plotEffect; // Growth (grouped by plots) when all the explanatory variables are set to 0
+	real averageGrowth;
 	real dbh_slope;
 
 	real pr_slope;
@@ -114,11 +114,7 @@ parameters {
 	real ph_slope2;
 
 	real competition_slope;
-
-	// Hyper parameters for growth function
-	real averageGrowth_mu;
-	real<lower = 0> averageGrowth_sd;
-
+	
 	// Errors (observation and process)
 	// --- Process error, which is the variance of a gamma distrib /!\
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
@@ -139,12 +135,6 @@ parameters {
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
-transformed parameters {
-	// Growth (grouped by plots) when all the explanatory variables are set to 0
-	vector [n_plots] averageGrowth;
-	averageGrowth = averageGrowth_mu + averageGrowth_sd * plotEffect; // <=> averageGrowth ~ normal(averageGrowth_mu, averageGrowth_sd)
-}
-
 model {
 	// Declare variables
 	int growth_counter = 1; // Counter in the latent space
@@ -156,8 +146,7 @@ model {
 
 	// Priors
 	// --- Growth parameters
-	target += std_normal_lpdf(plotEffect); // <=> normal_lpdf(plotEffect | 0, 1);
-	
+	target += normal_lpdf(averageGrowth | -4, 10); // sd_dbh * exp(-4) is around 2 to 3 mm (reasonable average growth) for sd_dbh = 130
 	target += normal_lpdf(dbh_slope | 0, 5);
 	
 	target += normal_lpdf(pr_slope | 0, 5);
@@ -170,10 +159,6 @@ model {
 	target += normal_lpdf(ph_slope2 | 0, 5);
 
 	target += normal_lpdf(competition_slope | 0, 5);
-
-	// --- Hyper parameters
-	target += normal_lpdf(averageGrowth_mu | -4, 10); // sd_dbh * exp(-4) is around 2 to 3 mm (reasonable average growth) for sd_dbh = 130
-	target += gamma_lpdf(averageGrowth_sd | 1.0/100, 1.0/100);
 
 	// --- Errors
 	/*
@@ -192,8 +177,10 @@ model {
 		For the process error, which is the variance of growth, we have:
 		shape = (m/var(dbh))^2 / (v/var(dbh)^2) = m^2/v
 		rate = (m/var(dbh))    / (v/var(dbh)^2) = var(dbh) * m/v
+
+		The values are taken from Rüger et al (2011), Growth Strategies of Tropical Tree Species: Disentangling Light and Size Effects
 	*/
-	target += gamma_lpdf(sigmaProc | 5.0^2/1, sd_dbh^2*5.0/1); // Remember that sigmaProc is a variance, not a sd!
+	target += gamma_lpdf(sigmaProc | 1.28^2/0.0256, sd_dbh^2*1.28/0.0256); // Remember that sigmaProc is a variance, not a sd!
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
@@ -209,7 +196,7 @@ model {
 			// Process model
 			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
 				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[climate_index[i] + j - 1],
-				averageGrowth[plot_index[i]], dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
+				averageGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
 
 			// Dbh at time t + 1
