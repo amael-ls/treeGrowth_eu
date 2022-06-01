@@ -179,6 +179,10 @@ model {
 		rate = (m/var(dbh))    / (v/var(dbh)^2) = var(dbh) * m/v
 
 		The values are taken from Rüger et al (2011), Growth Strategies of Tropical Tree Species: Disentangling Light and Size Effects
+		for sigmaProc, etaObs and proba priors.
+
+		The values are taken from Luoma et al (2011), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
+		for sigmaObs prior.
 	*/
 	target += gamma_lpdf(sigmaProc | 1.28^2/0.0256, sd_dbh^2*1.28/0.0256); // Remember that sigmaProc is a variance, not a sd!
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
