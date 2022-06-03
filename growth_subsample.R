@@ -471,5 +471,5 @@ results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_e
 results$cmdstan_diagnose()
 
 print(end_time - start_time)
-results$print(c("lp__", "averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+results$print(c("lp__", "averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
