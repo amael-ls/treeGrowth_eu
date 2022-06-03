@@ -143,6 +143,8 @@ model {
 	real expected_growth;
 	real temporary;
 	vector [n_children] latent_dbh_children;
+	real growth_mean_logNormal;
+	real growth_sd_logNormal;
 
 	// Priors
 	// --- Growth parameters
@@ -181,10 +183,10 @@ model {
 		The values are taken from Rüger et al (2011), Growth Strategies of Tropical Tree Species: Disentangling Light and Size Effects
 		for sigmaProc, etaObs and proba priors.
 
-		The values are taken from Luoma et al (2011), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
+		The values are taken from Luoma et al (2017), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
 		for sigmaObs prior.
 	*/
-	target += gamma_lpdf(sigmaProc | 1.28^2/0.0256, sd_dbh^2*1.28/0.0256); // Remember that sigmaProc is a variance, not a sd!
+	target += lognormal_lpdf(sigmaProc | 1.256145/sd_dbh, 0.2696117/sd_dbh); // <=> procError = 3.64 mm/yr ± 1 mm/yr
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
@@ -201,7 +203,11 @@ model {
 			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
 				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[climate_index[i] + j - 1],
 				averageGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
-			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
+
+			growth_mean_logNormal = log(expected_growth^2/sqrt(sigmaProc^2 + expected_growth^2));
+			growth_sd_logNormal = sqrt(log(sigmaProc^2/expected_growth^2 + 1));
+
+			target += lognormal_lpdf(latent_growth[growth_counter] | growth_mean_logNormal, growth_sd_logNormal);
 
 			// Dbh at time t + 1
 			temporary += latent_growth[growth_counter];
