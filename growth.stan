@@ -184,7 +184,7 @@ model {
 		The values are taken from Luoma et al (2011), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
 		for sigmaObs prior.
 	*/
-	target += gamma_lpdf(sigmaProc | 1.28^2/0.0256, sd_dbh^2*1.28/0.0256); // Remember that sigmaProc is a variance, not a sd!
+	target += gamma_lpdf(sigmaProc | 3.64^2/1.5, sd_dbh^2*3.64/1.5); // Remember that sigmaProc is a variance, not a sd!
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
