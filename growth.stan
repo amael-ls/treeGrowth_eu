@@ -179,17 +179,20 @@ model {
 		rate = (m/var(dbh))    / (v/var(dbh)^2) = var(dbh) * m/v
 
 		The values are taken from Rüger et al (2011), Growth Strategies of Tropical Tree Species: Disentangling Light and Size Effects
-		for sigmaProc, etaObs and proba priors.
+		for sigmaProc, etaObs and proba priors. For sigmaProc, because Nadja Rüger is using a logNormal prior, I had to compute its mean
+		and its variance, so that I can deduce the corresponding shape and rate from the gamma distribution. No that her std. dev of the
+		posterior of sigmaProc is: sqrt((exp(0.16^2) - 1)*exp(2*1.28 + 0.16^2)) = 0.59 (i.e., a variance of 0.34). I used a variance of
+		1.5 to make sure I am not too informative...
 
 		The values are taken from Luoma et al (2011), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
 		for sigmaObs prior.
 	*/
-	target += gamma_lpdf(sigmaProc | 3.64^2/1.5, sd_dbh^2*3.64/1.5); // Remember that sigmaProc is a variance, not a sd!
-	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
-	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
+	target += gamma_lupdf(sigmaProc | 3.64^2/1.5, sd_dbh^2*3.64/1.5); // Remember that sigmaProc is a variance, not a sd!
+	target += gamma_lupdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
+	target += gamma_lupdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
 	// target += beta_lpdf(proba | 3.95, 391.05); // This corresponds to a 1 % chance extrem error, ± 0.5 %
-	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
+	target += beta_lupdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
@@ -201,7 +204,7 @@ model {
 			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
 				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[climate_index[i] + j - 1],
 				averageGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
-			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
+			target += gamma_lupdf(latent_growth[growth_counter] | expected_growth^2/sigmaProc, expected_growth/sigmaProc);
 
 			// Dbh at time t + 1
 			temporary += latent_growth[growth_counter];
@@ -220,7 +223,7 @@ model {
 	}
 	
 	// Prior on initial hidden state: This is a diffuse initialisation
-	target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 3000/sd_dbh); // Remember that the dbh is in mm and standardised
+	target += uniform_lupdf(latent_dbh_parents | 0.1/sd_dbh, 3000/sd_dbh); // Remember that the dbh is in mm and standardised
 	
 	// --- Observation model
 	for (k in 1:n_inventories)
