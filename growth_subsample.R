@@ -473,3 +473,25 @@ results$cmdstan_diagnose()
 print(end_time - start_time)
 results$print(c("lp__", "averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
+
+# results = readRDS("Abies grandis/growth-run=1-2022-06-02_00h42.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+
+# my_avg = 3.641843
+# my_sd = 1
+
+# mu = log(my_avg^2/sqrt(my_sd^2 + my_avg^2))
+# sigma = sqrt(log(my_sd^2/my_avg^2 + 1))
+
+# qq = rlnorm(1e6, mu, sigma)
+# 100*mean(qq)/my_avg
+# 100*sd(qq)/my_sd
+
+# qq = rlnorm(1e6, 1.28, 0.16)
+# mean(qq)
+# sd(qq)
+
+# exp(1.28 + 0.16^2/2)
+# sqrt((exp(0.16^2) - 1)*exp(2*1.28 + 0.16^2))
+# (exp(0.16^2) - 1)*exp(2*1.28 + 0.16^2)
+
+# log(0.3441301/3.641843^2 + 1)
