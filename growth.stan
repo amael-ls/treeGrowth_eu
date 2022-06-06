@@ -191,7 +191,7 @@ model {
 		The values are taken from Luoma et al (2017), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
 		for sigmaObs prior.
 	*/
-	target += lognormal_lpdf(sigmaProc | 1.256145 - log(sd_dbh), 0.2696117); // <=> procError = 3.64 mm/yr ± 1 mm/yr
+	target += lognormal_lpdf(sigmaProc | 1.215 - log(sd_dbh), 0.125); // <=> procError = 3.3967 mm/yr ± 0.426 mm/yr
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
