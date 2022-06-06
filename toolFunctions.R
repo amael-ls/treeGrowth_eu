@@ -194,8 +194,8 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 		stop("Draws should be an array extracted from a CmdStanMCMC object")
 		
 	# isFALSE will not work here, hence !isTRUE
-	if (!isTRUE(all.equal(fun, dnorm)) & !isTRUE(all.equal(fun, dgamma)) & !isTRUE(all.equal(fun, dbeta)))
-		stop("This function only accepts dnorm, dgamma, or dbeta as priors")
+	if (!isTRUE(all.equal(fun, dnorm)) & !isTRUE(all.equal(fun, dlnorm)) & !isTRUE(all.equal(fun, dgamma)) & !isTRUE(all.equal(fun, dbeta)))
+		stop("This function only accepts dnorm, dlnorm, dgamma, or dbeta as priors")
 
 	# Get list of arguments
 	providedArgs = list(...)
@@ -235,6 +235,29 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 			arg1 = providedArgs[["mean"]]
 			arg2 = scaling*providedArgs[["sd"]]
 		} else {
+			arg1 = providedArgs[["arg1"]]
+			arg2 = scaling*providedArgs[["arg2"]]
+		}
+	}
+
+	if (isTRUE(all.equal(fun, dlnorm)))
+	{
+		if ((!all(c("mean", "sd") %in% names(providedArgs))) & (!all(c("arg1", "arg2") %in% names(providedArgs))) & 
+			(!all(c("meanlog", "sdlog") %in% names(providedArgs))))
+			stop("You must provide mean and sd or meanlog and sdlog for dlnorm")
+		
+		if (all(c("mean", "sd") %in% names(providedArgs)))
+		{
+			dlnorm_mean = providedArgs[["mean"]]
+			dlnorm_sd = providedArgs[["sd"]]
+
+			arg1 = log(dlnorm_mean^2/sqrt(dlnorm_sd^2 + dlnorm_mean^2))
+			arg2 = sqrt(log(dlnorm_sd^2/dlnorm_mean^2 + 1))
+		} else if (all(c("meanlog", "sdlog") %in% names(providedArgs))) {
+			arg1 = providedArgs[["meanlog"]]
+			arg2 = scaling*providedArgs[["sdlog"]]
+		} else {
+			print("args 1 and 2 provided; it is assumed they are meanlog and sdlog")
 			arg1 = providedArgs[["arg1"]]
 			arg2 = scaling*providedArgs[["arg2"]]
 		}
@@ -358,6 +381,31 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 				max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
 				check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
 					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
+		}
+	}
+
+	if (isTRUE(all.equal(fun, dlnorm)))
+	{
+		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, meanlog = arg1, sdlog = arg2)[["objective"]]
+		if (expand_bounds)
+		{
+			check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, meanlog = arg1,
+				sdlog = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_min_bound$value > 0.1)
+			{
+				min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+				check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, meanlog = arg1,
+					sdlog = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			}
+
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), meanlog = arg1,
+				sdlog = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
+			while (check_max_bound$value > 0.1)
+			{
+				max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), meanlog = arg1,
+					sdlog = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 		}
 	}
@@ -587,7 +635,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		# For process error (sigmaProc), it is a variance (of a gamma distrib)
 		sigmaProc_array = results$draws("sigmaProc")
 		lazyPosterior(draws = sigmaProc_array, fun = dgamma, filename = paste0(path, "sigmaProc_posterior"), params = "process error",
-			shape = 5.0^2/1, rate = sd_dbh^2*5.0/1, run = run)
+			shape = 5.0^2/1, rate = sd_dbh^2*5.0/1, scaling = sd_dbh^2, run = run)
 
 		lazyTrace(draws = sigmaProc_array, filename = paste0(path, "sigmaProc_traces"), run = run)
 
@@ -1135,7 +1183,7 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 {
 	required_params = c("averageGrowth_mu", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope",
-		"tas_slope2", "ph_slope", "ph_slope2", "competition_slope")
+		"tas_slope2", "ph_slope", "ph_slope2", "competition_slope", "sigmaProc")
 	
 	if (!all(names(params) %in% required_params))
 		stop("Some required parameters are missing")
@@ -1175,8 +1223,14 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 	slope_quadratic_predictors_rescale["tas_slope2"] = params["tas_slope2"]/sd_predictors["tas"]^2
 	slope_quadratic_predictors_rescale["ph_slope2"] = params["ph_slope2"]/sd_predictors["ph"]^2
 
+	errors_rescale = numeric(1)
+	names(errors_rescale) = c("sigmaProc")
+
+	errors_rescaled["sigmaProc"] = sd_dbh^2*params["sigmaProc"]
+
 	return (list(intercept_rescale = intercept_rescale, slope_dbh_rescale = slope_dbh_rescale,
-		slope_predictors_rescale = slope_predictors_rescale, slope_quadratic_predictors_rescale = slope_quadratic_predictors_rescale))
+		slope_predictors_rescale = slope_predictors_rescale, slope_quadratic_predictors_rescale = slope_quadratic_predictors_rescale,
+		errors_rescale = errors_rescale))
 }
 
 ## Function to compute growth, the data table must be sorted by year within tree id and plot id
