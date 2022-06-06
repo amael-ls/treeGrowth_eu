@@ -8,9 +8,12 @@
 		- Note that the dbh is standardised but not centred. The reason was that in a previous version of the model, it would have
 			implied a division by 0. Since then, I do not have this problem anymore, but I kept the dbh non-centred.
 	
-	Reminder:
+	Reminder (method of first and second moments, i.e., mean and variance or standard deviation):
 		- The gamma distribution of stan uses, in this order, shape (alpha) and rate (beta). It can however be reparametrised
 			using mean and var: alpha = mean^2/var, beta = mean/var
+		
+		- The lognormal distribution of stan uses, in this order, meanlog (mu) and sdlog (sigma). It can however be reparametrised
+			using mean and sd: mu = log(mean^2/sqrt(sd^2 + mean^2)), sigma = sqrt(log(sd^2/mean^2 + 1))
 */
 
 functions {
@@ -164,9 +167,9 @@ model {
 
 	// --- Errors
 	/*
-		A note on the two folowwing priors:
-		Let m be the mean of the gamma distribution, and v its variance (see comment at the beginning of this file to get shape and rate from
-		mean and variance).
+		A note on the two folowing priors:
+		--> Let m be the mean of the gamma distribution, and v its variance (see comment at the beginning of this file to get shape and
+			rate from mean and variance).
 
 		For instance, for the routine measure error, which is the standard deviation of the observation around the latent state, we have:
 		m = sqrt(3)
@@ -176,9 +179,11 @@ model {
 		shape = (m/sd(dbh))^2 / (v/sd(dbh)^2) = m^2/v
 		rate =  (m/sd(dbh))   / (v/sd(dbh)^2) = sd(dbh) * m/v
 
-		For the process error, which is the variance of growth, we have:
-		shape = (m/var(dbh))^2 / (v/var(dbh)^2) = m^2/v
-		rate = (m/var(dbh))    / (v/var(dbh)^2) = var(dbh) * m/v
+		--> Let m be the mean of the lognormal distribution, and s its standard deviation (see comment at the beginning of this file to get
+		meanlog and sdlog from mean and sd).
+		For the process error, which is the sd of growth, we have:
+		meanlog = log( (m/sd(dbh))^2/sqrt((s/sd(dbh))^2 + (m/sd(dbh))^2) ) = log(m^2/sqrt(s^2 + m^2)) - log(sd(dbh)) = meanlog - log(sd(dbh))
+		sdlog = sqrt(log( (s/sd(dbh))^2 / (m/sd(dbh))^2 + 1)) = sqrt(log(s^2/m^2 + 1))
 
 		The values are taken from Rüger et al (2011), Growth Strategies of Tropical Tree Species: Disentangling Light and Size Effects
 		for sigmaProc, etaObs and proba priors.
@@ -186,7 +191,7 @@ model {
 		The values are taken from Luoma et al (2017), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
 		for sigmaObs prior.
 	*/
-	target += lognormal_lpdf(sigmaProc | 1.256145/sd_dbh, 0.2696117/sd_dbh); // <=> procError = 3.64 mm/yr ± 1 mm/yr
+	target += lognormal_lpdf(sigmaProc | 1.256145 - log(sd_dbh), 0.2696117); // <=> procError = 3.64 mm/yr ± 1 mm/yr
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
