@@ -167,7 +167,7 @@ model {
 
 	// --- Errors
 	/*
-		A note on the two folowing priors:
+		A note on the folowing priors:
 		--> Let m be the mean of the gamma distribution, and v its variance (see comment at the beginning of this file to get shape and
 			rate from mean and variance).
 
@@ -185,13 +185,16 @@ model {
 		meanlog = log( (m/sd(dbh))^2/sqrt((s/sd(dbh))^2 + (m/sd(dbh))^2) ) = log(m^2/sqrt(s^2 + m^2)) - log(sd(dbh)) = meanlog - log(sd(dbh))
 		sdlog = sqrt(log( (s/sd(dbh))^2 / (m/sd(dbh))^2 + 1)) = sqrt(log(s^2/m^2 + 1))
 
+		However, for the lognormal, I used meanlog = log(mu_h) = log(1.28), and sd_log = sigma_h = 0.16 (Nadja Rüger, personnal
+		communication)
+
 		The values are taken from Rüger et al (2011), Growth Strategies of Tropical Tree Species: Disentangling Light and Size Effects
-		for sigmaProc, etaObs and proba priors.
+		for sigmaProc (personnal communication), etaObs and proba priors.
 
 		The values are taken from Luoma et al (2017), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
 		for sigmaObs prior.
 	*/
-	target += lognormal_lpdf(sigmaProc | 1.215 - log(sd_dbh), 0.125); // <=> procError = 3.3967 mm/yr ± 0.426 mm/yr
+	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16); // <=> procError = 1.30 mm/yr ± 0.21 mm/yr
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 

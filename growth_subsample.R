@@ -476,8 +476,8 @@ results$print(c("lp__", "averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "
 
 # results = readRDS("Abies grandis/growth-run=1-2022-06-02_00h42.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
 
-# my_avg = 3.396728 # From average Rüger et al 2011: exp(1.215 + 0.125^2/2), where 1.215 = mean(c(1.28, 1.15)), 0.125 = mean(c(0.09, 0.16))
-# my_sd = 0.4262549 # From average Rüger et al 2011: sqrt((exp(0.125^2) - 1)*exp(2*1.215 + 0.125^2))
+# my_avg = 1.296489 # From Nadja Rüger (personal communication), based on Rüger 2011 
+# my_sd = 0.208773 # From Nadja Rüger (personal communication), based on Rüger 2011
 
 # mu = log(my_avg^2/sqrt(my_sd^2 + my_avg^2))
 # sigma = sqrt(log(my_sd^2/my_avg^2 + 1))
@@ -495,3 +495,15 @@ results$print(c("lp__", "averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "
 # (exp(0.125^2) - 1)*exp(2*1.215 + 0.125^2)
 
 # log(0.3441301/3.641843^2 + 1)
+
+# mu_h = 1.28
+# sigma_h = 0.16
+# curve(dlnorm(x, meanlog = log(mu_h), sdlog = sigma_h), 0, 5)
+
+# aa = rlnorm(1e6, meanlog = log(mu_h), sdlog = sigma_h)
+
+# exp(log(mu_h) + 0.16^2/2)
+# sqrt((exp(0.16^2) - 1)*exp(2*log(mu_h) + 0.16^2))
+
+# mean(aa)
+# sd(aa)
