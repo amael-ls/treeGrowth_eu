@@ -120,7 +120,7 @@ parameters {
 	
 	// Errors (observation and process)
 	// --- Process error, which is the sd of a lognormal distrib /!\
-	real<lower = 0.5/sd_dbh^2> sigmaProc;
+	// real<lower = 0.5/sd_dbh^2> sigmaProc;
 
 	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
 	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
@@ -148,6 +148,7 @@ model {
 	vector [n_children] latent_dbh_children;
 	real growth_mean_logNormal;
 	real growth_sd_logNormal;
+	real sigmaProc = 1.12;
 
 	// Priors
 	// --- Growth parameters
@@ -194,7 +195,7 @@ model {
 		The values are taken from Luoma et al (2017), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
 		for sigmaObs prior.
 	*/
-	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16); // <=> procError = 1.30 mm/yr ± 0.21 mm/yr
+	// target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16); // <=> procError = 1.30 mm/yr ± 0.21 mm/yr
 	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
