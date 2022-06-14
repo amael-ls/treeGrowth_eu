@@ -119,7 +119,7 @@ parameters {
 	real competition_slope;
 	
 	// Errors (observation and process)
-	// --- Process error, which is the variance of a gamma distrib /!\
+	// --- Process error, which is the sd of a lognormal distrib /!\
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
 
 	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
@@ -239,13 +239,13 @@ model {
 	// --- Observation model
 	for (k in 1:n_inventories)
 	{
-		// Compare true (i.e., hidden or latent) parents with observed parents per chunk (i.e. per country/NFI)
+		// Compare true (i.e., hidden or latent) parents with observed parents
 		// Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
 		for (i in start_nfi_parents[k]:end_nfi_parents[k])
 			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]),
 				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]));
 
-		// Compare true (i.e., hidden or latent) children with observed children per chunk (i.e. per country/NFI)
+		// Compare true (i.e., hidden or latent) children with observed children
 		for (i in start_nfi_children[k]:end_nfi_children[k])
 			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], etaObs[k]),
 				normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], sigmaObs[k]));
