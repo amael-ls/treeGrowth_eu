@@ -120,13 +120,13 @@ parameters {
 	
 	// Errors (observation and process)
 	// --- Process error, which is the sd of a lognormal distrib /!\
-	// real<lower = 0.5/sd_dbh^2> sigmaProc;
+	real<lower = 0.5/sd_dbh^2> sigmaProc;
 
 	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
-	// array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
+	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
 
 	// --- Extreme error, by default at least twice the observation error. Rüger 2011 found it is around 8 times larger
-	// array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
+	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
 	
 	array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
@@ -148,10 +148,6 @@ model {
 	vector [n_children] latent_dbh_children;
 	real growth_mean_logNormal;
 	real growth_sd_logNormal;
-
-	real sigmaProc = 0.008977944;
-	real sigmaObs = 0.01209929;
-	real etaObs = 0.1788352;
 
 	// Priors
 	// --- Growth parameters
@@ -203,9 +199,9 @@ model {
 		sigmaObs: 0.01209929
 		etaObs: 0.1788352
 	*/
-	// target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.09); // <=> procError = 1.30 mm/yr ± 0.21 mm/yr
-	// target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
-	// target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
+	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.09); // <=> procError = 1.29 mm/yr ± 0.12 mm/yr
+	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm
+	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 
 	// target += beta_lpdf(proba | 3.95, 391.05); // This corresponds to a 1 % chance extrem error, ± 0.5 %
 	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
@@ -251,12 +247,12 @@ model {
 		// Compare true (i.e., hidden or latent) parents with observed parents
 		// Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
 		for (i in start_nfi_parents[k]:end_nfi_parents[k])
-			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs),
-				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs));
+			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]),
+				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]));
 
 		// Compare true (i.e., hidden or latent) children with observed children
 		for (i in start_nfi_children[k]:end_nfi_children[k])
-			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], etaObs),
-				normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], sigmaObs));
+			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], etaObs[k]),
+				normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], sigmaObs[k]));
 	}
 }
