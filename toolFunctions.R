@@ -634,8 +634,8 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		## Plot prior and posterior for error terms
 		# For process error (sigmaProc), it is a variance (of a gamma distrib)
 		sigmaProc_array = results$draws("sigmaProc")
-		lazyPosterior(draws = sigmaProc_array, fun = dgamma, filename = paste0(path, "sigmaProc_posterior"), params = "process error",
-			shape = 5.0^2/1, rate = sd_dbh^2*5.0/1, scaling = sd_dbh^2, run = run)
+		lazyPosterior(draws = sigmaProc_array, fun = dlnorm, filename = paste0(path, "sigmaProc_posterior"), params = "process error",
+			meanlog = log(1.28) - log(sd_dbh), sdlog = 0.16, run = run, expand_bounds = TRUE)
 
 		lazyTrace(draws = sigmaProc_array, filename = paste0(path, "sigmaProc_traces"), run = run)
 
@@ -739,7 +739,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 			generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
 
 			output = append(output, list(posteriorSim = list(posterior_draws = generate_quantities,
-				info = c(run = run, species = species, path = path, n_chains = n_chains, iter_sampling = iter_sampling,
+				info = list(run = run, species = species, path = path, n_chains = n_chains, iter_sampling = iter_sampling,
 					n_obs = n_obs, n_indiv = stanData$n_indiv, n_hiddenState = n_hiddenState),
 				parents_index = stanData$parents_index, children_index = stanData$children_index,
 				last_child_index = stanData$last_child_index,
@@ -1059,7 +1059,7 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 			lines(x = min_yr:max_yr, y = draws[iter, chain, ], col = "#3A3A3A55", lwd = 0.1)
 	}
 
-	if (!is.null(divergences))
+	if (!is.null(divergences) & length(divergences) != 0)
 	{
 		iter_div = divergences %% n_iter
 		iter_div[iter_div == 0] = n_iter
@@ -1179,6 +1179,43 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 	return (output)
 }
 
+## Function analysing probabilities of extreme errors
+probaExtremeObs = function(posteriorSim, ...)
+{
+	requiredNames = c("posterior_draws", "info", "parents_index", "children_index", "last_child_index", "divergences")
+	if (!all(names(posteriorSim) %in% requiredNames))
+		stop(paste0("Missing objects in posteriorSim: ", paste0(requiredNames[!(names(posteriorSim) %in% requiredNames)], collapse = ", ")))
+
+	path = posteriorSim[["info"]]$path
+	run = posteriorSim[["info"]]$run
+	n_obs = posteriorSim[["info"]]$n_obs
+	
+	proba_extreme_obs_array = posteriorSim[["posterior_draws"]]$draws("proba_extreme_obs")
+
+	proba_mean = 0
+
+	if (dim(proba_extreme_obs_array)[3] != n_obs)
+		stop("Dimension of proba_extreme_obs_array mismatch number of observations")
+
+	providedArgs = list(...)
+	ls_names = names(providedArgs)
+	if (all(c("plot_id", "tree_id") %in% ls_names)
+	{
+		treeData = readRDS(paste0(path, run, "_treeData.rds"))
+		indices = treeData[, which(plot_id == providedArgs[["plot_id"]] & tree_id == providedArgs[["tree_id"]])]
+		if (length(indices) == 0)
+		{
+			warning("Individual not found")
+			return (NULL)
+		}
+		proba_extreme_obs = proba_extreme_obs_array[, , indices]
+		proba_mean = apply(proba_extreme_obs, 3, mean)
+		names(proba_mean) = paste0("tree_", indices)
+	}
+
+	return (proba_mean)
+}
+
 ## Function to rescale parameters (intercept and slopes)
 rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 {
@@ -1234,8 +1271,10 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 }
 
 ## Function to compute growth, the data table must be sorted by year within tree id and plot id
-computeGrowth = function(dt, col = "growth", byCols = c("pointInventory_id", "tree_id"))
+computeGrowth = function(dt, col = "growth", byCols = c("plot_id", "tree_id"))
 {
+	if (!all(c("dbh", "year", byCols) %in% names(dt)))
+		stop(paste("The data table must contains at least contains the columns dbh, year,", paste(byCols, collapse = ", ")))
 	while (col %in% names(dt))
 	{
 		newcol = paste0(col, rnorm(1))
@@ -1248,13 +1287,13 @@ computeGrowth = function(dt, col = "growth", byCols = c("pointInventory_id", "tr
 		dt[, deltaYear := shift(year, n = 1, type = "lead", fill = NA) - year, by = byCols]
 }
 
-growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, rescaled = TRUE)
+growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_params = FALSE, standardised_variables = FALSE, ...)
 {
 	G = NaN
-	if (rescaled)
+	if (!standardised_params & !standardised_variables)
 	{
 		if (class(params) != "list")
-			stop("Rescale is true, list created by rescapeParameters expected")
+			stop("Parameters have been rescaled, list created by rescaleParams expected")
 
 		intercept = params[["intercept_rescale"]]
 
@@ -1272,5 +1311,67 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, rescaled = TR
 		G = sd_dbh * exp(intercept + dbh_slope*dbh + pr_slope*pr + pr_slope2*pr^2 + tas_slope*tas + tas_slope2*tas^2 +
 			ph_slope*ph + ph_slope2*ph^2 + competition_slope*basalArea)
 	}
+
+	if (standardised_params & !standardised_variables)
+	{
+		providedArgs = list(...)
+		ls_names = names(providedArgs)
+		scaling_ind = stri_detect(str = ls_names, regex = "scaling")
+		if (sum(scaling_ind) == 1)
+		{
+			required_params = "scaling"
+			single = TRUE
+		} else
+		{
+			required_params = c("dbh_scaling", "clim_scaling", "ph_scaling", "ba_scaling")
+			single = FALSE
+		}
+
+		if (!all(required_params %in% ls_names))
+			stop("Scaling parameters not provided completly")
+
+		if (single)
+		{
+			scaling_dt = providedArgs[["scaling"]]
+			setkey(scaling_dt, variable)
+		} else {
+			clim_scaling = providedArgs[["clim_scaling"]]
+			ph_scaling = providedArgs[["ph_scaling"]]
+			ba_scaling = providedArgs[["ba_scaling"]]
+
+			scaling_dt = rbindlist(list(clim_scaling, ph_scaling, ba_scaling))
+			setkey(scaling_dt, variable)
+		}
+
+		dbh = dbh/sd_dbh
+		pr = (pr - scaling_dt["pr", mu])/scaling_dt["pr", sd]
+		tas = (tas - scaling_dt["tas", mu])/scaling_dt["tas", sd]
+		ph = (ph - scaling_dt["ph", mu])/scaling_dt["ph", sd]
+		basalArea = (basalArea - scaling_dt["standBasalArea_interp", mu])/scaling_dt["standBasalArea_interp", sd]
+
+		standardised_variables = TRUE
+	}
+
+	if (standardised_params & standardised_variables)
+	{
+		intercept = params[["intercept_rescale"]]
+
+		dbh_slope = params[["slope_dbh_rescale"]]
+		
+		pr_slope = params[["slope_predictors_rescale"]]["pr_slope"]
+		tas_slope = params[["slope_predictors_rescale"]]["tas_slope"]
+		ph_slope = params[["slope_predictors_rescale"]]["ph_slope"]
+		competition_slope = params[["slope_predictors_rescale"]]["competition_slope"]
+
+		pr_slope2 = params[["slope_quadratic_predictors_rescale"]]["pr_slope2"]
+		tas_slope2 = params[["slope_quadratic_predictors_rescale"]]["tas_slope2"]
+		ph_slope2 = params[["slope_quadratic_predictors_rescale"]]["ph_slope2"]
+		
+		G = sd_dbh * exp(intercept + dbh_slope*dbh + pr_slope*pr + pr_slope2*pr^2 + tas_slope*tas + tas_slope2*tas^2 +
+			ph_slope*ph + ph_slope2*ph^2 + competition_slope*basalArea)
+	}
+
+	if (!standardised_params & standardised_variables)
+		warning("This combination of scaled and non scaled is not coded")
 	return (G)	
 }
