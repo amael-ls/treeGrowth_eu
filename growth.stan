@@ -55,6 +55,7 @@ data {
 	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth (all NFIs together)
 	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children tree observations = n_obs - n_indiv
 	array [n_indiv] int<lower = 2, upper = n_obs> nbYearsGrowth; // Number of years of growth for each individual
+	array [n_children] int<lower = 1> deltaYear; // Number of years between two measurements of an individual
 	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 
 	// Indices
@@ -67,11 +68,14 @@ data {
 	array [n_inventories] int<lower = 2, upper = n_indiv> end_nfi_parents; // Ending point of each NFI for parents
 	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_children; // Starting point of each NFI for children
 	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_children; // Ending point of each NFI for children
+	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_avg_growth; // Starting point of each NFI for averaged obs growth
+	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_avg_growth; // Ending point of each NFI for averaged obs growth
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
+	vector[n_children] avg_yearly_growth_obs;
 
 	// sd_dbh is for the whole species and should not be more than 5% different from the sd of the subsample, namely sd(Yobs)
 	real<lower = 0.95*sd(Yobs), upper = 1.05*sd(Yobs)> sd_dbh;
@@ -96,6 +100,7 @@ data {
 
 transformed data {
 	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
+	vector[n_children] normalised_avg_yearly_growth_obs = avg_yearly_growth_obs/sd_dbh; // Normalised but NOT centred averaged yearly growth
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
 	vector[n_plots] normalised_ph = (ph - ph_mu)/ph_sd; // Normalised and centred pH
@@ -123,10 +128,9 @@ parameters {
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
 
 	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
-	array [n_inventories] real sigmaObs_a; // Std. Dev. of a normal distrib /!\
-	array [n_inventories] real sigmaObs_b; // Std. Dev. of a normal distrib /!\
+	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
 
-	// --- Extreme error, by default at least twice the observation error. Rüger 2011 found it is around 8 times larger
+	// --- Extreme error, by default at least twice the min observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
 	
 	array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
@@ -139,26 +143,15 @@ parameters {
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
-transformed parameters {
-	array [n_obs] real sigmaObs;
-	for (k in 1:n_inventories)
-	{
-		for (i in start_nfi_parents[k]:end_nfi_parents[k])
-			sigmaObs[parents_index[i]] = sigmaObs_a[k] + sigmaObs_b[k] * normalised_Yobs[parents_index[i]];
-
-		for (i in start_nfi_children[k]:end_nfi_children[k])
-			sigmaObs[children_index[i]] = sigmaObs_a[k] + sigmaObs_b[k] * normalised_Yobs[children_index[i]];
-	}
-}
-
 model {
 	// Declare variables
 	int growth_counter = 1; // Counter in the latent space
 	int children_counter = 1; // Counter in the 'observation space' for chidlren
-	int record_children_counter = 1; // Counter to know when we should register the current dbh value into latent_dbh_children
+	int record_children_counter = 1; // Counter to know when we should compute the latent average yearly growth and store it
 	real expected_growth;
 	real temporary;
-	vector [n_children] latent_dbh_children;
+	real temporary_tm1; // temporary at time t - 1 (useful for trees measured more than twice)
+	vector [n_children] latent_avg_yearly_growth; // n_children is also the number of measured growth (number of intervals)!
 	real growth_mean_logNormal;
 	real growth_sd_logNormal;
 
@@ -213,11 +206,9 @@ model {
 		etaObs: 0.1788352
 	*/
 	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.09); // <=> procError = 1.29 mm/yr ± 0.12 mm/yr
+	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm ± 0.16
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 	
-	target += normal_lpdf(sigmaObs_a | 0.927/sd_dbh, 0.024/sd_dbh); // From Ruger 2011
-	target += normal_lpdf(sigmaObs_b | 0.0038/sd_dbh, 0.00036/sd_dbh); // From Ruger 2011
-
 	// target += beta_lpdf(proba | 3.95, 391.05); // This corresponds to a 1 % chance extrem error, ± 0.5 %
 	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
 
@@ -225,6 +216,7 @@ model {
 	for (i in 1:n_indiv) // Loop over all the individuals
 	{
 		temporary = latent_dbh_parents[i];
+		temporary_tm1 = temporary;
 		for (j in 1:nbYearsGrowth[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
 			// Process model
@@ -243,11 +235,12 @@ model {
 			growth_counter += 1;
 			record_children_counter += 1;
 
-			// Only the relevant (i.e., children) dbh are recorded
+			// Only the relevant (i.e., children) diameters at breast height are recorded
 			if (record_children_counter == latent_children_index[children_counter])
 			{
-				latent_dbh_children[children_counter] = temporary;
+				latent_avg_yearly_growth[children_counter] = (temporary - temporary_tm1)/deltaYear[children_counter];
 				children_counter += 1;
+				temporary_tm1 = temporary;
 			}
 		}
 		record_children_counter += 1; // The growth counter stops one year earlier! Indeed 3 measurements implies only 2 growing years!
@@ -262,12 +255,14 @@ model {
 		// Compare true (i.e., hidden or latent) parents with observed parents
 		// Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
 		for (i in start_nfi_parents[k]:end_nfi_parents[k])
-			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]),
-				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[parents_index[i]]));
+			target += log_mix(proba[k],
+				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]),
+				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]));
 
-		// Compare true (i.e., hidden or latent) children with observed children
-		for (i in start_nfi_children[k]:end_nfi_children[k])
-			target += log_mix(proba[k], normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], etaObs[k]),
-				normal_lpdf(normalised_Yobs[children_index[i]] | latent_dbh_children[i], sigmaObs[children_index[i]]));
+		// Compare true (i.e., hidden or latent) latent averaged yearly growth with observed averaged yearly growth
+		for (i in start_nfi_avg_growth[k]:end_nfi_avg_growth[k])
+			target += log_mix(proba[k],
+				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*etaObs[k]/deltaYear[i]),
+				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*sigmaObs[k]/deltaYear[i]));
 	}
 }
