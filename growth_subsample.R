@@ -21,6 +21,10 @@ species_id = as.integer(args[1]) # 17, 48
 run_id = as.integer(args[2]) # 1, 2, 3, 4
 max_indiv = as.integer(args[3]) # 8000
 
+# species_id = 2
+# run_id = 1
+# max_indiv = 8000
+
 set.seed(run_id)
 
 #### Tool function
@@ -87,6 +91,23 @@ init_fun = function(...)
 	}
 
 	return(list(latent_dbh_parents = Y_gen, latent_growth = latent_growth_gen))
+}
+
+## Function to compute growth, the data table must be sorted by year within tree id and plot id
+computeDiametralGrowth = function(dt, col = "growth", byCols = c("plot_id", "tree_id"))
+{
+	if (!all(c("dbh", "year", byCols) %in% names(dt)))
+		stop(paste("The data table must contains at least contains the columns dbh, year,", paste(byCols, collapse = ", ")))
+	while (col %in% names(dt))
+	{
+		newcol = paste0(col, rnorm(1))
+		warning(paste0("The name `", col, "` is already used in the data table. The result was stored in col `", newcol, "` instead"))
+		col = newcol
+	}
+	dt[, (col) := (shift(dbh, n = 1, type = "lead", fill = NA) - dbh)/(shift(year, n = 1, type = "lead", fill = NA) - year), by = byCols]
+
+	if (!("deltaYear" %in% names(dt)))
+		dt[, deltaYear := shift(year, n = 1, type = "lead", fill = NA) - year, by = byCols]
 }
 
 ## Function to compute the mean and sd of given variables in a data table
@@ -291,6 +312,10 @@ if ((!subsamplingActivated) & (run_id != 1))
 
 n_inventories = length(treeData[, unique(nfi_id)])
 
+## Compute growth
+computeDiametralGrowth(treeData)
+growth_dt = na.omit(treeData)
+
 ## Read climate
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
 
@@ -339,10 +364,13 @@ start_nfi_parents = integer(n_inventories)
 end_nfi_parents = integer(n_inventories)
 start_nfi_children = integer(n_inventories)
 end_nfi_children = integer(n_inventories)
+start_nfi_avg_growth = integer(n_inventories)
+end_nfi_avg_growth = integer(n_inventories)
 
 ls_countries = treeData[, unique(country)]
 start_nfi_parents[1] = 1
 start_nfi_children[1] = 1
+start_nfi_avg_growth[1] = 1
 
 if (n_inventories > 1)
 {
@@ -353,11 +381,18 @@ if (n_inventories > 1)
 
 		end_nfi_children[k] = start_nfi_children[k] + indices[(type == "child") & (stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
 		start_nfi_children[k + 1] = end_nfi_children[k] + 1
+
+		end_nfi_avg_growth = start_nfi_avg_growth[k] + growth_dt[(stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
+		start_nfi_avg_growth[k + 1] = end_nfi_avg_growth[k] + 1
 	}
 }
 
 end_nfi_parents[n_inventories] = n_indiv
 end_nfi_children[n_inventories] = n_obs - n_indiv # Which is n_children
+end_nfi_avg_growth[n_inventories] = n_obs - n_indiv # Which is n_children
+
+if (growth_dt[, .N] != n_obs - n_indiv)
+	stop("Dimension mismatch between growth_dt and number of observations")
 
 if (n_inventories == 1)
 {
@@ -365,6 +400,8 @@ if (n_inventories == 1)
 	end_nfi_parents = as.array(end_nfi_parents)
 	start_nfi_children = as.array(start_nfi_children)
 	end_nfi_children = as.array(end_nfi_children)
+	start_nfi_avg_growth = as.array(start_nfi_avg_growth)
+	end_nfi_avg_growth = as.array(end_nfi_avg_growth)
 }
 
 #### Compute and save normalising constants
@@ -411,6 +448,7 @@ stanData = list(
 	n_latentGrowth = n_latentGrowth, # Dimension of the state space vector for latent growth
 	n_children = n_obs - n_indiv, # Number of children trees observations = n_obs - n_indiv
 	nbYearsGrowth = nbYearsGrowth, # Number of years for each individual
+	deltaYear = growth_dt[, deltaYear],
 	n_inventories = n_inventories, # Number of forest inventories involving different measurement errors in the data
 	last_child_index = last_child_index, # Not used in stan, but useful for analyse_growth
 
@@ -424,11 +462,14 @@ stanData = list(
 	end_nfi_parents = end_nfi_parents, # Ending point of each NFI for parents
 	start_nfi_children = start_nfi_children, # Starting point of each NFI for children
 	end_nfi_children = end_nfi_children, # Ending point of each NFI for children
+	start_nfi_avg_growth = start_nfi_avg_growth,
+	end_nfi_avg_growth = end_nfi_avg_growth,
 
 	plot_index = unique(indices[, .(tree_id, plot_id, plot_index)])[, plot_index], # Indicates to which plot individuals belong to
 
 	# Observations
 	Yobs = treeData[, dbh],
+	avg_yearly_growth_obs = growth_dt[, growth],
 	sd_dbh = ifelse(subsamplingActivated, checkSampling[["sd_dbh_beforeSubsample"]], treeData[, sd(dbh)]),
 
 	# Explanatory variables
@@ -466,7 +507,7 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, ".rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_newlogLik.rds"))
 
 results$cmdstan_diagnose()
 
@@ -507,3 +548,22 @@ results$print(c("lp__", "averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "
 
 # mean(aa)
 # sd(aa)
+
+# X = rlnorm(n = 1e6, meanlog = log(1.28), sdlog = 0.16)
+# hist(log(X))
+# abline(v = log(1.28), col = "red", lwd = 2)
+
+# mu_test = 1.967
+# sd_test = 0.2
+
+# X = rnorm(n = 1e6, mean = mu_test, sd = sd_test)
+# hist(exp(X), breaks = seq(min(exp(X)), max(exp(X)) + 0.01, length.out = 100))
+# abline(v = exp(mu_test + sd_test^2/2), col = "red", lwd = 2)
+# mean(exp(X))
+# exp(mu_test + sd_test^2/2)
+# sd(exp(X))
+# sqrt(exp(2*mu_test + sd_test^2)*(exp(sd_test^2) - 1))
+
+# ruger_err = function(dbh)
+# 	return(0.927 + 0.0038*dbh)
+# ruger_err(seq(0, 200, 50))
