@@ -22,7 +22,7 @@ infoSpecies = readRDS("./speciesInformations.rds")
 
 n_runs = 4 # Number of runs used in growth_subsample.R
 threshold_indiv = 8000 # Minimal number of individuals required to use multi runs
-threshold_time = as.Date("2022/05/29") # Results anterior to this date will not be considered
+threshold_time = as.Date("2022/06/16") # Results anterior to this date will not be considered
 
 infoSpecies[, multiRun := if (n_indiv > threshold_indiv) TRUE else FALSE, by = speciesName_sci]
 infoSpecies[, processed := isProcessed(speciesName_sci, multiRun, threshold_time, lower = 1, upper = n_runs), by = speciesName_sci]
@@ -37,15 +37,18 @@ names(correl_ls) = infoSpecies[, speciesName_sci]
 posterior_ls = vector(mode = "list", length = infoSpecies[, .N])
 names(posterior_ls) = infoSpecies[, speciesName_sci]
 
-params_dt = data.table(parameters = c("averageGrowth_mu", "averageGrowth_sd", "dbh_slope", "pr_slope", "pr_slope2",
+ls_files = character(length = infoSpecies[, .N])
+names(ls_files) = infoSpecies[, speciesName_sci]
+
+params_dt = data.table(parameters = c("averageGrowth", "dbh_slope", "pr_slope", "pr_slope2",
 	"tas_slope", "tas_slope2", "ph_slope", "ph_slope2", "competition_slope"),
-	priors = c(dnorm, dgamma, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm),
-	arg1 = c(-4, 1/10, 0, 0, 0, 0, 0, 0, 0, 0),
-	arg2 = c(2, 1/10, 5, 5, 5, 5, 5, 5, 5, 5),
-	title = c("Average growth (mean)", "Random effect (sd)", "Dbh slope", "Precipitation slope", "Precipitation slope (quadratic term)",
+	priors = c(dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm),
+	arg1 = c(-4, 0, 0, 0, 0, 0, 0, 0, 0),
+	arg2 = c(10, 5, 5, 5, 5, 5, 5, 5, 5),
+	title = c("Average growth (mean)", "Dbh slope", "Precipitation slope", "Precipitation slope (quadratic term)",
 		"Temperature slope", "Temperature slope (quadratic term)", "Soil acidity slope (pH)", "Soil acidity slope (pH, quadratic term)",
 		"Competition slope"),
-	expand_bounds = c(FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE))
+	expand_bounds = c(FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE))
 
 setkey(params_dt, parameters)
 
@@ -54,10 +57,11 @@ for (species in infoSpecies[, speciesName_sci])
 {
 	multi = infoSpecies[species, multiRun]
 	ls_nfi = unlist(stri_split(infoSpecies[species, ls_nfi], regex = ", "))
-	summary_dt = centralised_fct(species, multi, n_runs, ls_nfi, params_dt, run = if (multi) NULL else 1)
+	summary_dt = centralised_fct(species, multi, n_runs, ls_nfi, params_dt, run = if (multi) NULL else 1, simulatePosterior = TRUE)
 	error_ls[[species]] = summary_dt[["error_dt"]]
 	correl_ls[[species]] = summary_dt[["correl_energy"]]
 	posterior_ls[[species]] = summary_dt[["posteriorSim"]]
+	ls_files[[species]] = summary_dt[["fileResults"]]
 }
 
 error_dt = rbindlist(error_ls, idcol = "speciesName_sci")
@@ -68,34 +72,116 @@ saveRDS(correl_dt, "./correlation_energy_species.rds")
 
 plot_correl_error(error_dt, correl_dt, threshold_correl = 0.2, rm_correl = "lp__")
 
-selected_indiv = data.table(
-	speciesName_sci = infoSpecies[, speciesName_sci],
-	plot_id = c("france_738952", "france_804256", "france_873749"),
-	tree_id = c(1, 3, 5)
-)
+# selected_indiv = data.table(speciesName_sci = infoSpecies[, speciesName_sci],
+# 	plot_id = c("france_738952", "france_804256", "france_873749"), tree_id = c(1, 3, 5))
 
-setkey(selected_indiv, speciesName_sci)
+# setkey(selected_indiv, speciesName_sci)
 
 # computeGrowth(dt = treeData, byCols = c("plot_id", "tree_id"))
-abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries.pdf",
-	plot_id = selected_indiv["Abies grandis", plot_id], tree_id = selected_indiv["Abies grandis", tree_id],
-	highlight_threshold_growth = 45)
+# abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries.pdf",
+# 	plot_id = selected_indiv["Abies grandis", plot_id], tree_id = selected_indiv["Abies grandis", tree_id],
+# 	highlight_threshold_growth = 45)
 
-abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries.pdf",
-	plot_id = "france_725338", tree_id = 16,
-	highlight_threshold_growth = 50)
+#### Few trajectory plots
+## Abies grandis
+abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries_normal.pdf",
+	plot_id = "france_1001833", tree_id = 5) # 2 measurements, average growth of 7 mm/yr (realistic)
 
-abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries2.pdf",
-	plot_id = "france_818095", tree_id = 4,
-	highlight_threshold_growth = 50)
+abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries_3measures_1wrong.pdf",
+	plot_id = "france_725338", tree_id = 16) # 3 measurements, last is wrong
 
-acerOpalus = dbh_timeSeries(posterior_ls[["Acer opalus"]], plotMean = TRUE, filename = "timeSeries.pdf", data = treeData,
-	plot_id = selected_indiv["Acer opalus", plot_id], tree_id = selected_indiv["Acer opalus", tree_id],
-	highlight_threshold_growth = 45)
+abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries_2measures_wrong.pdf",
+	plot_id = "france_818095", tree_id = 4) # 2 measurements, unrealistic growth (23.8 mm/yr)
 
-tiliaPlat = dbh_timeSeries(posterior_ls[["Tilia platyphyllos"]], plotMean = TRUE, filename = "timeSeries.pdf", data = treeData,
-	plot_id = selected_indiv["Tilia platyphyllos", plot_id], tree_id = selected_indiv["Tilia platyphyllos", tree_id],
-	highlight_threshold_growth = 45)
+## Acer opalus
+acerOpalus = dbh_timeSeries(posterior_ls[["Acer opalus"]], plotMean = TRUE, filename = "timeSeries.pdf",
+	plot_id = "france_1008324", tree_id = 3, highlight_threshold_growth = 45)
+
+acerOpalus = dbh_timeSeries(posterior_ls[["Acer opalus"]], plotMean = TRUE, filename = "timeSeries2.pdf",
+	plot_id = "france_100733", tree_id = 10, highlight_threshold_growth = 45)
+
+# Tilia platyphyllos
+tiliaPlat = dbh_timeSeries(posterior_ls[["Tilia platyphyllos"]], plotMean = TRUE, filename = "timeSeries.pdf",
+	plot_id = "france_121722", tree_id = 9) # index_gen = 2131, 2136
+
+tiliaPlat = dbh_timeSeries(posterior_ls[["Tilia platyphyllos"]], plotMean = TRUE, filename = "timeSeries2.pdf",
+	plot_id = "france_1004153", tree_id = 13) # index_gen = 127, 132
+
+tiliaPlat = dbh_timeSeries(posterior_ls[["Tilia platyphyllos"]], plotMean = TRUE, filename = "timeSeries_3measures_1wrong.pdf",
+	plot_id = "france_873749", tree_id = 5) # index_gen = 20330, 20335, 20340
+aa = probaExtremeObs(posterior_ls[["Tilia platyphyllos"]], plot_id = "france_873749", tree_id = 5)
+
+
+
+posteriorSim = posterior_ls[["Abies grandis"]]
+
+aa = probaExtremeObs(posteriorSim, plot_id = "france_725338", tree_id = 16)
+aa = probaExtremeObs(posteriorSim, plot_id = "france_818095", tree_id = 4)
+aa = probaExtremeObs(posteriorSim, plot_id = "france_1001833", tree_id = 5)
+
+
+names(posteriorSim)
+
+draws = posteriorSim$posterior_draws
+draws$metadata()$stan_variables
+
+paste0(posteriorSim$info[["path"]], posteriorSim$info[["run"]], "_",
+	c("ba_normalisation", "climate_normalisation", "dbh_normalisation", "ph_normalisation"), ".rds")
+
+growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_params = FALSE, standardised_variables = FALSE, ...)
+
+n_rep = as.integer(generate_quantities$info["iter_sampling"]) * as.integer(generate_quantities$info["n_chains"])
+
+dt_dharma = data.table(rep_id = rep(1:n_obs, each = n_rep),
+	rep_dbh = rep(stanData$Yobs, each = n_rep), # Observations
+	latent_dbh = numeric(n_rep * n_obs), # Estimated latent dbh
+	simulated_observations = numeric(n_rep * n_obs))
+
+
+yearly_latent_dbh = draws$draws("yearly_latent_dbh") # iter_sampling * n_chains * n_latentStates
+dim(yearly_latent_dbh)
+yearly_latent_dbh_1729_1730 = sd_dbh*yearly_latent_dbh[, , indices[1729, index_gen]:indices[1730, index_gen]]
+
+growth_array_1 = yearly_latent_dbh_1729_1730[, , 2] - yearly_latent_dbh_1729_1730[, , 1]
+growth_array_2 = yearly_latent_dbh_1729_1730[, , 3] - yearly_latent_dbh_1729_1730[, , 2]
+growth_array_3 = yearly_latent_dbh_1729_1730[, , 4] - yearly_latent_dbh_1729_1730[, , 3]
+growth_array_4 = yearly_latent_dbh_1729_1730[, , 5] - yearly_latent_dbh_1729_1730[, , 4]
+growth_array_5 = yearly_latent_dbh_1729_1730[, , 6] - yearly_latent_dbh_1729_1730[, , 5]
+
+my_avg = mean(growth_array_1)
+my_sd = sd(growth_array_1)
+
+mu = log(my_avg^2/sqrt(my_sd^2 + my_avg^2))
+sigma = sqrt(log(my_sd^2/my_avg^2 + 1))
+
+pdf("test.pdf")
+hist(growth_array_1)
+curve(dlnorm(x, meanlog = mu, sdlog = sigma), lwd = 2, col = "red", add = TRUE)
+dev.off()
+
+
+growth_mean_logNormal = function(sigmaProc, expected_growth)
+	return(log(expected_growth^2/sqrt(sigmaProc^2 + expected_growth^2)))
+
+growth_sd_logNormal = function(sigmaProc, expected_growth)
+	return (sqrt(log(sigmaProc^2/expected_growth^2 + 1)))
+
+curve(growth_mean_logNormal(x, 9), 0, 25)
+
+
+params_meanLog = growth_mean_logNormal(seq(9.997225, 12.701388, length.out = 20), 9)
+params_sdLog = growth_sd_logNormal(seq(9.997225, 12.701388, length.out = 20), 9)
+
+colours = MetBrewer::met.brewer("Hokusai3", length(params_meanLog))
+colours_str = grDevices::colorRampPalette(colours)(length(params_meanLog))
+
+curve(dlnorm(x, params_meanLog[1], params_sdLog[1]), 0, 25, col = colours_str[1], lwd = 2, xlab = "growth", ylab = "distrib",
+	ylim = c(0, 0.125))
+
+for (i in 2:length(params_meanLog))
+	curve(dlnorm(x, params_meanLog[i], params_sdLog[i]), 0, 25, add = TRUE, col = colours_str[i], lwd = 2)
+
+
 
 #* --------------------------------------------------------------------------------------------
 #! ********************************************************************************************
@@ -107,6 +193,7 @@ tiliaPlat = dbh_timeSeries(posterior_ls[["Tilia platyphyllos"]], plotMean = TRUE
 
 #! TO REMOVE AFTER !!!!!!!!!!!!!!!
 results = readRDS("Abies grandis/growth-run=1-2022-05-18_00h19.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
+# results = readRDS("Abies grandis/growth-run=1-2022-06-09_13h18.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
 stanData = readRDS("Abies grandis/1_stanData.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
 indices = readRDS("Abies grandis/1_indices.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
 treeData = readRDS("Abies grandis/1_treeData.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
@@ -267,7 +354,8 @@ pdf("test_1729.pdf", height = 11.25, width = 20)
 bayesplot::mcmc_parcoord(temporary_array, size = 0.25, alpha = 0.1, np = np, np_style = div_style)
 dev.off()
 
-draws = temporary_array
+# draws = temporary_array
+draws = yearly_latent_dbh_array
 data = treeData[1:2]
 data = treeData[1729:1730]
 
@@ -336,7 +424,9 @@ growth_fct(500, 500, 12, 5, 25, params, sd_dbh, rescaled = TRUE)
 
 
 ## Proba observation from extreme distribution
-proba_extreme_obs_array = generate_quantities$draws("proba_extreme_obs")
+# proba_extreme_obs_array = generate_quantities$draws("proba_extreme_obs")
+posteriorSim = posterior_ls[["Abies grandis"]]
+proba_extreme_obs_array = posteriorSim[["posterior_draws"]]$draws("proba_extreme_obs")
 range(proba_extreme_obs_array)
 
 # With first tree
@@ -345,7 +435,12 @@ mean(temporary_array)
 
 # With tree parent number 812, corresponds to indices[1729]
 temporary_array = proba_extreme_obs_array[, , 1729:1730]
+temporary_array1 = proba_extreme_obs_array[, , 1729]
 mean(temporary_array)
+temporary_array2 = proba_extreme_obs_array[, , 1730]
+mean(temporary_array)
+
+cor(temporary_array1, temporary_array2)
 
 dd = dim(temporary_array)
 
@@ -365,5 +460,60 @@ legend(x = "topleft", legend = c(paste("1729 -", 1:dd[2]), paste("1730 -", 1:dd[
 
 dev.off()
 
-lazyPosterior(temporary_array[,,1], filename = "1729", mean = 50, sd = 0.1, n = 10000)
+lazyPosterior(temporary_array[,,1], filename = "1729", mean = 50, sd = 0.1, n = 10000) # Mean and sd are dummy data outside of plot window
 lazyPosterior(temporary_array[,,2], filename = "1730", mean = 50, sd = 0.1, n = 10000)
+
+mainFolder = "/home/amael/project_ssm/inventories/growth/"
+treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshaped.rds"))
+ls_species = sort(treeData[, unique(speciesName_sci)])
+
+for (i in c(2, 5, 17, 48)) # (species in ls_species)
+{
+	species = ls_species[i]
+	temp = treeData[speciesName_sci == species]
+	temp[, next_dbh := shift(dbh, n = 1, type = "lead", fill = NA), by = .(plot_id, tree_id)]
+	computeGrowth(temp)
+	temp = na.omit(temp)
+	temp[, dbh_75 := 0.75*dbh]
+	temp = temp[next_dbh > dbh_75]
+	temp = temp[growth < 20]
+	# temp = temp[growth > -5]
+	pdf(paste0("histG_", species, ".pdf"))
+	hist(temp[, growth], breaks = seq(min(temp[, growth]), max(temp[, growth]), length.out = 20),
+		main = round(x = quantile(temp[, growth], seq(0, 1, .1)), digits = 1))
+	dev.off()
+}
+
+#### For a given tree, obviously measured without extreme error, is the latent average growth realistic and does it match the observation?
+latG = results$draws("latent_growth")
+dim(latG)
+(treeData[2, dbh] - treeData[1, dbh]) # diametral increment
+sum(sd_dbh*apply(latG[, , 1:5], 3, mean))
+vv = numeric(3000)
+for (i in 1:1000)
+	for (j in 1:3)
+		vv[(i - 1)*3 + j] = sum(sd_dbh*latG[i, j, 1:5])
+
+mean(vv)
+pdf("test.pdf")
+hist(vv, breaks = seq(min(vv) - 1, max(vv) + 1, by = 0.5))
+dev.off()
+
+
+
+# dbh1 = c(12, 18, 7, 24, 31)
+# dbh2 = c(15, 19, 17, 29, 35)
+# dbh = c(dbh1, dbh2)
+
+# years = c(5, 5, 4, 7, 2)
+# gg = numeric(5)
+# for (i in 1:5)
+# 	gg[i] = (dbh2[i] - dbh1[i])/years[i]
+
+# my_sd = sd(dbh)
+
+# gg2 = numeric(5)
+# for (i in 1:5)
+# 	gg2[i] = (dbh2[i]/my_sd - dbh1[i]/my_sd)/years[i]
+
+# gg/my_sd
