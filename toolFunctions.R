@@ -624,6 +624,8 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 
 		results$print(c("lp__", params_dt[, parameters], "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
 
+		Sys.sleep(5)
+
 		## Pairs plot of parameters versus energy
 		# Extract energy 
 		energy = as.vector(results$sampler_diagnostics(inc_warmup = FALSE)[, , "energy__"])
@@ -712,7 +714,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		error_dt[, run_id := run]
 		correl_energy[, run_id := run]
 
-		output = list(error_dt = error_dt, correl_energy = correl_energy)
+		output = list(error_dt = error_dt, correl_energy = correl_energy, fileResults = paste0(path, lastRun))
 
 		## Posterior predictive checking: Can the model give rise to new observations that properly resemble the original data?
 		if (simulatePosterior)
@@ -744,7 +746,44 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 				parents_index = stanData$parents_index, children_index = stanData$children_index,
 				last_child_index = stanData$last_child_index,
 				divergences = which(results$sampler_diagnostics()[, , "divergent__"] == 1))))
+		} else {
+			stanData = readRDS(paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 		}
+
+		pr_q25 = quantile(stanData$precip)["25%"]
+		pr_q75 = quantile(stanData$precip)["75%"]
+		tas_q25 = quantile(stanData$tas)["25%"]
+		tas_q75 = quantile(stanData$tas)["75%"]
+		ph_q25 = quantile(stanData$ph)["25%"]
+		ph_q75 = quantile(stanData$ph)["75%"]
+		ba_q25 = quantile(stanData$standBasalArea)["25%"]
+		ba_q75 = quantile(stanData$standBasalArea)["75%"]
+
+		scaling = data.table(variable = c("pr", "tas", "ph", "standBasalArea_interp"),
+			mu = c(stanData$pr_mu, stanData$tas_mu, stanData$ph_mu, stanData$ba_mu),
+			sd = c(stanData$pr_sd, stanData$tas_sd, stanData$ph_sd, stanData$ba_sd))
+
+		params = getParams(results, c("averageGrowth", "dbh_slope", "pr_slope", "tas_slope", "ph_slope", "competition_slope",
+			"pr_slope2", "tas_slope2", "ph_slope2"))
+
+		pdf(paste0(path, "growth_curve.pdf"))
+		curve(
+			growth_fct(x, pr_q25, tas_q25, ph_q25, ba_q25, params, sd_dbh, scaling = scaling, standardised_dbh = FALSE),
+				from = 50, to = 500, lwd = 2, lty = 2, col = "#34568B")
+		
+		curve(
+			growth_fct(x, pr_q25, tas_q75, ph_q25, ba_q25, params, sd_dbh, scaling = scaling, standardised_dbh = FALSE),
+				from = 50, to = 500, lwd = 2, lty = 2, col = "#CD212A", add = TRUE)
+		
+		curve(
+			growth_fct(x, pr_q75, tas_q25, ph_q25, ba_q25, params, sd_dbh, scaling = scaling, standardised_dbh = FALSE),
+				from = 50, to = 500, lwd = 2, col = "#34568B", add = TRUE)
+		
+		curve(
+			growth_fct(x, pr_q75, tas_q75, ph_q25, ba_q25, params, sd_dbh, scaling = scaling, standardised_dbh = FALSE),
+				from = 50, to = 500, lwd = 2, col = "#CD212A", add = TRUE)
+		dev.off()
+
 	}
 	return (output)
 }
@@ -1049,14 +1088,16 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 	if (!is.null(filename))
 		pdf(paste0(path, filename), height = 11.25, width = 20)
 
+	par(mar = c(8, 8, 0.5, 0.5), mgp = c(5,1,0))
 	plot(0, pch = "", xlim = c(min_yr, max_yr), ylim = c(min_val, max_val), axes = TRUE, bg = "transparent",
 		xlab = "Year",
-		ylab = "Diameter at breast height")
+		ylab = "Diameter at breast height",
+		las = 1, cex.lab = 2.5, cex.axis = 1.75)
 
 	for (iter in 1:n_iter)
 	{
 		for (chain in 1:n_chains)
-			lines(x = min_yr:max_yr, y = draws[iter, chain, ], col = "#3A3A3A55", lwd = 0.1)
+			lines(x = min_yr:max_yr, y = draws[iter, chain, ], col = "#3A3A3A55", lwd = 0.15)
 	}
 
 	if (!is.null(divergences) & length(divergences) != 0)
@@ -1169,7 +1210,7 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 		}
 	}
 
-	points(data[, year], data[, dbh], pch = 20, cex = 2, col = "#CD212A")
+	points(data[, year], data[, dbh], pch = 20, cex = 4, col = "#CD212A")
 	
 	if (!is.null(filename))
 	{
@@ -1199,7 +1240,7 @@ probaExtremeObs = function(posteriorSim, ...)
 
 	providedArgs = list(...)
 	ls_names = names(providedArgs)
-	if (all(c("plot_id", "tree_id") %in% ls_names)
+	if (all(c("plot_id", "tree_id") %in% ls_names))
 	{
 		treeData = readRDS(paste0(path, run, "_treeData.rds"))
 		indices = treeData[, which(plot_id == providedArgs[["plot_id"]] & tree_id == providedArgs[["tree_id"]])]
@@ -1271,7 +1312,7 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 }
 
 ## Function to compute growth, the data table must be sorted by year within tree id and plot id
-computeGrowth = function(dt, col = "growth", byCols = c("plot_id", "tree_id"))
+computeGrowth = function(dt, col = "growth", byCols = c("plot_id", "tree_id"), radialGrowth = TRUE)
 {
 	if (!all(c("dbh", "year", byCols) %in% names(dt)))
 		stop(paste("The data table must contains at least contains the columns dbh, year,", paste(byCols, collapse = ", ")))
@@ -1283,14 +1324,21 @@ computeGrowth = function(dt, col = "growth", byCols = c("plot_id", "tree_id"))
 	}
 	dt[, (col) := (shift(dbh, n = 1, type = "lead", fill = NA) - dbh)/(shift(year, n = 1, type = "lead", fill = NA) - year), by = byCols]
 
+	if (radialGrowth)
+		dt[, (col) := dt[, ..col]/2]
+
 	if (!("deltaYear" %in% names(dt)))
 		dt[, deltaYear := shift(year, n = 1, type = "lead", fill = NA) - year, by = byCols]
 }
 
-growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_params = FALSE, standardised_variables = FALSE, ...)
+growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_dbh = TRUE, standardised_params = TRUE,
+	standardised_variables = FALSE, ...)
 {
 	G = NaN
-	if (!standardised_params & !standardised_variables)
+	if (!standardised_dbh)
+		dbh = dbh/sd_dbh
+
+	if (!standardised_params & !standardised_variables) # i.e., params from rescaleParams function; explanatory variables from data
 	{
 		if (class(params) != "list")
 			stop("Parameters have been rescaled, list created by rescaleParams expected")
@@ -1312,7 +1360,7 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 			ph_slope*ph + ph_slope2*ph^2 + competition_slope*basalArea)
 	}
 
-	if (standardised_params & !standardised_variables)
+	if (standardised_params & !standardised_variables) # i.e., params from stan output; explanatory variables from data
 	{
 		providedArgs = list(...)
 		ls_names = names(providedArgs)
@@ -1321,8 +1369,7 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 		{
 			required_params = "scaling"
 			single = TRUE
-		} else
-		{
+		} else {
 			required_params = c("dbh_scaling", "clim_scaling", "ph_scaling", "ba_scaling")
 			single = FALSE
 		}
@@ -1342,8 +1389,7 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 			scaling_dt = rbindlist(list(clim_scaling, ph_scaling, ba_scaling))
 			setkey(scaling_dt, variable)
 		}
-
-		dbh = dbh/sd_dbh
+		
 		pr = (pr - scaling_dt["pr", mu])/scaling_dt["pr", sd]
 		tas = (tas - scaling_dt["tas", mu])/scaling_dt["tas", sd]
 		ph = (ph - scaling_dt["ph", mu])/scaling_dt["ph", sd]
@@ -1352,20 +1398,20 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 		standardised_variables = TRUE
 	}
 
-	if (standardised_params & standardised_variables)
+	if (standardised_params & standardised_variables) # i.e., params from stan output; explanatory variables from above or already std.
 	{
-		intercept = params[["intercept_rescale"]]
+		intercept = params["averageGrowth"]
 
-		dbh_slope = params[["slope_dbh_rescale"]]
+		dbh_slope = params["dbh_slope"]
 		
-		pr_slope = params[["slope_predictors_rescale"]]["pr_slope"]
-		tas_slope = params[["slope_predictors_rescale"]]["tas_slope"]
-		ph_slope = params[["slope_predictors_rescale"]]["ph_slope"]
-		competition_slope = params[["slope_predictors_rescale"]]["competition_slope"]
+		pr_slope = params["pr_slope"]
+		tas_slope = params["tas_slope"]
+		ph_slope = params["ph_slope"]
+		competition_slope = params["competition_slope"]
 
-		pr_slope2 = params[["slope_quadratic_predictors_rescale"]]["pr_slope2"]
-		tas_slope2 = params[["slope_quadratic_predictors_rescale"]]["tas_slope2"]
-		ph_slope2 = params[["slope_quadratic_predictors_rescale"]]["ph_slope2"]
+		pr_slope2 = params["pr_slope2"]
+		tas_slope2 = params["tas_slope2"]
+		ph_slope2 = params["ph_slope2"]
 		
 		G = sd_dbh * exp(intercept + dbh_slope*dbh + pr_slope*pr + pr_slope2*pr^2 + tas_slope*tas + tas_slope2*tas^2 +
 			ph_slope*ph + ph_slope2*ph^2 + competition_slope*basalArea)
