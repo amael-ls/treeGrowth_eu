@@ -8,107 +8,25 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
-library(posterior)
+# library(posterior)
 library(cmdstanr)
 library(stringi)
 library(viridis)
 library(terra)
 
 #### Tool functions
-## Growth function
-growth_fct = function(x, precipitation, temperature, basalArea, params, scaled_dbh = FALSE, scaled_clim = FALSE, ...)
-{
-	providedArgs = list(...)
-	providedArgs_names = names(providedArgs)
-	scaling = 1
-
-	if (!scaled_dbh)
-	{
-		if (!("sd_dbh" %in% providedArgs_names))
-			stop("You need to provide sd_dbh in order to standardise dbh")
-		
-		sd_dbh = providedArgs[["sd_dbh"]]
-		scaling = sd_dbh
-		x = x/sd_dbh
-	}
-
-	if (!scaled_clim)
-	{
-		if (!all(c("pr_mu", "pr_sd", "tas_mu", "tas_sd") %in% providedArgs_names))
-			stop("You need to provide pr_mu, pr_sd, tas_mu, and tas_sd in order to standardise dbh")
-		
-		pr_mu = providedArgs[["pr_mu"]]
-		pr_sd = providedArgs[["pr_sd"]]
-		tas_mu = providedArgs[["tas_mu"]]
-		tas_sd = providedArgs[["tas_sd"]]
-		temperature = (temperature - tas_mu)/tas_sd
-		precipitation = (precipitation - pr_mu)/pr_sd
-	}
-
-	potentialGrowth = params["potentialGrowth"]
-	dbh_slope = params["dbh_slope"]
-
-	pr_slope = params["pr_slope"]
-	pr_slope2 = params["pr_slope2"]
-	tas_slope = params["tas_slope"]
-	tas_slope2 = params["tas_slope2"]
-
-	competition_slope = params["competition_slope"]
-
-	return(scaling*exp(potentialGrowth + dbh_slope*x + pr_slope*precipitation + pr_slope2*precipitation^2 +
-		tas_slope*temperature + tas_slope2*temperature^2 + competition_slope*basalArea))
-}
-
-## Function to get estimated parameters from results (fixed values, either mean or median)
-getParams = function(model_cmdstan, params_names, type = "mean")
-{
-	if (!(type %in% c("mean", "median")))
-		stop("Unknown type. Please choose median or mean")
-	
-	vals = numeric(length(params_names))
-	names(vals) = params_names
-	for (i in 1:length(params_names))
-	{
-		vals[i] = ifelse(type == "mean",
-			mean(model_cmdstan$draws(params_names[i])),
-			median(model_cmdstan$draws(params_names[i])))
-	}
-	return (vals)
-}
-
-## Get name of the last run
-getLastRun = function(path, begin = "growth-", extension = ".rds", format = "ymd", run = NULL, getAll = FALSE)
-{
-	if (format != "ymd")
-		stop("Format is not recognised. For now only year-month-day alias ymd works")
-	
-	if (!is.null(run))
-		begin = paste0(begin, "run=", run, "-")
-	
-	ls_files = list.files(path = path, pattern = paste0("^", begin, ".*", extension, "$"))
-	ls_files_split = stri_split(stri_sub(ls_files, from = stri_locate(ls_files, regex = begin)[, "end"] + 1),
-			regex = "-", simplify = TRUE)
-	n = length(ls_files)
-	
-	if (format == "ymd") # year month day
-		dt = data.table(file = ls_files, year = ls_files_split[, 1], month = ls_files_split[, 2], day = ls_files_split[, 3])
-
-	dt[stri_detect(str = day, regex = extension), day := stri_sub(str = day, to = stri_locate_first(str = day, regex = "_")[,"start"] - 1)]
-	setorder(dt, year, month, day)
-	if (getAll)
-		return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-"), allFiles = dt))
-	return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-")))
-}
+source("toolFunctions.R")
 
 #### Load data
 ## Common variables
-species = "Picea_abies"
+species = "Tilia platyphyllos"
 run = 1
 years = 2010:2018
 
 ## Paths
 tree_path = paste0("./", species, "/")
-climate_path = "/home/amael/project_ssm/climateData/Chelsa/yearlyAverage/"
+climate_path = "/bigdata/Predictors/climateChelsa/"
+ph_path = "/bigdata/Predictors/Soil\ esdacph\ Soil\ pH\ in\ Europe/"
 shapefile_path = "/home/amael/shapefiles/deutschland/"
 
 ## Tree data
@@ -116,20 +34,30 @@ info_lastRun = getLastRun(path = tree_path, run = run)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
 results = readRDS(paste0(tree_path, lastRun))
+nb_nfi = results$metadata()$stan_variable_dims$sigmaObs
 
 ## Associated estimated parameters
-params_names = c("potentialGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2", "competition_slope",
-	"measureError", "processError")
+params_names = c("averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc")
+
+if (nb_nfi > 1)
+	params_names = expand(params_names, nb_nfi)[["new_names"]]
 
 # Mean estimation
 estimated_params = getParams(model_cmdstan = results, params_names = params_names)
 
-## Climate
+## Climate (now, it would be more accurate to call this predictors, but by that time there were only climate!)
 temperature_files = paste0(climate_path, "tas/", years, ".tif")
 precipitation_files = paste0(climate_path, "pr/", years, ".tif")
 
+soil_shp = vect(paste0(ph_path, "country_laea.shp"))
+soil = rast(paste0(ph_path, "ph_cacl2/w001001.adf"))
+crs(soil) = crs(soil_shp)
+
 climate = rast(c(temperature_files, precipitation_files))
-names(climate) = c(paste0("tas_", years), paste0("pr_", years))
+soil = project(soil, climate)
+climate = c(climate, soil)
+names(climate) = c(paste0("tas_", years), paste0("pr_", years), "ph")
 
 ## Landscape
 germany = vect(paste0(shapefile_path, "germany.shp"))
@@ -148,124 +76,18 @@ cities_rs = vect(x = cities, geom = c("x", "y"), crs = crs(germany))
 
 ## Crop climate to Germany only
 climate = crop(x = climate, y = germany, mask = TRUE)
-climate_mean = c(mean(subset(climate, paste0("tas_", years))), mean(subset(climate, paste0("pr_", years))))
-names(climate_mean) = c("temperature", "precipitation")
+climate_mean = c(mean(subset(climate, paste0("tas_", years))), mean(subset(climate, paste0("pr_", years))), mean(subset(climate, "ph")))
+names(climate_mean) = c("temperature", "precipitation", "ph")
 
 ## Scaling
 dbh_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "dbh_normalisation.rds"))
 climate_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "climate_normalisation.rds"))
+ph_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "ph_normalisation.rds"))
+ba_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "ba_normalisation.rds"))
 
 #### Compute average growth in a landscape/along a gradient
 ## Define stan model to compute average growth (integral in generated quantities block)
-gq_script = write_stan_file(
-"
-functions {
-	// Function to integrate (growth function). This returns the expected growth in mm, for 1 year.
-	real growth_integrand(real x, real xc, array[] real theta, array[] real x_r, array[] int x_i)
-	{
-		// theta is the vector of parameters
-		real potentialGrowth = theta[1];
-		real dbh_slope = theta[2];
-
-		real pr_slope = theta[3];
-		real pr_slope2 = theta[4];
-		real tas_slope = theta[5];
-		real tas_slope2 = theta[6];
-
-		real competition_slope = theta[7];
-
-		// x_r is an array of real data (here, precip, competition, etc...)
-		real precip = x_r[1];
-		real temperature = x_r[2];
-		real totalTreeWeight = x_r[3];
-
-		return (exp(potentialGrowth + dbh_slope*x + pr_slope*precip + pr_slope2*precip^2 +
-			tas_slope*temperature + tas_slope2*temperature^2 + competition_slope*totalTreeWeight));
-	}
-}
-
-data {
-	// Number of data
-	int<lower = 1> n_indiv; // Number of individuals
-	int<lower = 1> n_climate; // Dimension of the climate vector
-	int<lower = 1> n_climate_new; // Dimension of the new climate vector
-	int<lower = 1> n_obs; // Number of trees observations
-	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth
-	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children trees observations = n_obs - n_indiv
-	array [n_indiv] int<lower = 2, upper = n_obs> nbYearsGrowth; // Number of years of growth for each individual
-
-	// Indices
-	array [n_indiv] int<lower = 1, upper = n_obs - 1> parents_index; // Index of each parent in the observed data
-	array [n_children] int<lower = 2, upper = n_obs> children_index; // Index of children in the observed data
-	array [n_indiv] int<lower = 1, upper = n_climate - 1> climate_index; // Index of the climate associated to each parent
-
-	// Observations
-	vector<lower = 0>[n_obs] Yobs;
-
-	// Explanatory variables
-	vector<lower = 0>[n_climate] precip; // Precipitations
-	real pr_mu; // To standardise the precipitations
-	real<lower = 0> pr_sd; // To standardise the precipitations
-
-	vector[n_climate] tas; // Temperature
-	real tas_mu; // To standardise the temperature
-	real<lower = 0> tas_sd; // To standardise the temperature
-
-	vector<lower = 0>[n_indiv] totalTreeWeight; // Sum of the tree weights for a given plot at a given time
-
-	array [3*n_climate_new] real x_r; // Contains in this order: pr, ts, totalTreeWeight, each of size n_climate_new, and already standardised
-}
-
-transformed data {
-	vector[n_obs] normalised_Yobs = Yobs/sd(Yobs); // Normalised but NOT centred dbh
-	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centered precipitations
-	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centered temperatures
-	vector[n_indiv] normalised_totalTreeWeight = (totalTreeWeight - mean(totalTreeWeight))/sd(totalTreeWeight);
-
-	array [0] int x_i; // Unused, but necessary, int array to compute integral
-}
-
-parameters {
-	// Parameters
-	real potentialGrowth; // Growth when all the explanatory variables are set to 0
-	real dbh_slope;
-
-	real pr_slope;
-	real pr_slope2;
-
-	real tas_slope;
-	real tas_slope2;
-
-	real competition_slope;
-
-	real<lower = 0.5/sd(Yobs)^2> processError;
-	real<lower = 0.1/sqrt(12)*25.4/sd(Yobs)> measureError; // Constrained by default, see appendix D Eitzel for the calculus
-
-	vector<lower = 0, upper = 10>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
-	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
-}
-
-generated quantities {
-	array [n_climate_new] real average_growth_sim;
-	
-	{
-		real lower_bound = 50/sd(Yobs);
-		real upper_bound = 700/sd(Yobs);
-		array [3] int index;
-
-		for (i in 1:n_climate_new)
-		{
-			index = {i, i + n_climate_new, i + 2*n_climate_new}; // To get the i^th value of precip, temp, and tree weight, respectively
-			average_growth_sim[i] = integrate_1d(growth_integrand, lower_bound, upper_bound,
-				{potentialGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, competition_slope},
-				x_r[index], x_i)/(upper_bound - lower_bound);
-		}
-	}
-}
-"
-)
-
-gq_model = cmdstan_model(gq_script)
+gq_model = cmdstan_model("generate_meanGrowth.stan")
 
 ## Common variables
 mean_tas = mean(values(subset(climate_mean, "temperature")), na.rm = TRUE)
@@ -276,59 +98,70 @@ mean_pr = mean(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
 min_pr = min(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
 max_pr = max(values(subset(climate_mean, "precipitation")), na.rm = TRUE)
 
+mean_ph = mean(values(subset(climate_mean, "ph")), na.rm = TRUE)
+min_ph = min(values(subset(climate_mean, "ph")), na.rm = TRUE)
+max_ph = max(values(subset(climate_mean, "ph")), na.rm = TRUE)
+
 n_tas = 200
 n_pr = 600
+n_ph = 10
 
 n_chains = results$num_chains()
 
-lower_dbh = 40
-upper_dbh = 700
+treeData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run), "treeData.rds"))
+
+lower_dbh = quantile(treeData$dbh, seq(0, 1, 0.025))["2.5%"]
+upper_dbh = quantile(treeData$dbh, seq(0, 1, 0.025))["97.5%"]
 
 ## Compute average growth in a landscape
 average_growth = setDT(as.data.frame(x = climate_mean, xy = TRUE))
 
-average_growth[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
-	precipitation = precipitation, temperature = temperature, basalArea = 0,
-	params = estimated_params, scaled_dbh = FALSE, scaled_clim = FALSE,
-	sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
-	tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd])$value, by = .(x, y)]
+#! THE NEXT LINE MUST BE UPDATED TO NEW VERSION! SEE dt_growth_tas
+# average_growth[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
+# 	precipitation = precipitation, temperature = temperature, ph = ph, standBasalArea = 0,
+# 	params = estimated_params, scaled_dbh = FALSE, scaled_clim = FALSE,
+# 	sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
+# 	tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd],
+# 	ph_mu = ph_mu_sd[variable == "ph", mu], ph_sd = ph_mu_sd[variable == "ph", sd],
+# 	ba_mu = ba_mu_sd[variable == "standBasalArea_interp", mu], ba_sd = ba_mu_sd[variable == "standBasalArea_interp", sd])$value,
+# 	by = .(x, y)]
 
-average_growth[, integral := integral/(upper_dbh - lower_dbh)]
+# average_growth[, integral := integral/(upper_dbh - lower_dbh)]
 
 ## Compute average growth along a one-dimension environmental gradient
 # Temperature gradient
 dt_growth_tas = data.table(temperature = seq(min_tas, max_tas, length.out = n_tas), integral = numeric(n_tas))
 
 dt_growth_tas[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
-	precipitation = mean_pr, temperature = temperature, basalArea = 0,
-	params = estimated_params, scaled_dbh = FALSE, scaled_clim = FALSE,
-	sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
-	tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd])$value, by = temperature]
+	pr = mean_pr, tas = temperature, ph = mean_ph, basalArea = 25,
+	params = estimated_params, standardised_dbh = FALSE, standardised_params = TRUE, standardised_variables = FALSE,
+	sd_dbh = dbh_mu_sd[1, sd], scaling = rbindlist(list(climate_mu_sd, ph_mu_sd, ba_mu_sd)))$value, by = temperature]
 
 dt_growth_tas[, integral := integral/(upper_dbh - lower_dbh)]
 
 stanData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 stanData$x_r = c((rep(mean_pr, n_tas) - stanData$pr_mu)/stanData$pr_sd, # Precip
 	(dt_growth_tas[, temperature] - stanData$tas_mu)/stanData$tas_sd, # Temperature
-	rep(0, n_tas) # totalTreeWeight, note that I set it to 0, which is not the averaged on the centred scale
+	(rep(25, n_tas) - stanData$ba_mu)/stanData$ba_sd
 )
 stanData$n_climate_new = n_tas
+stanData$lower_bound = unname(lower_dbh)
+stanData$upper_bound = unname(upper_dbh)
 
 generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
 
 average_growth_sim = generate_quantities$draws("average_growth_sim")
 quantile_tas = data.table(q5 = numeric(n_tas), q95 = numeric(n_tas))
 for (i in 1:n_tas)
-	quantile_tas[i, c("q5", "q95") := as.list(sd(stanData$Yobs)*quantile2(x = average_growth_sim[, , i], probs = c(0.05, 0.95)))]
+	quantile_tas[i, c("q5", "q95") := as.list(sd(stanData$Yobs)*quantile(x = average_growth_sim[, , i], probs = c(0.05, 0.95)))]
 
 # Precipitation gradient
 dt_growth_pr = data.table(precipitation = seq(min_pr, max_pr, length.out = n_pr), integral = numeric(n_pr))
 
 dt_growth_pr[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
-	precipitation = precipitation, temperature = mean_tas, basalArea = 0,
-	params = estimated_params, scaled_dbh = FALSE, scaled_clim = FALSE,
-	sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
-	tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd])$value, by = precipitation]
+	pr = precipitation, tas = mean_tas, ph = mean_ph, basalArea = 25,
+	params = estimated_params, standardised_dbh = FALSE, standardised_params = TRUE, standardised_variables = FALSE,
+	sd_dbh = dbh_mu_sd[1, sd], scaling = rbindlist(list(climate_mu_sd, ph_mu_sd, ba_mu_sd)))$value, by = precipitation]
 
 dt_growth_pr[, integral := integral/(upper_dbh - lower_dbh)]
 
@@ -336,16 +169,18 @@ dt_growth_pr[, integral := integral/(upper_dbh - lower_dbh)]
 stanData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 stanData$x_r = c((dt_growth_pr[, precipitation] - stanData$pr_mu)/stanData$pr_sd, # Precip
 	(rep(mean_tas, n_pr) - stanData$tas_mu)/stanData$tas_sd, # Temperature
-	rep(0, n_pr) # totalTreeWeight, note that I set it to 0, which is not the averaged on the centred scale
+	(rep(25, n_pr) - stanData$ba_mu)/stanData$ba_sd
 )
 stanData$n_climate_new = n_pr
+stanData$lower_bound = unname(lower_dbh)
+stanData$upper_bound = unname(upper_dbh)
 
 generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
 
 average_growth_sim = generate_quantities$draws("average_growth_sim")
 quantile_pr = data.table(q5 = numeric(n_pr), q95 = numeric(n_pr))
 for (i in 1:n_pr)
-	quantile_pr[i, c("q5", "q95") := as.list(sd(stanData$Yobs)*quantile2(x = average_growth_sim[, , i], probs = c(0.05, 0.95)))]
+	quantile_pr[i, c("q5", "q95") := as.list(sd(stanData$Yobs)*quantile(x = average_growth_sim[, , i], probs = c(0.05, 0.95)))]
 
 #### Plot average growth
 ## In function of climate
