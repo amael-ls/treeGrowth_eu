@@ -75,7 +75,7 @@ transformed data {
 
 parameters {
 	// Parameters for growth function
-	vector [n_plots] plotEffect; // Growth (grouped by plots) when all the explanatory variables are set to 0
+	real averageGrowth;
 	real dbh_slope;
 
 	real pr_slope;
@@ -88,11 +88,7 @@ parameters {
 	real ph_slope2;
 
 	real competition_slope;
-
-	// Hyper parameters for growth function
-	real averageGrowth_mu;
-	real<lower = 0> averageGrowth_sd;
-
+	
 	// Errors (observation and process)
 	// --- Process error, which is the variance of a gamma distrib /!\
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
@@ -111,12 +107,6 @@ parameters {
 
 	// --- Growth
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
-}
-
-transformed parameters {
-	// Growth (grouped by plots) when all the explanatory variables are set to 0
-	vector [n_plots] averageGrowth;
-	averageGrowth = averageGrowth_mu + averageGrowth_sd * plotEffect; // <=> averageGrowth ~ normal(averageGrowth_mu, averageGrowth_sd)
 }
 
 generated quantities {
@@ -171,14 +161,14 @@ generated quantities {
 				// Process model
 				expected_growth = growth(current_latent_dbh, normalised_precip[climate_index[i] + j - 1],
 					normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]],
-					normalised_standBasalArea[climate_index[i] + j - 1], averageGrowth[plot_index[i]],
+					normalised_standBasalArea[climate_index[i] + j - 1], averageGrowth,
 					dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 
 				// Record difference expected growth minus latent growth
 				latentG_residuals[growth_counter] = expected_growth - latent_growth[growth_counter];
 
 				// Dbh at time t + 1
-				current_latent_dbh += latent_growth[growth_counter]; // Or should it be += gamma(mean = latent_growth, var = sigmaProc)?
+				current_latent_dbh += latent_growth[growth_counter];
 				growth_counter += 1;
 				dbh_counter += 1;
 				yearly_latent_dbh[dbh_counter] = current_latent_dbh;
