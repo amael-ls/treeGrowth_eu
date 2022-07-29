@@ -260,6 +260,12 @@ model {
 				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]));
 
 		// Compare true (i.e., hidden or latent) latent averaged yearly growth with observed averaged yearly growth
+		/*
+			Note that here, I use 2*etaObs[k]/deltaYear[i]. This is because the yearly growth error is twice the error on the dbh
+			divided by the number of years between the two measurement (i.e., averageing the growth error).
+
+			See Rüger et al 2011
+		*/
 		for (i in start_nfi_avg_growth[k]:end_nfi_avg_growth[k])
 			target += log_mix(proba[k],
 				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*etaObs[k]/deltaYear[i]),
