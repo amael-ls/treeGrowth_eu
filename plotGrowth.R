@@ -182,6 +182,32 @@ quantile_pr = data.table(q5 = numeric(n_pr), q95 = numeric(n_pr))
 for (i in 1:n_pr)
 	quantile_pr[i, c("q5", "q95") := as.list(sd(stanData$Yobs)*quantile(x = average_growth_sim[, , i], probs = c(0.05, 0.95)))]
 
+# Basal area gradient
+dt_growth_ba = data.table(basalArea = seq(min_ba, max_ba, length.out = n_ba), integral = numeric(n_ba))
+
+dt_growth_ba[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
+	pr = mean_pr, ba = temperature, ph = mean_ph, basalArea = 25,
+	params = estimated_params, standardised_dbh = FALSE, standardised_params = TRUE, standardised_variables = FALSE,
+	sd_dbh = dbh_mu_sd[1, sd], scaling = rbindlist(list(climate_mu_sd, ph_mu_sd, ba_mu_sd)))$value, by = temperature]
+
+dt_growth_ba[, integral := integral/(upper_dbh - lower_dbh)]
+
+stanData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
+stanData$x_r = c((rep(mean_pr, n_ba) - stanData$pr_mu)/stanData$pr_sd, # Precip
+	(dt_growth_ba[, temperature] - stanData$ba_mu)/stanData$ba_sd, # Temperature
+	(rep(25, n_ba) - stanData$ba_mu)/stanData$ba_sd
+)
+stanData$n_climate_new = n_ba
+stanData$lower_bound = unname(lower_dbh)
+stanData$upper_bound = unname(upper_dbh)
+
+generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
+
+average_growth_sim = generate_quantities$draws("average_growth_sim")
+quantile_ba = data.table(q5 = numeric(n_ba), q95 = numeric(n_ba))
+for (i in 1:n_ba)
+	quantile_ba[i, c("q5", "q95") := as.list(sd(stanData$Yobs)*quantile(x = average_growth_sim[, , i], probs = c(0.05, 0.95)))]
+
 #### Plot average growth
 ## In function of climate
 # Common variables
