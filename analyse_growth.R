@@ -69,6 +69,7 @@ correl_dt = rbindlist(correl_ls, idcol = "speciesName_sci")
 
 saveRDS(error_dt, "./error_species.rds")
 saveRDS(correl_dt, "./correlation_energy_species.rds")
+saveRDS(posterior_ls, "./posterior_ls.rds")
 
 plot_correl_error(error_dt, correl_dt, threshold_correl = 0.2, rm_correl = "lp__")
 
@@ -92,6 +93,31 @@ abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, 
 
 abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries_2measures_wrong.pdf",
 	plot_id = "france_818095", tree_id = 4) # 2 measurements, unrealistic growth (23.8 mm/yr)
+
+abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries_germany.pdf",
+	plot_id = "germany_26304_2", tree_id = 5)
+
+
+
+example = data.table(year = rep(2000:2011, each = 3000), draw = rep(1:3000, each = 12), growth = 0)
+for (i in 1:12)
+	example[(3000*(i - 1) + 1):(3000*i), growth := as.numeric(qq[, , i])]
+
+example[growth > 10, growth := NA]
+example[, year := as.factor(year)]
+setDF(example)
+
+ridge_density_plot <-
+	example %>%
+	ggplot(aes(x = growth, y = year, fill = year)) +
+	ggridges::geom_density_ridges(quantile_lines = TRUE, quantile_fun=function(x,...)mean(x), scale = 1) +
+	theme(legend.position = "none", axis.title = element_text(size = 24), axis.text = element_text(size = 18),
+		panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+		plot.background = element_rect(fill = "transparent", colour = NA_character_),
+		panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+ggsave("test.pdf", ridge_density_plot)
+
 
 ## Acer opalus
 acerOpalus = dbh_timeSeries(posterior_ls[["Acer opalus"]], plotMean = TRUE, filename = "timeSeries.pdf",
