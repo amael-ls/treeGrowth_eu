@@ -22,9 +22,12 @@ shapefile_folder = "/home/amael/shapefiles/europe/"
 treeData = readRDS(paste0(treeData_folder, "standardised_european_growth_data_reshaped.rds"))
 coords = vect(unique(treeData[, .(x, y)]), geom = c("x", "y"), crs = "EPSG:4326")
 
+# coords = sample(coords, 45000)
+
 europe = vect(paste0(shapefile_folder, "europe.shp"))
 
 #### Plot
+# pdf("plots_location_growth_subsample_2.pdf", height = 10, width = 10)
 pdf("plots_location_growth.pdf", height = 10, width = 10)
 plot(europe, col = "#C4AC7C44", border = "#9E391A", axes = FALSE)
 plot(coords, pch = 20, cex = 0.025, col = "#354536", add = TRUE)
