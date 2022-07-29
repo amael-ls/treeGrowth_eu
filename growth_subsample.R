@@ -1,6 +1,16 @@
 
 #### Aim of prog: Fit the French growth data. (This objective will be updated to part of Europe later)
-
+## Comments:
+# 1. To use the GPU with Stan, it is first needed to run clinfo -l. On Bayreuth, I get:
+#	clinfo -l
+#	Platform #0: NVIDIA CUDA
+#		+-- Device #0: NVIDIA RTX A5000
+#		`-- Device #1: NVIDIA RTX A5000
+#	This indicates that the platform 0 has the GPU with 2 devices.
+#	Then, compile the model with the option: cpp_options = list(stan_opencl = TRUE)
+#	Finally, to run the model with the function sample, use the argument opencl_ids
+#	The opencl_ids is supplied as a vector of length 2, where the first element is the platform ID and the second argument is the device ID.
+#	In this case it is (0, 0) or (0, 1) if the second device is desired
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -15,7 +25,7 @@ library(stringi)
 #### Get parameters for run
 args = commandArgs(trailingOnly = TRUE)
 if (length(args) != 3)
-  stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
+	stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
 species_id = as.integer(args[1]) # 17, 48
 run_id = as.integer(args[2]) # 1, 2, 3, 4
@@ -66,6 +76,12 @@ init_fun = function(...)
 
 	latent_growth_gen = numeric(n_latentGrowth)
 	counter_growth = 0
+
+	# Change extreme growth to more plausible values
+	q_90 = quantile(average_yearlyGrowth, seq(0, 1, 0.1))["90%"]
+	n_above_q90 = length(average_yearlyGrowth[average_yearlyGrowth > q_90])
+	average_yearlyGrowth[average_yearlyGrowth > q_90] = rgamma(n_above_q90, shape = q_90^2/1, rate = q_90/1)
+
 	for (i in 1:n_indiv) # Not that this forbid trees to shrink
 	{
 		for (j in 1:nbYearsGrowth[i])
@@ -77,8 +93,8 @@ init_fun = function(...)
 
 	if (any(latent_growth_gen == 0))
 	{
-		warning("Some generated latent growth were 0. There have been replaced by 0.1 (before standardising)")
-		latent_growth_gen[latent_growth_gen == 0] = 0.1
+		warning("Some generated latent growth were 0. There have been replaced by 1e-5 (before standardising)")
+		latent_growth_gen[latent_growth_gen == 0] = 1e-5
 	}
 
 	# Normalise dbh
@@ -436,7 +452,7 @@ initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_inde
 length(initVal_Y_gen)
 
 for (i in 1:n_chains)
-	print(range(initVal_Y_gen[[i]][["latent_growth"]]))
+	print(range(initVal_Y_gen[[i]][["latent_growth"]])) # The small values comes from the fact that variance >> mean in gamma for small mean
 
 # Data to provide
 stanData = list(
@@ -494,20 +510,20 @@ saveRDS(object = stanData, file = paste0(savingPath, run_id, "_stanData.rds"))
 saveRDS(object = treeData, file = paste0(savingPath, run_id, "_treeData.rds"))
 
 ## Compile model
-model = cmdstan_model("./growth.stan")
+model = cmdstan_model("./growth.stan", cpp_options = list(stan_opencl = TRUE))
 
 start_time = Sys.time()
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
 	iter_warmup = 1500, iter_sampling = 1000, save_warmup = TRUE, init = initVal_Y_gen,
-	max_treedepth = 13, adapt_delta = 0.95)
+	max_treedepth = 13, adapt_delta = 0.95, opencl_ids = c(0, ifelse(species_id %% 2 == 0, 0, 1)))
 
 end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_newlogLik.rds"))
+results$save_object(file = paste0(savingPath, "ruger_growth-run=", run_id, "-", time_ended, "_ruger.rds"))
 
 results$cmdstan_diagnose()
 
