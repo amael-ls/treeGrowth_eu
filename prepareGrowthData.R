@@ -1,7 +1,7 @@
 
 #### Aim of script: Prepare the data for growth (indices for multiple countries)
 ## Comments
-# There are three parts in this program:
+# There are five parts in this program:
 #	1. Standardisation of the growth data among country
 #	2. Filter unknown species, check names are standardised, keep only most abundant species (threshold to 2000 measurements)
 #	3. Extract climate data and check that all the rasters have the same grid:
@@ -11,7 +11,7 @@
 #		"Continental-scale digital soil mapping using european soil profile data: soil ph",
 #		Hannes Isaak Reuter, Luis Rodriguez Lado, Tomislav Hengl & Luca Montanarella,
 #		Hamburger Beiträge zur Physischen Geographie und Landschaftsökologie - 92 Heft 19/2008, pp. 91-102.
-#
+#	5. Linearly interpolate stand basal area (it will use the same index as climate)
 
 #### Clear memory and load packages
 rm(list = ls())
