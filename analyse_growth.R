@@ -22,7 +22,7 @@ infoSpecies = readRDS("./speciesInformations.rds")
 
 n_runs = 4 # Number of runs used in growth_subsample.R
 threshold_indiv = 8000 # Minimal number of individuals required to use multi runs
-threshold_time = as.Date("2022/06/16") # Results anterior to this date will not be considered
+threshold_time = as.Date("2022/07/25") # Results anterior to this date will not be considered
 
 infoSpecies[, multiRun := if (n_indiv > threshold_indiv) TRUE else FALSE, by = speciesName_sci]
 infoSpecies[, processed := isProcessed(speciesName_sci, multiRun, threshold_time, lower = 1, upper = n_runs), by = speciesName_sci]
@@ -543,3 +543,82 @@ dev.off()
 # 	gg2[i] = (dbh2[i]/my_sd - dbh1[i]/my_sd)/years[i]
 
 # gg/my_sd
+
+####! CRASH TEST ZONE
+
+## Check the proportion of unrealistic growth
+# Load results
+results = readRDS("Tilia platyphyllos/ruger_growth-run=1-2022-07-30_03h16_ruger.rds")
+stanData = readRDS("Tilia platyphyllos/1_stanData.rds")
+sd_dbh = readRDS("Tilia platyphyllos/1_dbh_normalisation.rds")[, sd]
+
+posterior_latent_growth = sd_dbh*results$draws("latent_growth") # (iter_sampling, n_chains, n_latentGrowth)
+
+quantile(posterior_latent_growth, seq(0, 1, 0.1))
+
+ll = as.data.table(posterior_latent_growth) # (iter_sampling * n_chains * n_latentGrowth, 4)
+
+threshold = 10
+ll[value > threshold, .N]*100/ll[, .N]
+
+ll[value > threshold, .N*100/3000, by = variable]
+
+quantile(posterior_latent_growth, c(0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.975, 1))
+
+pdf("distrib_growth.pdf", height = 8, width = 8)
+hist(ll[value > threshold, .N*100/3000, by = variable][, V1])
+dev.off()
+
+# Generate quantities for a fixed environment, dbh is the variable
+gq_model = cmdstan_model("./generate_probaGrowth.stan")
+
+# Access data
+n_chains = results$num_chains()
+
+# Change data (fixed environment, size grandient)
+set.seed(1969-08-18)
+indices = readRDS("Tilia platyphyllos/1_indices.rds")
+patch_id = sample(x = 1:indices[.N, plot_index], size = 1)
+
+precip = mean(stanData$precip[indices[plot_index == patch_id, unique(index_clim_start)]:
+	indices[plot_index == patch_id, unique(index_clim_end)]])
+temperature = mean(stanData$tas[indices[plot_index == patch_id, unique(index_clim_start)]:
+	indices[plot_index == patch_id, unique(index_clim_end)]])
+ph = stanData$ph[patch_id]
+basalArea = mean(stanData$standBasalArea[indices[plot_index == patch_id, unique(index_clim_start)]:
+	indices[plot_index == patch_id, unique(index_clim_end)]])
+
+
+stanData$environment = c(precip = (precip - stanData$pr_mu)/stanData$pr_sd,
+	temperature = (temperature - stanData$tas_mu)/stanData$tas_sd,
+	ph = (ph - stanData$ph_mu)/stanData$ph_sd,
+	basalArea = (basalArea - stanData$ba_mu)/stanData$ba_sd)
+
+stanData$n_dbh = 1000
+stanData$n_threshold = 3
+
+stanData$dbh0 = seq(50, 550, length.out = stanData$n_dbh)
+stanData$threshold = seq(10, 20, length.out = stanData$n_threshold)
+
+# Simulations
+generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
+probaGrowth = generate_quantities$draws("probaGrowth_beyondThreshold") # iter_sampling * n_chains * n_dbh * n_threshold
+
+probaGrowth_mean = apply(probaGrowth, 3, mean)
+
+probaGrowth_dt = data.table(dbh = rep(stanData$dbh0, stanData$n_threshold),
+	threshold = rep(stanData$threshold, each = stanData$n_dbh),
+	proba = probaGrowth_mean)
+
+colours = MetBrewer::met.brewer("Hokusai3", stanData$n_threshold)
+colours_str = grDevices::colorRampPalette(colours)(stanData$n_threshold)
+
+pdf("test.pdf", height = 6, width = 17)
+plot(stanData$dbh0, probaGrowth_dt[threshold == 10, proba], type = "l", col = colours_str[1], lwd = 2,
+	ylim = c(0, 1.01*max(probaGrowth_mean)), xlab = "dbh", ylab = "Proba", las = 1)
+lines(stanData$dbh0, probaGrowth_dt[threshold == 15, proba], col = colours_str[2], lwd = 2)
+lines(stanData$dbh0, probaGrowth_dt[threshold == 20, proba], col = colours_str[3], lwd = 2)
+legend(x = "topleft", legend = paste(stanData$threshold, "mm"), fill = colours_str, box.lwd = 0)
+dev.off()
+
+####! END CRASH TEST ZONE
