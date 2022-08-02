@@ -30,11 +30,12 @@ ph_path = "/bigdata/Predictors/Soil\ esdacph\ Soil\ pH\ in\ Europe/"
 shapefile_path = "/home/amael/shapefiles/deutschland/"
 
 ## Tree data
-info_lastRun = getLastRun(path = tree_path, run = run)
+# info_lastRun = getLastRun(path = tree_path, run = run)
+info_lastRun = getLastRun(path = tree_path, begin = "^ruger_growth-", run = run)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
 results = readRDS(paste0(tree_path, lastRun))
-nb_nfi = results$metadata()$stan_variable_dims$sigmaObs
+nb_nfi = results$metadata()$stan_variable_sizes$sigmaObs
 
 ## Associated estimated parameters
 params_names = c("averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
