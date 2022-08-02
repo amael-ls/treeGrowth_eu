@@ -90,11 +90,14 @@ data {
 
 	vector<lower = 0>[n_dbh] dbh0; // DBH used as a predictor (new data)
 	vector<lower = 0>[n_threshold] threshold; // DBH used as a predictor (new data)
+
+	array [4] real environment; // Contains in this order: precip, temp, pH, basal area, already standardised
 }
 
 transformed data {
 	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_dbh] normalised_DBH = dbh0/sd_dbh; // Normalised but NOT centred dbh
+	vector[n_threshold] normalised_threshold = threshold/sd_dbh; // Normalised threshold
 	vector[n_children] normalised_avg_yearly_growth_obs = avg_yearly_growth_obs/sd_dbh; // Normalised but NOT centred averaged yearly growth
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centered precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centered temperatures
@@ -144,15 +147,15 @@ generated quantities {
 		{
 			for (j in 1:n_dbh)
 			{
-				expected_growth = growth(dbh0[j],
-					normalised_precip[1], normalised_tas[1], normalised_ph[1], normalised_standBasalArea[1],
+				expected_growth = growth(normalised_DBH[j],
+					environment[1], environment[2], environment[3], environment[4],
 					averageGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 				
 				growth_mean_logNormal = log(expected_growth^2/sqrt(sigmaProc^2 + expected_growth^2));
 				growth_sd_logNormal = sqrt(log(sigmaProc^2/expected_growth^2 + 1));
 
 				// Compute the probability that growth > threshold for a given dbh, environment, and set of parameters.
-				probaGrowth_beyondThreshold[count] = 1 - lognormal_cdf(threshold[i] | growth_mean_logNormal, growth_sd_logNormal);
+				probaGrowth_beyondThreshold[count] = 1 - lognormal_cdf(normalised_threshold[i] | growth_mean_logNormal, growth_sd_logNormal);
 
 				count += 1;
 			}
