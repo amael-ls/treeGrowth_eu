@@ -125,7 +125,7 @@ parameters {
 	
 	// Errors (observation and process)
 	// --- Process error, which is the sd of a lognormal distrib /!\
-	real<lower = 0.5/sd_dbh^2> sigmaProc;
+	// real<lower = 0.5/sd_dbh^2> sigmaProc;
 
 	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
 	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
@@ -154,6 +154,7 @@ model {
 	vector [n_children] latent_avg_yearly_growth; // n_children is also the number of measured growth (number of intervals)!
 	real growth_mean_logNormal;
 	real growth_sd_logNormal;
+	real sigmaProc = 0.2468601 - log(sd_dbh);
 
 	// Priors
 	// --- Growth parameters
@@ -206,7 +207,7 @@ model {
 		etaObs: 0.1788352
 	*/
 	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.09); // <=> procError = 1.29 mm/yr ± 0.12 mm/yr
-	target += gamma_lpdf(sigmaObs | 3.0/0.025, sd_dbh*sqrt(3)/0.025); // <=> routine measurement error (sd) = sqrt(3) mm ± 0.16
+	target += gamma_lpdf(sigmaObs | 3.5/2.5, sd_dbh*sqrt(3.5)/2.5); // <=> routine measurement error (sd) = sqrt(3.5) mm ± 1.58
 	target += gamma_lpdf(etaObs | 25.6^2/6.2, sd_dbh*25.6/6.2); // <=> extreme measurement error (sd) = 25.6 mm
 	
 	// target += beta_lpdf(proba | 3.95, 391.05); // This corresponds to a 1 % chance extrem error, ± 0.5 %
