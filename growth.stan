@@ -18,7 +18,7 @@
 
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
-	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope,
+	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope, real dbh_slope2,
 		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real ph_slope, real ph_slope2, real competition_slope)
 	{
 		/*
@@ -32,16 +32,17 @@ functions {
 			It takes the following parameters:
 				- averageGrowth: The basic growth, when all the explanatory variables are set to zero
 				- dbh_slope: The slope for dbh
+				- dbh_slope2: The slope for dbh (quadratic term)
 				- pr_slope: The slope for precipitation
-				- pr_slope2: The slope for precipitation (squared term)
+				- pr_slope2: The slope for precipitation (quadratic term)
 				- tas_slope: The slope for temperature (tas)
-				- tas_slope2: The slope for temperature (tas, squared term)
+				- tas_slope2: The slope for temperature (tas, quadratic term)
 				- ph_slope: The slope for pH
-				- ph_slope2: The slope for pH (squared term)
+				- ph_slope2: The slope for pH (quadratic term)
 				- competition_slope: The slope for competition
 		*/
 
-		return (exp(averageGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
+		return (exp(averageGrowth + dbh_slope*dbh0 + dbh_slope2*dbh0^2 + pr_slope*precip + pr_slope2*precip^2 +
 			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea));
 	}
 }
@@ -111,6 +112,7 @@ parameters {
 	// Parameters for growth function
 	real averageGrowth;
 	real dbh_slope;
+	real dbh_slope2;
 
 	real pr_slope;
 	real pr_slope2;
@@ -125,7 +127,7 @@ parameters {
 	
 	// Errors (observation and process)
 	// --- Process error, which is the sd of a lognormal distrib /!\
-	// real<lower = 0.5/sd_dbh^2> sigmaProc;
+	real<lower = 0.5/sd_dbh^2> sigmaProc;
 
 	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
 	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
@@ -154,12 +156,12 @@ model {
 	vector [n_children] latent_avg_yearly_growth; // n_children is also the number of measured growth (number of intervals)!
 	real growth_mean_logNormal;
 	real growth_sd_logNormal;
-	real sigmaProc = 0.2468601 - log(sd_dbh);
 
 	// Priors
 	// --- Growth parameters
 	target += normal_lpdf(averageGrowth | -4, 10); // sd_dbh * exp(-4) is around 2 to 3 mm (reasonable average growth) for sd_dbh = 130
 	target += normal_lpdf(dbh_slope | 0, 5);
+	target += normal_lpdf(dbh_slope2 | 0, 5);
 	
 	target += normal_lpdf(pr_slope | 0, 5);
 	target += normal_lpdf(pr_slope2 | 0, 5);
@@ -223,7 +225,7 @@ model {
 			// Process model
 			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
 				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[climate_index[i] + j - 1],
-				averageGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
+				averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 
 			growth_mean_logNormal = log(expected_growth^2/sqrt(sigmaProc^2 + expected_growth^2));
 			growth_sd_logNormal = sqrt(log(sigmaProc^2/expected_growth^2 + 1));
