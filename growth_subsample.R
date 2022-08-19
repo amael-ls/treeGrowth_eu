@@ -329,7 +329,7 @@ if ((!subsamplingActivated) & (run_id != 1))
 n_inventories = length(treeData[, unique(nfi_id)])
 
 ## Compute growth
-computeDiametralGrowth(treeData)
+computeDiametralGrowth(treeData, byCols = c("speciesName_sci", "plot_id", "tree_id"))
 growth_dt = na.omit(treeData)
 
 ## Read climate
@@ -523,12 +523,12 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "ruger_growth-run=", run_id, "-", time_ended, "_ruger.rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_widerEtaPrior.rds"))
 
 results$cmdstan_diagnose()
 
 print(end_time - start_time)
-results$print(c("lp__", "averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+results$print(c("lp__", "averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
 
 # results = readRDS("Abies grandis/growth-run=1-2022-06-02_00h42.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
@@ -583,3 +583,20 @@ results$print(c("lp__", "averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "
 # ruger_err = function(dbh)
 # 	return(0.927 + 0.0038*dbh)
 # ruger_err(seq(0, 200, 50))
+
+# Growth larger than 10 mm/yr
+   country     N
+1:  france 30221
+2: germany  6341
+
+
+# Growth larger than 15 mm/yr
+   country    N
+1:  france 5067
+2: germany  517
+
+
+# Growth larger than 20 mm/yr
+   country   N
+1:  france 837
+2: germany  75
