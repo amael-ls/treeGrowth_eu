@@ -523,7 +523,7 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_widerEtaPrior.rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_widerEtaPrior_widerProba.rds"))
 
 results$cmdstan_diagnose()
 
@@ -584,19 +584,81 @@ results$print(c("lp__", "averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", 
 # 	return(0.927 + 0.0038*dbh)
 # ruger_err(seq(0, 200, 50))
 
-# Growth larger than 10 mm/yr
-   country     N
-1:  france 30221
-2: germany  6341
+# # Growth larger than 10 mm/yr
+#    country     N
+# 1:  france 30221
+# 2: germany  6341
 
 
-# Growth larger than 15 mm/yr
-   country    N
-1:  france 5067
-2: germany  517
+# # Growth larger than 15 mm/yr
+#    country    N
+# 1:  france 5067
+# 2: germany  517
 
 
-# Growth larger than 20 mm/yr
-   country   N
-1:  france 837
-2: germany  75
+# # Growth larger than 20 mm/yr
+#    country   N
+# 1:  france 837
+# 2: germany  75
+
+# growth_dt[growth > 10, .N, by = country][, 100*N/growth_dt[, .N, by = country][, N]]
+# growth_dt[growth > 15, .N, by = country][, 100*N/growth_dt[, .N, by = country][, N]]
+# growth_dt[growth > 20, .N, by = country][, 100*N/growth_dt[, .N, by = country][, N]]
+
+# alpha = function(m, v, sd = TRUE, percent = TRUE)
+# {
+# 	if (sd)
+# 		v = v^2
+	
+# 	if (percent)
+# 	{
+# 		m = m/100
+# 		v = v/100^2
+# 	}
+
+# 	if (v >= m*(1 - m))
+# 		stop("variance out of bound")
+# 	if ((m <= 0) | (m >= 1))
+# 		stop("mean out of bound")
+	
+# 	return (m*(m*(1 - m)/v - 1))
+# }
+
+# beta = function(m, v, sd = TRUE, percent = TRUE)
+# {
+# 	if (sd)
+# 		v = v^2
+	
+# 	if (percent)
+# 	{
+# 		m = m/100
+# 		v = v/100^2
+# 	}
+
+# 	if (v >= m*(1 - m))
+# 		stop("variance out of bound")
+# 	if ((m <= 0) | (m >= 1))
+# 		stop("mean out of bound")
+	
+# 	return ((1 - m)*(m*(1 - m)/v - 1))
+# }
+
+# m = 1
+# v = 0.75
+# curve(dbeta(x, shape1 = alpha(m, v), shape2 = beta(m, v)), to = 0.2, lwd = 2, col = "#125687")
+
+# aa = rbeta(1e6, shape1 = alpha(m, v), shape2 = beta(m, v))
+# 100*range(aa)
+# 100*mean(aa)
+# 100*sd(aa)
+
+
+# aa = rlnorm(1e6, meanlog = log(1.28), sdlog = 0.09)
+# sd(aa)
+
+# bb = rlnorm(1e6, meanlog = log(1.28) - 2, sdlog = 0.5)
+# sd(bb)
+
+# curve(dlnorm(x, meanlog = log(1.28), sdlog = 0.09), from = 0, to = 5)
+# curve(dlnorm(x, meanlog = log(1.28) - 2, sdlog = 0.5), add = TRUE, col = "#126578")
+
