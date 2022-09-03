@@ -328,6 +328,15 @@ if ((!subsamplingActivated) & (run_id != 1))
 
 n_inventories = length(treeData[, unique(nfi_id)])
 
+## Compute if there are two measurements or more
+if (treeData[, .N, by = .(plot_id, tree_id)][, min(N) < 2])
+	stop("There are individuals measured only once")
+
+onlyTwoMeasures = treeData[, .N, by = .(plot_id, tree_id)][, N == 2] # plot_id is country-specific!
+
+if (length(onlyTwoMeasures) != n_indiv)
+	stop("Dimensions mismatch between n_indiv and onlyTwoMeasures")
+
 ## Compute growth
 computeDiametralGrowth(treeData, byCols = c("speciesName_sci", "plot_id", "tree_id"))
 growth_dt = na.omit(treeData)
@@ -482,6 +491,8 @@ stanData = list(
 	end_nfi_avg_growth = end_nfi_avg_growth,
 
 	plot_index = unique(indices[, .(tree_id, plot_id, plot_index)])[, plot_index], # Indicates to which plot individuals belong to
+
+	onlyTwoMeasures = onlyTwoMeasures, # Indicates whether there are only two measurements or more (boolean)
 
 	# Observations
 	Yobs = treeData[, dbh],
