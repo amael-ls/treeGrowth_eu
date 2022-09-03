@@ -14,6 +14,8 @@
 		
 		- The lognormal distribution of stan uses, in this order, meanlog (mu) and sdlog (sigma). It can however be reparametrised
 			using mean and sd: mu = log(mean^2/sqrt(sd^2 + mean^2)), sigma = sqrt(log(sd^2/mean^2 + 1))
+
+	Like C++, BUGS, and R, Stan uses 0 to encode false, and 1 to encode true. https://mc-stan.org/docs/functions-reference/logical-functions.html
 */
 
 functions {
@@ -73,6 +75,8 @@ data {
 	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_avg_growth; // Ending point of each NFI for averaged obs growth
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
+
+	array [n_indiv] int<lower = 0, upper = 1> onlyTwoMeasures; // Indicates whether there are only two measurements or more (boolean)
 
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
@@ -208,8 +212,8 @@ model {
 		sigmaObs: 0.01209929
 		etaObs: 0.1788352
 	*/
-	// target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.09); // <=> procError = 1.29 mm/yr ± 0.12 mm/yr
-	target += gamma_lpdf(sigmaProc | 1.29^2/1.0, 1.29/1.0); // <=> procError = 1.29 mm/yr ± 1 mm/yr
+	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.09); // <=> procError = 1.29 mm/yr ± 0.12 mm/yr
+	// target += gamma_lpdf(sigmaProc | 1.29^2/1.0, 1.29/1.0); // WRONG <=> procError = 1.29 mm/yr ± 1 mm/yr //! WRONG PRIOR
 	target += gamma_lpdf(sigmaObs | 3.5/1, sd_dbh*sqrt(3.5)/1); // <=> routine measurement error (sd) = sqrt(3.5) mm ± 1 mm
 	target += gamma_lpdf(etaObs | 30^2/45.0, sd_dbh*30/45.0); // <=> extreme measurement error (sd) = 30 mm ± 6.7 mm
 	
@@ -260,9 +264,18 @@ model {
 		// Compare true (i.e., hidden or latent) parents with observed parents
 		// Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
 		for (i in start_nfi_parents[k]:end_nfi_parents[k])
-			target += log_mix(proba[k],
-				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]),
-				normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]));
+		{
+			if (onlyTwoMeasures[i]) // Like C++, BUGS, and R, Stan uses 0 to encode false, and 1 to encode true.
+			{
+				target += normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]); // Assume first measure correct
+			}
+			else
+			{
+				target += log_mix(proba[k],
+					normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]),
+					normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]));
+			}
+		}
 
 		// Compare true (i.e., hidden or latent) latent averaged yearly growth with observed averaged yearly growth
 		/*
