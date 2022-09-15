@@ -130,7 +130,7 @@ parameters {
 	real competition_slope;
 	
 	// Errors (observation and process)
-	// --- Process error, which is the sd of a lognormal distrib /!\
+	// --- Process error, which is the sdlog parameter of a lognormal distrib /!\
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
 
 	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
@@ -154,7 +154,7 @@ model {
 	int growth_counter = 1; // Counter in the latent space
 	int children_counter = 1; // Counter in the 'observation space' for chidlren
 	int record_children_counter = 1; // Counter to know when we should compute the latent average yearly growth and store it
-	real expected_growth;
+	real expected_growth_meanlog;
 	real temporary;
 	real temporary_tm1; // temporary at time t - 1 (useful for trees measured more than twice)
 	vector [n_children] latent_avg_yearly_growth; // n_children is also the number of measured growth (number of intervals)!
@@ -163,7 +163,7 @@ model {
 
 	// Priors
 	// --- Growth parameters
-	target += normal_lpdf(averageGrowth | -4, 10); // sd_dbh * exp(-4) is around 2 to 3 mm (reasonable average growth) for sd_dbh = 130
+	target += normal_lpdf(averageGrowth | 0, 5);
 	target += normal_lpdf(dbh_slope | 0, 5);
 	target += normal_lpdf(dbh_slope2 | 0, 5);
 	
@@ -212,7 +212,7 @@ model {
 		sigmaObs: 0.01209929
 		etaObs: 0.1788352
 	*/
-	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.09); // <=> procError = 1.29 mm/yr ± 0.12 mm/yr
+	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16);
 	target += gamma_lpdf(sigmaObs | 3.5/1, sd_dbh*sqrt(3.5)/1); // <=> routine measurement error (sd) = sqrt(3.5) mm ± 1 mm
 	target += gamma_lpdf(etaObs | 30^2/45.0, sd_dbh*30/45.0); // <=> extreme measurement error (sd) = 30 mm ± 6.7 mm
 	
@@ -226,14 +226,11 @@ model {
 		for (j in 1:nbYearsGrowth[i]) // Loop for all years but the first (which is the parent of indiv i)
 		{
 			// Process model
-			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
+			expected_growth_meanlog = growth(temporary, normalised_precip[climate_index[i] + j - 1],
 				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[climate_index[i] + j - 1],
 				averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 
-			growth_mean_logNormal = log(expected_growth^2/sqrt(sigmaProc^2 + expected_growth^2));
-			growth_sd_logNormal = sqrt(log(sigmaProc^2/expected_growth^2 + 1));
-
-			target += lognormal_lpdf(latent_growth[growth_counter] | growth_mean_logNormal, growth_sd_logNormal);
+			target += lognormal_lpdf(latent_growth[growth_counter] | expected_growth_meanlog, sigmaProc);
 
 			// Dbh at time t + 1
 			temporary += latent_growth[growth_counter];

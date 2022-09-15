@@ -548,7 +548,7 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_widerEtaPrior_widerProba_germany_1000_simplified.rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_widerEtaPrior_widerProba_germany_1000_reparametrised.rds"))
 
 results$cmdstan_diagnose()
 
