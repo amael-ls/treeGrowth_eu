@@ -213,13 +213,10 @@ model {
 		etaObs: 0.1788352
 	*/
 	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.09); // <=> procError = 1.29 mm/yr ± 0.12 mm/yr
-	// target += gamma_lpdf(sigmaProc | 1.29^2/1.0, 1.29/1.0); // WRONG <=> procError = 1.29 mm/yr ± 1 mm/yr //! WRONG PRIOR
 	target += gamma_lpdf(sigmaObs | 3.5/1, sd_dbh*sqrt(3.5)/1); // <=> routine measurement error (sd) = sqrt(3.5) mm ± 1 mm
 	target += gamma_lpdf(etaObs | 30^2/45.0, sd_dbh*30/45.0); // <=> extreme measurement error (sd) = 30 mm ± 6.7 mm
 	
-	// target += beta_lpdf(proba | 3.95, 391.05); // This corresponds to a 1 % chance extrem error, ± 0.5 %
-	// target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
-	target += beta_lpdf(proba | 1.453871, 51.22261); // This corresponds to a 2.76 % chance extrem error, ± 2.23 %. Mean from Rüger 2011
+	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
@@ -265,7 +262,7 @@ model {
 		// Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
 		for (i in start_nfi_parents[k]:end_nfi_parents[k])
 		{
-			if (onlyTwoMeasures[i]) // Like C++, BUGS, and R, Stan uses 0 to encode false, and 1 to encode true.
+			if (onlyTwoMeasures[i] == 1) // Like C++, BUGS, and R, Stan uses 0 to encode false, and 1 to encode true.
 			{
 				target += normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]); // Assume first measure correct
 			}
