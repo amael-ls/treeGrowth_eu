@@ -19,7 +19,7 @@ source("toolFunctions.R")
 
 #### Load data
 ## Common variables
-species = "Tilia platyphyllos"
+species = "Fagus sylvatica"
 run = 1
 years = 2010:2018
 
@@ -27,18 +27,18 @@ years = 2010:2018
 tree_path = paste0("./", species, "/")
 climate_path = "/bigdata/Predictors/climateChelsa/"
 ph_path = "/bigdata/Predictors/Soil\ esdacph\ Soil\ pH\ in\ Europe/"
-shapefile_path = "/home/amael/shapefiles/deutschland/"
+shapefile_path = "/home/amael/shapefiles/Deutschland/"
 
 ## Tree data
 # info_lastRun = getLastRun(path = tree_path, run = run)
-info_lastRun = getLastRun(path = tree_path, begin = "^ruger_growth-", run = run)
+info_lastRun = getLastRun(path = tree_path, begin = "growth-", run = run)
 lastRun = info_lastRun[["file"]]
 time_ended = info_lastRun[["time_ended"]]
 results = readRDS(paste0(tree_path, lastRun))
 nb_nfi = results$metadata()$stan_variable_sizes$sigmaObs
 
 ## Associated estimated parameters
-params_names = c("averageGrowth", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+params_names = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc")
 
 if (nb_nfi > 1)
@@ -117,17 +117,13 @@ upper_dbh = quantile(treeData$dbh, seq(0, 1, 0.025))["97.5%"]
 ## Compute average growth in a landscape
 average_growth = setDT(as.data.frame(x = climate_mean, xy = TRUE))
 
-#! THE NEXT LINE MUST BE UPDATED TO NEW VERSION! SEE dt_growth_tas
-# average_growth[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
-# 	precipitation = precipitation, temperature = temperature, ph = ph, standBasalArea = 0,
-# 	params = estimated_params, scaled_dbh = FALSE, scaled_clim = FALSE,
-# 	sd_dbh = dbh_mu_sd[1, sd], pr_mu = climate_mu_sd[variable == "pr", mu], pr_sd = climate_mu_sd[variable == "pr", sd],
-# 	tas_mu = climate_mu_sd[variable == "tas", mu], tas_sd = climate_mu_sd[variable == "tas", sd],
-# 	ph_mu = ph_mu_sd[variable == "ph", mu], ph_sd = ph_mu_sd[variable == "ph", sd],
-# 	ba_mu = ba_mu_sd[variable == "standBasalArea_interp", mu], ba_sd = ba_mu_sd[variable == "standBasalArea_interp", sd])$value,
-# 	by = .(x, y)]
+average_growth[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
+	pr = precipitation, tas = temperature, ph = ph, basalArea = 25,
+	params = estimated_params, standardised_dbh = FALSE, standardised_params = TRUE, standardised_variables = FALSE,
+	sd_dbh = dbh_mu_sd[1, sd], scaling = rbindlist(list(climate_mu_sd, ph_mu_sd, ba_mu_sd)))$value,
+	by = .(x, y)]
 
-# average_growth[, integral := integral/(upper_dbh - lower_dbh)]
+average_growth[, integral := integral/(upper_dbh - lower_dbh)]
 
 ## Compute average growth along a one-dimension environmental gradient
 # Temperature gradient
@@ -143,6 +139,7 @@ dt_growth_tas[, integral := integral/(upper_dbh - lower_dbh)]
 stanData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 stanData$x_r = c((rep(mean_pr, n_tas) - stanData$pr_mu)/stanData$pr_sd, # Precip
 	(dt_growth_tas[, temperature] - stanData$tas_mu)/stanData$tas_sd, # Temperature
+	(rep(mean_ph, n_tas) - stanData$ph_mu)/stanData$ph_sd, # pH
 	(rep(25, n_tas) - stanData$ba_mu)/stanData$ba_sd
 )
 stanData$n_climate_new = n_tas
@@ -170,6 +167,7 @@ dt_growth_pr[, integral := integral/(upper_dbh - lower_dbh)]
 stanData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 stanData$x_r = c((dt_growth_pr[, precipitation] - stanData$pr_mu)/stanData$pr_sd, # Precip
 	(rep(mean_tas, n_pr) - stanData$tas_mu)/stanData$tas_sd, # Temperature
+	(rep(mean_ph, n_pr) - stanData$ph_mu)/stanData$ph_sd, # pH
 	(rep(25, n_pr) - stanData$ba_mu)/stanData$ba_sd
 )
 stanData$n_climate_new = n_pr
@@ -215,7 +213,7 @@ for (i in 1:n_ba)
 y_min = min(dt_growth_tas[, min(integral)], dt_growth_pr[, integral],
 	quantile_tas[, min(q5)], quantile_pr[, min(q5)])
 
-y_max = max(dt_growth_tas[, max(integral)], dt_growth_pr[, integral],
+y_max = max(dt_growth_tas[, max(integral)], dt_growth_pr[, max(integral)],
 	quantile_tas[, max(q95)], quantile_pr[, max(q95)])
 
 # Average growth versus temperature
