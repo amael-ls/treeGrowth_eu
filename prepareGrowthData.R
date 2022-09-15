@@ -93,7 +93,7 @@ growthData[, country := NFI_ls[NFI == nfi_id, country], by = nfi_id]
 growthData[, plot_id := paste(country, plot_id, sep = "_")]
 
 #? --------------------------------------------------------------------------------------------------------
-######## PART II: Standardisation of the species names among country, keep only most abundant
+######## PART II: Standardisation of the species names among countries, keep only most abundant
 #? --------------------------------------------------------------------------------------------------------
 #### Load species names (obtained from taxa folder, script 'getSpeciesFromIndividual.R')
 ls_species = readRDS("/bigdata/Inventories/Taxa/species_fromIndividuals.rds")
