@@ -12,10 +12,10 @@
 
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
-	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope,
+	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope, real dbh_slope2,
 		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real ph_slope, real ph_slope2, real competition_slope)
 	{
-		return (exp(averageGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
+		return (exp(averageGrowth + dbh_slope*dbh0 + dbh_slope2*dbh0^2 + pr_slope*precip + pr_slope2*precip^2 +
 			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea));
 	}
 }
@@ -41,8 +41,11 @@ data {
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
+	array [n_indiv] int<lower = 0, upper = 1> onlyTwoMeasures; // Indicates whether there are only two measurements or more (boolean)
+
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
+	vector[n_children] avg_yearly_growth_obs;
 
 	// sd_dbh is for the whole species and should not be more than 5% different from the sd of the subsample, namely sd(Yobs)
 	real<lower = 0.95*sd(Yobs), upper = 1.05*sd(Yobs)> sd_dbh;
@@ -77,6 +80,7 @@ parameters {
 	// Parameters for growth function
 	real averageGrowth;
 	real dbh_slope;
+	real dbh_slope2;
 
 	real pr_slope;
 	real pr_slope2;
@@ -90,13 +94,13 @@ parameters {
 	real competition_slope;
 	
 	// Errors (observation and process)
-	// --- Process error, which is the variance of a gamma distrib /!\
+	// --- Process error, which is the sd of a lognormal distrib /!\
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
 
 	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
 	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
 
-	// --- Extreme error, by default at least twice the observation error. Rüger 2011 found it is around 8 times larger
+	// --- Extreme error, by default at least twice the min observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
 	
 	array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
@@ -161,8 +165,8 @@ generated quantities {
 				// Process model
 				expected_growth = growth(current_latent_dbh, normalised_precip[climate_index[i] + j - 1],
 					normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]],
-					normalised_standBasalArea[climate_index[i] + j - 1], averageGrowth,
-					dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
+					normalised_standBasalArea[climate_index[i] + j - 1], averageGrowth, dbh_slope, dbh_slope2,
+					pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 
 				// Record difference expected growth minus latent growth
 				latentG_residuals[growth_counter] = expected_growth - latent_growth[growth_counter];

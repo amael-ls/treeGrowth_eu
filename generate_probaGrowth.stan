@@ -6,7 +6,7 @@
 
 functions {
 	// Function computing the expected annual diameter-growth in mm for a given dbh, environment, and set of parameters
-	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope,
+	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope, real dbh_slope2,
 		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real ph_slope, real ph_slope2, real competition_slope)
 	{
 		/*
@@ -29,7 +29,7 @@ functions {
 				- competition_slope: The slope for competition
 		*/
 
-		return (exp(averageGrowth + dbh_slope*dbh0 + pr_slope*precip + pr_slope2*precip^2 +
+		return (exp(averageGrowth + dbh_slope*dbh0 + dbh_slope2*dbh0^2 + pr_slope*precip + pr_slope2*precip^2 +
 			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea));
 	}
 }
@@ -43,7 +43,6 @@ data {
 	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth
 	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children trees observations = n_obs - n_indiv
 	array [n_indiv] int<lower = 2, upper = n_obs> nbYearsGrowth; // Number of years of growth for each individual
-	array [n_children] int<lower = 1> deltaYear; // Number of years between two measurements of an individual
 	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 
 	int<lower = 1> n_dbh; // Dimension of the dbh vector (new data)
@@ -64,6 +63,8 @@ data {
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
+	array [n_indiv] int<lower = 0, upper = 1> onlyTwoMeasures; // Indicates whether there are only two measurements or more (boolean)
+
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
 	vector[n_children] avg_yearly_growth_obs;
@@ -73,7 +74,7 @@ data {
 
 	// Explanatory variables
 	vector<lower = 0>[n_climate] precip; // Precipitations
-	real pr_mu; // To standardise the precipitations
+	real<lower = 0> pr_mu; // To standardise the precipitations
 	real<lower = 0> pr_sd; // To standardise the precipitations
 
 	vector[n_climate] tas; // Temperature
@@ -89,7 +90,7 @@ data {
 	real<lower = 0> ba_sd; // To standardise the basal area
 
 	vector<lower = 0>[n_dbh] dbh0; // DBH used as a predictor (new data)
-	vector<lower = 0>[n_threshold] threshold; // DBH used as a predictor (new data)
+	vector<lower = 0>[n_threshold] threshold; // Lower bound of integral, i.e., variable of cdf function (new data)
 
 	array [4] real environment; // Contains in this order: precip, temp, pH, basal area, already standardised
 }
@@ -109,6 +110,7 @@ parameters {
 	// Parameters for growth function
 	real averageGrowth;
 	real dbh_slope;
+	real dbh_slope2;
 
 	real pr_slope;
 	real pr_slope2;
@@ -149,7 +151,7 @@ generated quantities {
 			{
 				expected_growth = growth(normalised_DBH[j],
 					environment[1], environment[2], environment[3], environment[4],
-					averageGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
+					averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 				
 				growth_mean_logNormal = log(expected_growth^2/sqrt(sigmaProc^2 + expected_growth^2));
 				growth_sd_logNormal = sqrt(log(sigmaProc^2/expected_growth^2 + 1));
@@ -160,5 +162,5 @@ generated quantities {
 				count += 1;
 			}
 		}
-	}	
+	}
 }

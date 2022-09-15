@@ -6,21 +6,25 @@ functions {
 		// theta is the vector of parameters
 		real averageGrowth = theta[1];
 		real dbh_slope = theta[2];
+		real dbh_slope2 = theta[3];
 
-		real pr_slope = theta[3];
-		real pr_slope2 = theta[4];
-		real tas_slope = theta[5];
-		real tas_slope2 = theta[6];
+		real pr_slope = theta[4];
+		real pr_slope2 = theta[5];
+		real tas_slope = theta[6];
+		real tas_slope2 = theta[7];
+		real ph_slope = theta[8];
+		real ph_slope2 = theta[9];
 
-		real competition_slope = theta[7];
+		real competition_slope = theta[10];
 
 		// x_r is an array of real data (here, precip, competition, etc...)
 		real precip = x_r[1];
 		real temperature = x_r[2];
-		real totalTreeWeight = x_r[3];
+		real ph = x_r[3];
+		real standBasalArea = x_r[4];
 
-		return (exp(averageGrowth + dbh_slope*x + pr_slope*precip + pr_slope2*precip^2 +
-			tas_slope*temperature + tas_slope2*temperature^2 + competition_slope*totalTreeWeight));
+		return (exp(averageGrowth + dbh_slope*x + dbh_slope2*x^2 + pr_slope*precip + pr_slope2*precip^2 +
+			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea));
 	}
 }
 
@@ -52,6 +56,8 @@ data {
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
+	array [n_indiv] int<lower = 0, upper = 1> onlyTwoMeasures; // Indicates whether there are only two measurements or more (boolean)
+
 	// Observations
 	vector<lower = 0>[n_obs] Yobs;
 	vector[n_children] avg_yearly_growth_obs;
@@ -64,7 +70,7 @@ data {
 
 	// Explanatory variables
 	vector<lower = 0>[n_climate] precip; // Precipitations
-	real pr_mu; // To standardise the precipitations
+	real<lower = 0> pr_mu; // To standardise the precipitations
 	real<lower = 0> pr_sd; // To standardise the precipitations
 
 	vector[n_climate] tas; // Temperature
@@ -79,14 +85,14 @@ data {
 	real ba_mu; // To standardise the basal area
 	real<lower = 0> ba_sd; // To standardise the basal area
 
-	array [3*n_climate_new] real x_r; // Contains in this order: pr, ts, basal area, each of size n_climate_new, and already standardised
+	array [4*n_climate_new] real x_r; // Contains in this order: pr, ts, ph, basal area, each of size n_climate_new, and already standardised
 }
 
 transformed data {
 	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_children] normalised_avg_yearly_growth_obs = avg_yearly_growth_obs/sd_dbh; // Normalised but NOT centred averaged yearly growth
-	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centered precipitations
-	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centered temperatures
+	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
+	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
 	vector[n_plots] normalised_ph = (ph - ph_mu)/ph_sd; // Normalised and centred pH
 	vector[n_climate] normalised_standBasalArea = (standBasalArea - ba_mu)/ba_sd; // Normalised and centred BA
 
@@ -100,6 +106,7 @@ parameters {
 	// Parameters for growth function
 	real averageGrowth;
 	real dbh_slope;
+	real dbh_slope2;
 
 	real pr_slope;
 	real pr_slope2;
@@ -129,13 +136,14 @@ generated quantities {
 	array [n_climate_new] real average_growth_sim;
 	
 	{
-		array [3] int index;
+		array [4] int index;
 
 		for (i in 1:n_climate_new)
 		{
-			index = {i, i + n_climate_new, i + 2*n_climate_new}; // To get the i^th value of precip, temp, and basal area, respectively
+			// Extract the i^th value of precipitation, temperature, pH, and basal area, respectively
+			index = {i, i + n_climate_new, i + 2*n_climate_new, i + 3*n_climate_new};
 			average_growth_sim[i] = integrate_1d(growth_integrand, normalised_lower_bound, normalised_upper_bound,
-				{averageGrowth, dbh_slope, pr_slope, pr_slope2, tas_slope, tas_slope2, competition_slope},
+				{averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope},
 				x_r[index], x_i)/(normalised_upper_bound - normalised_lower_bound);
 		}
 	}
