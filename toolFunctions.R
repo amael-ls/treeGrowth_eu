@@ -519,7 +519,7 @@ energyPairs = function(path, run, results, nb_nfi, energy, rm_names = c("latent"
 	filename = paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "pairs.pdf")
 
 	params_names = results$metadata()$stan_variables
-	params_names = params_names[params_names != "averageGrowth"]
+
 	for (i in 1:length(rm_names))
 		params_names = params_names[!stri_detect(params_names, regex = rm_names[i])]
 	
@@ -764,7 +764,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 			sd = c(stanData$pr_sd, stanData$tas_sd, stanData$ph_sd, stanData$ba_sd))
 
 		params = getParams(results, c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "tas_slope", "ph_slope", "competition_slope",
-			"pr_slope2", "tas_slope2", "ph_slope2"))
+			"pr_slope2", "tas_slope2", "ph_slope2", "sigmaProc"))
 
 		
 		pdf(paste0(path, "growth_curve.pdf"))
@@ -989,7 +989,6 @@ plot_correl_error = function(error_dt, correl_dt, threshold_correl = 0.1, rm_cor
 checkFunnels = function(results, param, nb_nfi, rm_names = c("latent", "Effect", "lp__"), n_rows = 3, n_cols = 6, filename = NULL)
 {
 	params_names = results$metadata()$stan_variables
-	params_names = params_names[params_names != "averageGrowth"]
 	
 	for (i in 1:length(rm_names))
 		params_names = params_names[!stri_detect(params_names, regex = rm_names[i])]
@@ -1300,7 +1299,7 @@ probaExtremeObs = function(posteriorSim, ...)
 ## Function to rescale parameters (intercept and slopes)
 rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 {
-	required_params = c("averageGrowth_mu", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope",
+	required_params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope",
 		"tas_slope2", "ph_slope", "ph_slope2", "competition_slope", "sigmaProc")
 	
 	if (!all(names(params) %in% required_params))
@@ -1313,7 +1312,7 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 		stop("Some required sd are missing")
 	
 	# beta_0 = scaled beta_0 - Σ scaled gamma_i * mu_i/sd_i + Σ scaled delta_j * mu_j^2/sd_j^2
-	intercept_rescale = params["averageGrowth_mu"] - params["pr_slope"]*mu_predictors["pr"]/sd_predictors["pr"] -
+	intercept_rescale = params["averageGrowth"] - params["pr_slope"]*mu_predictors["pr"]/sd_predictors["pr"] -
 		params["tas_slope"]*mu_predictors["tas"]/sd_predictors["tas"] - params["ph_slope"]*mu_predictors["ph"]/sd_predictors["ph"] -
 		params["competition_slope"]*mu_predictors["basalArea"]/sd_predictors["basalArea"] +
 		params["pr_slope2"]*mu_predictors["pr"]^2/sd_predictors["pr"]^2 +
@@ -1348,7 +1347,7 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 	errors_rescale = numeric(1)
 	names(errors_rescale) = c("sigmaProc")
 
-	errors_rescaled["sigmaProc"] = sd_dbh^2*params["sigmaProc"]
+	errors_rescaled["sigmaProc"] = sd_dbh^2*params["sigmaProc"] #! NOT SURE OF THIS!!! I THINK IT DOES NOT WORK NOW THAT I USE LOGNORMAL
 
 	return (list(intercept_rescale = intercept_rescale, slope_dbh_rescale = slope_dbh_rescale,
 		slope_quadratic_dbh_rescale = slope_quadratic_dbh_rescale, slope_predictors_rescale = slope_predictors_rescale,
@@ -1375,7 +1374,19 @@ computeGrowth = function(dt, col = "growth", byCols = c("plot_id", "tree_id"), r
 		dt[, deltaYear := shift(year, n = 1, type = "lead", fill = NA) - year, by = byCols]
 }
 
+## Function computing the expected growth in the case growth ~ lognormal
 growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_dbh = TRUE, standardised_params = TRUE,
+	standardised_variables = FALSE, ...)
+{
+	sigmaProc = params[["sigmaProc"]]
+	G_average = exp(growth_fct_meanlog(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_dbh,
+		standardised_params, standardised_variables, ...) + sigmaProc^2/2) # Formula from the average of a lognormal
+	
+	return (G_average);
+}
+
+## Function computing the expected growth on the log scale (i.e., corresponds to the parameter meanlog of lognormal distribution)
+growth_fct_meanlog = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_dbh = TRUE, standardised_params = TRUE,
 	standardised_variables = FALSE, ...)
 {
 	G = NaN
