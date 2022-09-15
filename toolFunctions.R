@@ -637,7 +637,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		# For process error (sigmaProc), it is a variance (of a gamma distrib)
 		sigmaProc_array = results$draws("sigmaProc")
 		lazyPosterior(draws = sigmaProc_array, fun = dlnorm, filename = paste0(path, "sigmaProc_posterior"), params = "process error",
-			meanlog = log(1.28) - log(sd_dbh), sdlog = 0.16, run = run, expand_bounds = TRUE)
+			meanlog = log(1.28) - log(sd_dbh), sdlog = 0.09, run = run, expand_bounds = TRUE)
 
 		lazyTrace(draws = sigmaProc_array, filename = paste0(path, "sigmaProc_traces"), run = run)
 
@@ -650,7 +650,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		# --- Routine measurement error (sigmaObs), it is a sd (of a normal distrib)
 		sigmaObs_array = results$draws("sigmaObs")
 		lazyPosterior(draws = sigmaObs_array, fun = dgamma, filename = paste0(path, "sigmaObs_posterior"), run = run, xlab = "Error in mm",
-			shape = 3.0/0.025, rate = sd_dbh*sqrt(3.0)/0.025, params = "routine obs error", multi = multi_NFI, scaling = sd_dbh,
+			shape = 3.5/2.5, rate = sd_dbh*sqrt(3.5)/2.5, params = "routine obs error", multi = multi_NFI, scaling = sd_dbh,
 			ls_nfi = ls_nfi, expand_bounds = TRUE)
 
 		# --- Extreme error (etaObs), it is a sd (of a normal distrib)...
@@ -763,27 +763,67 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 			mu = c(stanData$pr_mu, stanData$tas_mu, stanData$ph_mu, stanData$ba_mu),
 			sd = c(stanData$pr_sd, stanData$tas_sd, stanData$ph_sd, stanData$ba_sd))
 
-		params = getParams(results, c("averageGrowth", "dbh_slope", "pr_slope", "tas_slope", "ph_slope", "competition_slope",
+		params = getParams(results, c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "tas_slope", "ph_slope", "competition_slope",
 			"pr_slope2", "tas_slope2", "ph_slope2"))
 
+		
 		pdf(paste0(path, "growth_curve.pdf"))
+		par(mar = c(5, 4, 4, 10), xpd = TRUE)
+		# Empty plot
+		# --- Bounds for x-axis
+		v = seq(50, 3500, by = 50)
+		dbh_min = min(stanData[["Yobs"]])
+		dbh_max = max(stanData[["Yobs"]])
+
+		if ((dbh_min < 50) | (dbh_max > 3000))
+			stop("dbh range out of bounds 50 and 3500")
+
+		x_min = v[min(which(abs(dbh_min - v) == min(abs(dbh_min - v))))]
+		x_max = v[max(which(abs(dbh_max - v) == min(abs(dbh_max - v))))]
+
+		# --- Bounds for y-axis
+		y_min = min(
+			optimize(growth_fct, interval = c(x_min, x_max), tol = 1e-4, maximum = FALSE, pr = pr_q25, tas = tas_q25, ph = ph_q25,
+				basalArea = ba_q25, params = params, sd_dbh = sd_dbh, standardised_dbh = FALSE, scaling = scaling)$objective,
+			optimize(growth_fct, interval = c(x_min, x_max), tol = 1e-4, maximum = FALSE, pr = pr_q25, tas = tas_q75, ph = ph_q25,
+				basalArea = ba_q25, params = params, sd_dbh = sd_dbh, standardised_dbh = FALSE, scaling = scaling)$objective,
+			optimize(growth_fct, interval = c(x_min, x_max), tol = 1e-4, maximum = FALSE, pr = pr_q75, tas = tas_q25, ph = ph_q25,
+				basalArea = ba_q25, params = params, sd_dbh = sd_dbh, standardised_dbh = FALSE, scaling = scaling)$objective,
+			optimize(growth_fct, interval = c(x_min, x_max), tol = 1e-4, maximum = FALSE, pr = pr_q75, tas = tas_q75, ph = ph_q25,
+				basalArea = ba_q25, params = params, sd_dbh = sd_dbh, standardised_dbh = FALSE, scaling = scaling)$objective)
+
+		y_max = max(
+			optimize(growth_fct, interval = c(x_min, x_max), tol = 1e-4, maximum = TRUE, pr = pr_q25, tas = tas_q25, ph = ph_q25,
+				basalArea = ba_q25, params = params, sd_dbh = sd_dbh, standardised_dbh = FALSE, scaling = scaling)$objective,
+			optimize(growth_fct, interval = c(x_min, x_max), tol = 1e-4, maximum = TRUE, pr = pr_q25, tas = tas_q75, ph = ph_q25,
+				basalArea = ba_q25, params = params, sd_dbh = sd_dbh, standardised_dbh = FALSE, scaling = scaling)$objective,
+			optimize(growth_fct, interval = c(x_min, x_max), tol = 1e-4, maximum = TRUE, pr = pr_q75, tas = tas_q25, ph = ph_q25,
+				basalArea = ba_q25, params = params, sd_dbh = sd_dbh, standardised_dbh = FALSE, scaling = scaling)$objective,
+			optimize(growth_fct, interval = c(x_min, x_max), tol = 1e-4, maximum = TRUE, pr = pr_q75, tas = tas_q75, ph = ph_q25,
+				basalArea = ba_q25, params = params, sd_dbh = sd_dbh, standardised_dbh = FALSE, scaling = scaling)$objective)
+
+		plot(0, type = "n", xlab = "dbh (in mm)", ylab = "Growth (in mm/yr)", xlim = c(x_min, x_max), ylim = c(y_min, y_max))
+
+		# Plot curves
 		curve(
 			growth_fct(x, pr_q25, tas_q25, ph_q25, ba_q25, params, sd_dbh, scaling = scaling, standardised_dbh = FALSE),
-				from = 50, to = 500, lwd = 2, lty = 2, col = "#34568B")
+				from = x_min, to = x_max, lwd = 2, lty = 2, col = "#34568B", add = TRUE)
 		
 		curve(
 			growth_fct(x, pr_q25, tas_q75, ph_q25, ba_q25, params, sd_dbh, scaling = scaling, standardised_dbh = FALSE),
-				from = 50, to = 500, lwd = 2, lty = 2, col = "#CD212A", add = TRUE)
+				from = x_min, to = x_max, lwd = 2, lty = 2, col = "#CD212A", add = TRUE)
 		
 		curve(
 			growth_fct(x, pr_q75, tas_q25, ph_q25, ba_q25, params, sd_dbh, scaling = scaling, standardised_dbh = FALSE),
-				from = 50, to = 500, lwd = 2, col = "#34568B", add = TRUE)
+				from = x_min, to = x_max, lwd = 2, col = "#34568B", add = TRUE)
 		
 		curve(
 			growth_fct(x, pr_q75, tas_q75, ph_q25, ba_q25, params, sd_dbh, scaling = scaling, standardised_dbh = FALSE),
-				from = 50, to = 500, lwd = 2, col = "#CD212A", add = TRUE)
+				from = x_min, to = x_max, lwd = 2, col = "#CD212A", add = TRUE)
+		
+		legend(x = "topright", inset = c(-0.45, 0), legend = c("P 25 and T 25", "P 25 and T 75", "P 75 and T 25", "P 75 and T 75"),
+			lty = c(2, 2, 1, 1), col = c("#34568B", "#CD212A", "#34568B", "#CD212A"), lwd = 2, bty = "n")
 		dev.off()
-
 	}
 	return (output)
 }
@@ -1260,7 +1300,7 @@ probaExtremeObs = function(posteriorSim, ...)
 ## Function to rescale parameters (intercept and slopes)
 rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 {
-	required_params = c("averageGrowth_mu", "dbh_slope", "pr_slope", "pr_slope2", "tas_slope",
+	required_params = c("averageGrowth_mu", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope",
 		"tas_slope2", "ph_slope", "ph_slope2", "competition_slope", "sigmaProc")
 	
 	if (!all(names(params) %in% required_params))
@@ -1282,7 +1322,11 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 	
 	# beta_1 = scaled beta_1/sd_dbh
 	slope_dbh_rescale = params["dbh_slope"]/sd_dbh
+	
+	# beta_2 = scaled beta_2/sd_dbh^2
+	slope_quadratic_dbh_rescale = params["dbh_slope2"]/sd_dbh^2
 
+	# Predictors (gammas and deltas)
 	slope_predictors_rescale = numeric(4)
 	names(slope_predictors_rescale) = c("pr_slope", "tas_slope", "ph_slope", "competition_slope")
 
@@ -1307,8 +1351,8 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 	errors_rescaled["sigmaProc"] = sd_dbh^2*params["sigmaProc"]
 
 	return (list(intercept_rescale = intercept_rescale, slope_dbh_rescale = slope_dbh_rescale,
-		slope_predictors_rescale = slope_predictors_rescale, slope_quadratic_predictors_rescale = slope_quadratic_predictors_rescale,
-		errors_rescale = errors_rescale))
+		slope_quadratic_dbh_rescale = slope_quadratic_dbh_rescale, slope_predictors_rescale = slope_predictors_rescale,
+		slope_quadratic_predictors_rescale = slope_quadratic_predictors_rescale, errors_rescale = errors_rescale))
 }
 
 ## Function to compute growth, the data table must be sorted by year within tree id and plot id
@@ -1346,6 +1390,7 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 		intercept = params[["intercept_rescale"]]
 
 		dbh_slope = params[["slope_dbh_rescale"]]
+		dbh_slope2 = params[["slope_quadratic_dbh_rescale"]]
 		
 		pr_slope = params[["slope_predictors_rescale"]]["pr_slope"]
 		tas_slope = params[["slope_predictors_rescale"]]["tas_slope"]
@@ -1356,7 +1401,7 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 		tas_slope2 = params[["slope_quadratic_predictors_rescale"]]["tas_slope2"]
 		ph_slope2 = params[["slope_quadratic_predictors_rescale"]]["ph_slope2"]
 		
-		G = sd_dbh * exp(intercept + dbh_slope*dbh + pr_slope*pr + pr_slope2*pr^2 + tas_slope*tas + tas_slope2*tas^2 +
+		G = sd_dbh * exp(intercept + dbh_slope*dbh + dbh_slope2*dbh^2 + pr_slope*pr + pr_slope2*pr^2 + tas_slope*tas + tas_slope2*tas^2 +
 			ph_slope*ph + ph_slope2*ph^2 + competition_slope*basalArea)
 	}
 
@@ -1403,6 +1448,7 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 		intercept = params["averageGrowth"]
 
 		dbh_slope = params["dbh_slope"]
+		dbh_slope2 = params["dbh_slope2"]
 		
 		pr_slope = params["pr_slope"]
 		tas_slope = params["tas_slope"]
@@ -1413,7 +1459,7 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 		tas_slope2 = params["tas_slope2"]
 		ph_slope2 = params["ph_slope2"]
 		
-		G = sd_dbh * exp(intercept + dbh_slope*dbh + pr_slope*pr + pr_slope2*pr^2 + tas_slope*tas + tas_slope2*tas^2 +
+		G = sd_dbh * exp(intercept + dbh_slope*dbh + dbh_slope2*dbh^2 + pr_slope*pr + pr_slope2*pr^2 + tas_slope*tas + tas_slope2*tas^2 +
 			ph_slope*ph + ph_slope2*ph^2 + competition_slope*basalArea)
 	}
 
@@ -1421,3 +1467,35 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 		warning("This combination of scaled and non scaled is not coded")
 	return (G)	
 }
+
+# f = function(m, v, percentage = TRUE)
+# {
+# 	if (percentage)
+# 	{
+# 		m = m/100
+# 		v = v/1e4
+# 	}
+
+# 	if ((m <= 0) | (m >= 1))
+# 		stop ("Mean is out of bound")
+
+# 	if ((v >= m*(1 - m)) | v <= 0)
+# 		stop ("Variance is out of bound")
+
+
+# 	alpha = (m*(1 - m)/v - 1)*m
+# 	beta = (m*(1 - m)/v - 1)*(1 - m)
+
+# 	return (list(alpha = alpha, beta = beta))
+# }
+
+# r = f(0.5, 0.2)
+# print(r)
+
+# curve(dbeta(x, shape1 = r[["alpha"]], shape2 = r[["beta"]]), to = 0.08)
+# aa = rbeta(1e7, shape1 = r[["alpha"]], shape2 = r[["beta"]])
+# 100*mean(aa)
+# 100*sd(aa)
+# 10000*var(aa)
+
+# var_ana = 1e4*r[["alpha"]]*r[["beta"]]/((r[["alpha"]] + r[["beta"]])^2*(r[["alpha"]] + r[["beta"]] + 1))
