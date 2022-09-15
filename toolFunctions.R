@@ -1467,35 +1467,3 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 		warning("This combination of scaled and non scaled is not coded")
 	return (G)	
 }
-
-# f = function(m, v, percentage = TRUE)
-# {
-# 	if (percentage)
-# 	{
-# 		m = m/100
-# 		v = v/1e4
-# 	}
-
-# 	if ((m <= 0) | (m >= 1))
-# 		stop ("Mean is out of bound")
-
-# 	if ((v >= m*(1 - m)) | v <= 0)
-# 		stop ("Variance is out of bound")
-
-
-# 	alpha = (m*(1 - m)/v - 1)*m
-# 	beta = (m*(1 - m)/v - 1)*(1 - m)
-
-# 	return (list(alpha = alpha, beta = beta))
-# }
-
-# r = f(0.5, 0.2)
-# print(r)
-
-# curve(dbeta(x, shape1 = r[["alpha"]], shape2 = r[["beta"]]), to = 0.08)
-# aa = rbeta(1e7, shape1 = r[["alpha"]], shape2 = r[["beta"]])
-# 100*mean(aa)
-# 100*sd(aa)
-# 10000*var(aa)
-
-# var_ana = 1e4*r[["alpha"]]*r[["beta"]]/((r[["alpha"]] + r[["beta"]])^2*(r[["alpha"]] + r[["beta"]] + 1))
