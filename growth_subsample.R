@@ -195,7 +195,7 @@ normalisation = function(dt, colnames = names(df), folder = "./", filename = "no
 
 			rowsToKeep = integer(length = sum(col_end - col_start + 1))
 			count = 1
-			for (i in 1:length(col_start))
+			for (i in seq_along(col_start))
 			{
 				rowsToKeep[count:(count + col_end[i] - col_start[i])] = col_start[i]:col_end[i]
 				count = count + col_end[i] - col_start[i] + 1
