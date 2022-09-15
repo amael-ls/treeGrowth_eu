@@ -12,6 +12,9 @@
 #	The opencl_ids is supplied as a vector of length 2, where the first element is the platform ID and the second argument is the device ID.
 #	In this case it is (0, 0) or (0, 1) if the second device is desired
 
+#! TRY ON GERMAN DATA, THE FRENCH DATA ARE NOT ADAPTED TO THE WAY WE MODEL GROWTH!
+#! THE FRENCH DATA DO NOT MEASURE DBH THE FIRST TIME, THEY DO A DENDROCHRONO. THIS IS WHY THERE IS NO ERROR ON THAT PART.
+
 #### Clear memory and load packages
 rm(list = ls())
 graphics.off()
@@ -290,10 +293,19 @@ ls_species = sort(treeData[, unique(speciesName_sci)])
 if ((species_id < 1) | (species_id > length(ls_species)))
 	stop(paste0("Species id = ", species_id, " has no corresponding species (i.e., either negative or larger than the number of species)"))
 
+speciesCountry = treeData[, .N, by = .(speciesName_sci, country)]
+setkey(speciesCountry, speciesName_sci)
+setnames(speciesCountry, "N", "n_measurements")
+
 species = ls_species[species_id]
 print(paste("Script running for species:", species))
+print(speciesCountry[species])
 
-treeData = treeData[speciesName_sci == species]
+if (!("germany" %in% speciesCountry[species, country]))
+	stop("Germany is missing")
+
+treeData = treeData[speciesName_sci == species & country == "germany"]
+
 savingPath = paste0("./", species, "/")
 
 if (!dir.exists(savingPath))
@@ -340,6 +352,8 @@ if (length(onlyTwoMeasures) != n_indiv)
 ## Compute growth
 computeDiametralGrowth(treeData, byCols = c("speciesName_sci", "plot_id", "tree_id"))
 growth_dt = na.omit(treeData)
+
+print(paste0(round(100*growth_dt[growth < 0 | growth > 10, .N]/growth_dt[, .N], 3), "% negative or above 10 mm/yr"))
 
 ## Read climate
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
@@ -534,7 +548,7 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_widerEtaPrior_widerProba.rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_widerEtaPrior_widerProba_germany_1000_simplified.rds"))
 
 results$cmdstan_diagnose()
 
@@ -673,3 +687,33 @@ results$print(c("lp__", "averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", 
 # curve(dlnorm(x, meanlog = log(1.28), sdlog = 0.09), from = 0, to = 5)
 # curve(dlnorm(x, meanlog = log(1.28) - 2, sdlog = 0.5), add = TRUE, col = "#126578")
 
+# #### Study of Rüger 2011's parameters
+# alpha0 = -0.437
+# alpha1 = -0.162
+# sigma_a = 0.565
+
+# beta0 = 0.756
+# beta1 =  -0.143
+# sigma_b = 0.226
+
+# gamma0 = -0.102
+# gamma1 = 0.048
+# sigma_c = 0.301
+
+# abund = 370
+# light = 0.1
+# dbh = 124
+
+# set.seed(1)
+
+# aj = alpha0 + alpha1*log10(abund) # rnorm(1, alpha0 + alpha1*log10(abund), sigma_a)
+# bj = beta0 + beta1*log10(abund) # rnorm(1, beta0 + beta1*log10(abund), sigma_b)
+# cj = gamma0 + gamma1*log10(abund) # rnorm(1, gamma0 + gamma1*log10(abund), sigma_c)
+
+# sigmaProc = rlnorm(1, meanlog = log(1.28), sdlog = 0.16)
+
+# print(mean(rlnorm(1e6, meanlog = log(1.28), sdlog = 0.16)))
+
+# expectedG = exp(aj + bj*(log(light) - log(0.05)) + cj*(log(dbh) - log(50)))
+
+# curve(dlnorm(x, meanlog = expectedG, sdlog = sigmaProc), to = 10)
