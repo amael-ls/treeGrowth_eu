@@ -20,13 +20,18 @@ source("./toolFunctions.R")
 ## Species informations
 infoSpecies = readRDS("./speciesInformations.rds")
 
-n_runs = 4 # Number of runs used in growth_subsample.R
-threshold_indiv = 8000 # Minimal number of individuals required to use multi runs
-threshold_time = as.Date("2022/07/25") # Results anterior to this date will not be considered
+n_runs = 1 # Number of runs used in growth_subsample.R
+threshold_indiv = 1000 # Minimal number of individuals required to use multi runs
+threshold_time = as.Date("2022/09/12") # Results anterior to this date will not be considered
 
 infoSpecies[, multiRun := if (n_indiv > threshold_indiv) TRUE else FALSE, by = speciesName_sci]
 infoSpecies[, processed := isProcessed(speciesName_sci, multiRun, threshold_time, lower = 1, upper = n_runs), by = speciesName_sci]
 infoSpecies = infoSpecies[(processed)]
+
+infoSpecies[, n_nfi := 1]
+infoSpecies[, ls_nfi := "DE BWI"]
+infoSpecies[, ls_countries := "germany"]
+infoSpecies[, multiRun := FALSE]
 
 error_ls = vector(mode = "list", length = infoSpecies[, .N])
 names(error_ls) = infoSpecies[, speciesName_sci]
@@ -40,15 +45,15 @@ names(posterior_ls) = infoSpecies[, speciesName_sci]
 ls_files = character(length = infoSpecies[, .N])
 names(ls_files) = infoSpecies[, speciesName_sci]
 
-params_dt = data.table(parameters = c("averageGrowth", "dbh_slope", "pr_slope", "pr_slope2",
+params_dt = data.table(parameters = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2",
 	"tas_slope", "tas_slope2", "ph_slope", "ph_slope2", "competition_slope"),
-	priors = c(dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm),
-	arg1 = c(-4, 0, 0, 0, 0, 0, 0, 0, 0),
-	arg2 = c(10, 5, 5, 5, 5, 5, 5, 5, 5),
-	title = c("Average growth (mean)", "Dbh slope", "Precipitation slope", "Precipitation slope (quadratic term)",
-		"Temperature slope", "Temperature slope (quadratic term)", "Soil acidity slope (pH)", "Soil acidity slope (pH, quadratic term)",
-		"Competition slope"),
-	expand_bounds = c(FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE))
+	priors = c(dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm),
+	arg1 = c(-4, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+	arg2 = c(10, 5, 5, 5, 5, 5, 5, 5, 5, 5),
+	title = c("Average growth (mean)", "Dbh slope", "Dbh slope (quadratic term)", "Precipitation slope",
+		"Precipitation slope (quadratic term)", "Temperature slope", "Temperature slope (quadratic term)", "Soil acidity slope (pH)",
+		"Soil acidity slope (pH, quadratic term)", "Competition slope"),
+	expand_bounds = c(FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE))
 
 setkey(params_dt, parameters)
 
@@ -97,7 +102,63 @@ abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, 
 abiesGrandis = dbh_timeSeries(posterior_ls[["Abies grandis"]], plotMean = TRUE, filename = "timeSeries_germany.pdf",
 	plot_id = "germany_26304_2", tree_id = 5)
 
+## Quercus robur
+quercusRobus = dbh_timeSeries(posterior_ls[["Quercus robur"]], plotMean = TRUE, filename = "timeSeries_normal.pdf",
+	plot_id = "germany_10151_4", tree_id = 3) # 2 measurements, average growth of 4.54 mm/yr (realistic)
 
+quercusRobus = dbh_timeSeries(posterior_ls[["Quercus robur"]], plotMean = TRUE, filename = "timeSeries_2measures_wrong.pdf",
+	plot_id = "germany_45459_4", tree_id = 1) # 2 measurements, unrealistic growth (17.8 mm/yr)
+
+#         plot_id  tree_id   growth    which_line (added by me)
+# germany_45459_4        1   17.800           756
+# germany_10151_4        3    4.600             2
+# germany_10220_1        2    2.888
+# germany_10220_1        3    2.666
+
+#### Probability a measurement is from the extreme distribution
+quercus_robur = posterior_ls[["Quercus robur"]]
+
+proba_extreme_obs_array = quercus_robur[["posterior_draws"]]$draws("proba_extreme_obs") # n_iter_sampling * n_chains * n_latent_states
+
+proba_extreme_obs_array[, , 1512] # Correspond to plot_id = germany_45459_4, tree_id = 1 which is obviously wrong
+proba_extreme_obs_array[, , 2] # Correspond to plot_id = germany_10151_4, tree_id = 3, which is a normal tree
+
+selectedTrees = proba_extreme_obs_array[, , c(2, 1512)]
+mean(selectedTrees[, , 1]) # Normal measurement
+mean(selectedTrees[, , 2]) # Obviously wrong measurement
+
+dd = dim(selectedTrees)
+
+colours = MetBrewer::met.brewer("Hokusai3", dd[2]*dd[3])
+colours_str = grDevices::colorRampPalette(colours)(dd[2]*dd[3])
+
+pdf("chains_proba_extreme.pdf", height = 11.25, width = 20)
+
+plot(0, type = "n", xlim = c(0, dd[1]), ylim = c(0, 1), ylab = "proba extreme error", xlab = "Iterations")
+
+for (param in 1:dd[3])
+{
+	for (chain in 1:dd[2])
+		lines(1:dd[1], selectedTrees[, chain, param], col = colours_str[(param - 1)*dd[2] + chain])
+}
+
+abline(h = mean(selectedTrees[, , 1]), col = "#CD212A")
+axis(2, at = mean(selectedTrees[, , 1]), round(mean(selectedTrees[, , 1]), 2), las = 1)
+
+legend(x = "topleft", legend = c(paste("Normal ", 1:dd[2]), paste("Wrong ", 1:dd[2])), fill = colours_str, box.lwd = 0)
+
+dev.off()
+
+lazyPosterior(selectedTrees[, , 1], fun = dbeta, filename = "normal", shape1 = 48.67, shape2 = 1714.84, n = 10000)
+lazyPosterior(selectedTrees[, , 2], fun = dbeta, filename = "wrong", shape1 = 48.67, shape2 = 1714.84, n = 10000)
+
+
+#### Plot correlations between parameters using the function checkFunnels
+results = readRDS("Quercus robur/growth-run=1-2022-09-13_08h43_widerEtaPrior_widerProba_germany_1000.rds")
+checkFunnels(results, param = "sigmaProc", 1, filename = "Quercus robur/correlations_sigmaProc.pdf")
+
+
+####! No idea what follows
 
 example = data.table(year = rep(2000:2011, each = 3000), draw = rep(1:3000, each = 12), growth = 0)
 for (i in 1:12)
@@ -548,9 +609,9 @@ dev.off()
 
 ## Check the proportion of unrealistic growth
 # Load results
-results = readRDS("Tilia platyphyllos/ruger_growth-run=1-2022-07-30_03h16_ruger.rds")
-stanData = readRDS("Tilia platyphyllos/1_stanData.rds")
-sd_dbh = readRDS("Tilia platyphyllos/1_dbh_normalisation.rds")[, sd]
+results = readRDS("Fagus sylvatica/growth-run=1-2022-09-13_13h26_widerEtaPrior_widerProba_germany_1000.rds")
+stanData = readRDS("Fagus sylvatica/1_stanData.rds")
+sd_dbh = readRDS("Fagus sylvatica/1_dbh_normalisation.rds")[, sd]
 
 posterior_latent_growth = sd_dbh*results$draws("latent_growth") # (iter_sampling, n_chains, n_latentGrowth)
 
@@ -577,7 +638,7 @@ n_chains = results$num_chains()
 
 # Change data (fixed environment, size grandient)
 set.seed(1969-08-18)
-indices = readRDS("Tilia platyphyllos/1_indices.rds")
+indices = readRDS("Fagus sylvatica/1_indices.rds")
 patch_id = sample(x = 1:indices[.N, plot_index], size = 1)
 
 precip = mean(stanData$precip[indices[plot_index == patch_id, unique(index_clim_start)]:
