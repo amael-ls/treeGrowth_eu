@@ -30,7 +30,7 @@ getParams = function(model_cmdstan, params_names, type = "mean")
 	
 	vals = numeric(length(params_names))
 	names(vals) = params_names
-	for (i in 1:length(params_names))
+	for (i in seq_along(params_names))
 	{
 		vals[i] = ifelse(type == "mean",
 			mean(model_cmdstan$draws(params_names[i])),
@@ -499,13 +499,13 @@ expand = function(base_names, nb_nfi, patterns = c("Obs", "proba"))
 	
 	new_names = vector(mode = "list", length = length(patterns))
 	old_names = base_names
-	for (i in 1:length(patterns))
+	for (i in seq_along(patterns))
 	{
 		reg = patterns[i]
 		toModify = base_names[stri_detect(base_names, regex = reg)]
 		base_names = base_names[!stri_detect(base_names, regex = reg)]
 		new_names[[i]] = character(length = nb_nfi*length(toModify))
-		for (j in 1:length(toModify))
+		for (j in seq_along(toModify))
 			new_names[[i]][((j - 1)*nb_nfi + 1):(j*nb_nfi)] = paste0(toModify[j], "[", 1:nb_nfi, "]")
 	}
 
@@ -520,7 +520,7 @@ energyPairs = function(path, run, results, nb_nfi, energy, rm_names = c("latent"
 
 	params_names = results$metadata()$stan_variables
 
-	for (i in 1:length(rm_names))
+	for (i in seq_along(rm_names))
 		params_names = params_names[!stri_detect(params_names, regex = rm_names[i])]
 	
 	if (nb_nfi > 1)
@@ -990,7 +990,7 @@ checkFunnels = function(results, param, nb_nfi, rm_names = c("latent", "Effect",
 {
 	params_names = results$metadata()$stan_variables
 	
-	for (i in 1:length(rm_names))
+	for (i in seq_along(rm_names))
 		params_names = params_names[!stri_detect(params_names, regex = rm_names[i])]
 
 	if (nb_nfi > 1)
@@ -1144,7 +1144,7 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 		iter_div = divergences %% n_iter
 		iter_div[iter_div == 0] = n_iter
 		chain_div = (divergences - iter_div) %% n_chains + 1
-		for (i in 1:length(divergences))
+		for (i in seq_along(divergences))
 			lines(x = min_yr:max_yr, y = draws[iter, chain, ], col = "#EF8A47", lwd = 0.75)
 		output = append(output, list(divergences = c(iter_div = iter_div, chain_div = chain_div)))
 	}
