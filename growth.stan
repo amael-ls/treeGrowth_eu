@@ -212,7 +212,8 @@ model {
 		sigmaObs: 0.01209929
 		etaObs: 0.1788352
 	*/
-	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16);
+	// target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16);
+	target += gamma_lpdf(sigmaProc | 2.0/1.0, sd_dbh*sqrt(2)/1.0);
 	target += gamma_lpdf(sigmaObs | 3.5/1, sd_dbh*sqrt(3.5)/1); // <=> routine measurement error (sd) = sqrt(3.5) mm ± 1 mm
 	target += gamma_lpdf(etaObs | 30^2/45.0, sd_dbh*30/45.0); // <=> extreme measurement error (sd) = 30 mm ± 6.7 mm
 	
