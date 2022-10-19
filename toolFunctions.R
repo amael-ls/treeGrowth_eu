@@ -25,17 +25,28 @@
 ## Get fixed values parameters
 getParams = function(model_cmdstan, params_names, type = "mean")
 {
-	if (!(type %in% c("mean", "median")))
-		stop("Unknown type. Please choose median or mean")
+	if (!(type %in% c("mean", "median", "quantile")))
+		stop("Unknown type. Please choose median, quantile, or mean")
 	
-	vals = numeric(length(params_names))
-	names(vals) = params_names
-	for (i in seq_along(params_names))
+	if (type != "quantile")
 	{
-		vals[i] = ifelse(type == "mean",
-			mean(model_cmdstan$draws(params_names[i])),
-			median(model_cmdstan$draws(params_names[i])))
+		vals = numeric(length(params_names))
+		names(vals) = params_names
+		for (i in seq_along(params_names))
+		{
+			vals[i] = ifelse(type == "mean",
+				mean(model_cmdstan$draws(params_names[i])),
+				median(model_cmdstan$draws(params_names[i])))
+		}
+	} else {
+		vals = data.table(parameter = params_names, q5 = 0, med = 0, avg = 0, q95 = 0)
+		for (i in seq_along(params_names))
+		{
+			vals[i, c("q5", "med", "q95") := as.list(quantile(model_cmdstan$draws(params_names[i]), c(0.05, 0.5, 0.95)))]
+			vals[i, avg := mean(model_cmdstan$draws(params_names[i]))]
+		}
 	}
+	
 	return (vals)
 }
 
