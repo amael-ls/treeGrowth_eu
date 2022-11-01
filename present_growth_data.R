@@ -16,6 +16,9 @@ library(data.table)
 library(stringi)
 library(terra)
 
+if (!nzchar(system.file(package = "MetBrewer")))
+	install.packages("MetBrewer")
+
 #### Tool functions
 collectEnvironment = function(trees_dt, env_dt, climVars = c("pr", "tas"), file = NULL)
 {
@@ -132,4 +135,41 @@ if (!env[["loaded"]])
 
 climBounds = computeEnvironment(treeData, env[["env"]],
 	ls_species = c("Betula pendula", "Fagus sylvatica", "Pinus sylvestris", "Quercus robur"))
+
+#### Plot climate data per species
+## Common variables
+setkey(climBounds, speciesName_sci, stats)
+ls_species = climBounds[, unique(speciesName_sci)]
+
+ls_vars = colnames(climBounds)[!(colnames(climBounds) %in% c("speciesName_sci", "stats"))]
+y_max = length(ls_species) - 1
+
+for (currentVar in ls_vars)
+{
+	pdf (paste0(currentVar, ".pdf"), height = 6, width = 9.708204)
+	x_min = min(climBounds[stats == "p05", ..currentVar])
+	x_max = max(climBounds[stats == "p95", ..currentVar])
+
+	counter = 0
+
+	plot(0, type = "n", axes = FALSE, ann = FALSE, xlim = c(x_min, x_max), ylim = c(0, y_max + 0.5))
+	par(mar = c(3, 3, 2, 2), oma = c(0, 8, 0, 3))
+
+	for (species in ls_species)
+	{
+		segments(x0 = unlist(climBounds[.(species, "p05"), ..currentVar]), y0 = counter,
+			x1 = unlist(climBounds[.(species, "p95"), ..currentVar]))
+		segments(x0 = unlist(climBounds[.(species, "p05"), ..currentVar]), y0 = counter - 0.05, y1 = counter + 0.05, lwd = 2)
+		points(x = unlist(climBounds[.(species, "med"), ..currentVar]), y = counter, col = "#95C36E", bg = "#95C36E", pch = 23)
+		segments(x0 = unlist(climBounds[.(species, "p95"), ..currentVar]), y0 = counter - 0.05, y1 = counter + 0.05, lwd = 2)
+		points(x = unlist(climBounds[.(species, "avg"), ..currentVar]), y = counter, col = "#295384", pch = 19)
+
+		counter = counter + 1
+	}
+	axis(side = 1, at = round(seq(x_min, x_max, length.out = 3), 1), labels = round(seq(x_min, x_max, length.out = 3), 1))
+	axis(side = 2, at = 0:y_max, labels = ls_species, las = 1)
+	legend(x = "top", xpd = TRUE, legend = c("Median", "Mean"), pch = c(23, 19), col = c("#95C36E", "#295384"),
+		pt.bg = c("#95C36E", "#295384"), bty = "n", horiz = TRUE)
+	dev.off()
+}
 
