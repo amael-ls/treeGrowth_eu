@@ -13,7 +13,9 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
+library(tikzDevice)
 library(stringi)
+library(xtable)
 library(terra)
 
 if (!nzchar(system.file(package = "MetBrewer")))
@@ -146,11 +148,12 @@ y_max = length(ls_species) - 1
 
 for (currentVar in ls_vars)
 {
-	pdf (paste0(currentVar, ".pdf"), height = 6, width = 9.708204)
+	# pdf(paste0(currentVar, ".pdf"), height = 6, width = 9.708204)
+	tikz(file = paste0(currentVar, ".tex"), height = 4.379768, width = 7.086614) # Width = 18 cm or 7.08 Inches, Golden ratio
 	x_min = min(climBounds[stats == "p05", ..currentVar])
 	x_max = max(climBounds[stats == "p95", ..currentVar])
 
-	counter = 0
+	counter = y_max
 
 	plot(0, type = "n", axes = FALSE, ann = FALSE, xlim = c(x_min, x_max), ylim = c(0, y_max + 0.5))
 	par(mar = c(3, 3, 2, 2), oma = c(0, 8, 0, 3))
@@ -164,12 +167,21 @@ for (currentVar in ls_vars)
 		segments(x0 = unlist(climBounds[.(species, "p95"), ..currentVar]), y0 = counter - 0.05, y1 = counter + 0.05, lwd = 2)
 		points(x = unlist(climBounds[.(species, "avg"), ..currentVar]), y = counter, col = "#295384", pch = 19)
 
-		counter = counter + 1
+		counter = counter - 1
 	}
 	axis(side = 1, at = round(seq(x_min, x_max, length.out = 3), 1), labels = round(seq(x_min, x_max, length.out = 3), 1))
-	axis(side = 2, at = 0:y_max, labels = ls_species, las = 1)
-	legend(x = "top", xpd = TRUE, legend = c("Median", "Mean"), pch = c(23, 19), col = c("#95C36E", "#295384"),
-		pt.bg = c("#95C36E", "#295384"), bty = "n", horiz = TRUE)
+	axis(side = 2, at = y_max:0, labels = ls_species, las = 1)
+	legend(x = "topleft", xpd = TRUE, legend = c("Median", "Mean"), pch = c(23, 19), col = c("#95C36E", "#295384"),
+		pt.bg = c("#95C36E", "#295384"), bty = "n", horiz = TRUE, inset = c(0, -0.01))
 	dev.off()
 }
 
+#### Table climate range
+climBounds_xt = climBounds[.(unique(speciesName_sci), rep(c("min", "max"), each = length(ls_species)))]
+climBounds_xt = dcast(climBounds_xt, speciesName_sci ~ stats, value.var = c("pr", "tas"))
+climBounds_xt = merge(x = climBounds_xt, y = unique(species_data[, .(speciesName_sci, sp_indivs_tot)]), by = "speciesName_sci")
+
+setcolorder(x = climBounds_xt, neworder = c("speciesName_sci", "sp_indivs_tot", paste(rep(ls_vars, each = 2), c("min", "max"), sep = "_")))
+
+climBounds_xt = xtable(x = climBounds_xt, align = c("r", "r", "c", "c", "c", "c", "c"), digits = 1)
+print(x = climBounds_xt, include.rownames = FALSE, table.placement = "h")
