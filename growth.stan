@@ -62,15 +62,9 @@ data {
 	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 
 	// Indices
-	array [n_indiv] int<lower = 1, upper = n_obs - 1> parents_index; // Index of each parent in the 'observation space'
-	array [n_children] int<lower = 2, upper = n_obs> children_index; // Index of children in the 'observation space'
 	array [n_children] int<lower = 2> latent_children_index; // Index of children in the 'latent space'
 	array [n_indiv] int<lower = 1, upper = n_climate - 1> climate_index; // Index of the climate associated to each parent
 	
-	array [n_inventories] int<lower = 1, upper = n_indiv - 1> start_nfi_parents; // Starting point of each NFI for parents
-	array [n_inventories] int<lower = 2, upper = n_indiv> end_nfi_parents; // Ending point of each NFI for parents
-	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_children; // Starting point of each NFI for children
-	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_children; // Ending point of each NFI for children
 	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_avg_growth; // Starting point of each NFI for averaged obs growth
 	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_avg_growth; // Ending point of each NFI for averaged obs growth
 	
@@ -252,28 +246,12 @@ model {
 	// --- Observation model
 	for (k in 1:n_inventories)
 	{
-		// Compare true (i.e., hidden or latent) parents with observed parents
-		// Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
-		for (i in start_nfi_parents[k]:end_nfi_parents[k])
-		{
-			if (onlyTwoMeasures[i] == 1) // Like C++, BUGS, and R, Stan uses 0 to encode false, and 1 to encode true.
-			{
-				target += normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]); // Assume first measure correct
-			}
-			else
-			{
-				target += log_mix(proba[k],
-					normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]),
-					normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]));
-			}
-		}
-
 		// Compare true (i.e., hidden or latent) latent averaged yearly growth with observed averaged yearly growth
 		/*
-			Note that here, I use 2*etaObs[k]/deltaYear[i]. This is because the yearly growth error is twice the error on the dbh
-			divided by the number of years between the two measurement (i.e., averageing the growth error).
+			Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
 
-			See Rüger et al 2011
+			Note that here, I use 2*etaObs[k]/deltaYear[i]. This is because the yearly growth error is twice the error on the dbh
+			divided by the number of years between the two measurement (i.e., averageing the growth error). See Rüger et al 2011.
 		*/
 		for (i in start_nfi_avg_growth[k]:end_nfi_avg_growth[k])
 			target += log_mix(proba[k],
