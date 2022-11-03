@@ -70,30 +70,27 @@ data {
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
-	array [n_indiv] int<lower = 0, upper = 1> onlyTwoMeasures; // Indicates whether there are only two measurements or more (boolean)
-
 	// Observations
-	vector<lower = 0>[n_obs] Yobs;
 	vector[n_children] avg_yearly_growth_obs;
 
-	// sd_dbh is for the whole species and should not be more than 5% different from the sd of the subsample, namely sd(Yobs)
-	real<lower = 0.95*sd(Yobs), upper = 1.05*sd(Yobs)> sd_dbh;
-
 	// Explanatory variables
+	vector<lower = 0>[n_indiv] dbh_init; // Initial dbh, considered here as a known data
+	real<lower = 0> sd_dbh; // To standardise the initial dbh (sd_dbh is however the sd of all the dbh, not only initial ones)
+
 	vector<lower = 0>[n_climate] precip; // Precipitations
-	real<lower = 0> pr_mu; // To standardise the precipitations
+	real<lower = 0> pr_mu; // To centre the precipitations
 	real<lower = 0> pr_sd; // To standardise the precipitations
 
 	vector[n_climate] tas; // Temperature
-	real tas_mu; // To standardise the temperature
+	real tas_mu; // To centre the temperature
 	real<lower = 0> tas_sd; // To standardise the temperature
 
 	vector<lower = 0, upper = 14>[n_plots] ph; // pH of the soil measured with CaCl2
-	real<lower = 0, upper = 14> ph_mu; // To standardise the pH
+	real<lower = 0, upper = 14> ph_mu; // To centre the pH
 	real<lower = 0> ph_sd; // To standardise the pH
 
 	vector<lower = 0>[n_climate] standBasalArea; // Sum of the tree basal area for a given plot at a given time (interpolation for NA data)
-	real ba_mu; // To standardise the basal area
+	real ba_mu; // To centre the basal area
 	real<lower = 0> ba_sd; // To standardise the basal area
 }
 
