@@ -326,13 +326,13 @@ if (n_indiv > max_indiv)
 	n_indiv = checkSampling[["n_indiv"]]
 
 	if (checkSampling[["diffAverage"]])
-		warning("The subsample does not look representative of the whole data set, check the average")
+		stop("The subsample does not look representative of the whole data set, check the average")
 
 	if (checkSampling[["diffSD"]])
-		warning("The subsample does not look representative of the whole data set, check the std. dev")
+		stop("The subsample does not look representative of the whole data set, check the std. dev")
 
 	if (checkSampling[["diffQuantile_25_75"]])
-		warning("The subsample does not look representative of the whole data set, check the quantiles 0.25, 0.5, and 0.75")
+		stop("The subsample does not look representative of the whole data set, check the quantiles 0.25, 0.5, and 0.75")
 }
 
 if ((!subsamplingActivated) & (run_id != 1))
@@ -343,11 +343,6 @@ n_inventories = length(treeData[, unique(nfi_id)])
 ## Compute if there are two measurements or more
 if (treeData[, .N, by = .(plot_id, tree_id)][, min(N) < 2])
 	stop("There are individuals measured only once")
-
-onlyTwoMeasures = treeData[, .N, by = .(plot_id, tree_id)][, N == 2] # plot_id is country-specific!
-
-if (length(onlyTwoMeasures) != n_indiv)
-	stop("Dimensions mismatch between n_indiv and onlyTwoMeasures")
 
 ## Compute growth
 computeDiametralGrowth(treeData, byCols = c("speciesName_sci", "plot_id", "tree_id"))
@@ -480,14 +475,13 @@ stanData = list(
 
 	plot_index = unique(indices[, .(tree_id, plot_id, plot_index)])[, plot_index], # Indicates to which plot individuals belong to
 
-	onlyTwoMeasures = onlyTwoMeasures, # Indicates whether there are only two measurements or more (boolean)
-
 	# Observations
-	Yobs = treeData[, dbh],
 	avg_yearly_growth_obs = growth_dt[, growth],
-	sd_dbh = ifelse(subsamplingActivated, checkSampling[["sd_dbh_beforeSubsample"]], treeData[, sd(dbh)]),
 
 	# Explanatory variables
+	dbh_init = treeData[parents_index, dbh],
+	sd_dbh = ifelse(subsamplingActivated, checkSampling[["sd_dbh_beforeSubsample"]], treeData[, sd(dbh)]),
+
 	precip = climate[, pr], # Annual precipitations (sum over 12 months)
 	pr_mu = climate_mu_sd[variable == "pr", mu],
 	pr_sd = climate_mu_sd[variable == "pr", sd],
