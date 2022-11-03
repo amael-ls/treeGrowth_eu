@@ -133,9 +133,6 @@ parameters {
 	// --- Process error, which is the sdlog parameter of a lognormal distrib /!\
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
 
-	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
-	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
-
 	// --- Extreme error, by default at least twice the min observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
 	
@@ -160,6 +157,11 @@ model {
 	vector [n_children] latent_avg_yearly_growth; // n_children is also the number of measured growth (number of intervals)!
 	real growth_mean_logNormal;
 	real growth_sd_logNormal;
+
+	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
+	array [n_inventories] real sigmaObs; // Std. Dev. of a normal distrib /!\
+	for (i in 1:n_inventories)
+		sigmaObs[i] = 3.0/sd_dbh; // Assessing Precision in Conventional Field Measurements of Individual Tree Attributes (Luoma 2017)
 
 	// Priors
 	// --- Growth parameters
@@ -209,14 +211,9 @@ model {
 
 		The average values of the priors on the standardised scale are approximately (obtained with one sample of 1e8):
 		sigmaProc: 0.008977944
-		sigmaObs: 0.01209929
 		etaObs: 0.1788352
 	*/
-	// target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16);
-	target += gamma_lpdf(sigmaProc | 2.0/1.0, sd_dbh*sqrt(2)/1.0);
-	target += gamma_lpdf(sigmaObs | 3.5/1, sd_dbh*sqrt(3.5)/1); // <=> routine measurement error (sd) = sqrt(3.5) mm ± 1 mm
 	target += gamma_lpdf(etaObs | 30^2/45.0, sd_dbh*30/45.0); // <=> extreme measurement error (sd) = 30 mm ± 6.7 mm
-	
 	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
 
 	// Model
