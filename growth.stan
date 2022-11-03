@@ -213,6 +213,7 @@ model {
 		sigmaProc: 0.008977944
 		etaObs: 0.1788352
 	*/
+	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16);
 	target += gamma_lpdf(etaObs | 30^2/45.0, sd_dbh*30/45.0); // <=> extreme measurement error (sd) = 30 mm ± 6.7 mm
 	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
 
