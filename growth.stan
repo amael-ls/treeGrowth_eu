@@ -150,11 +150,9 @@ model {
 	real temporary_tm1; // temporary at time t - 1 (useful for trees measured more than twice)
 	vector [n_children] latent_avg_yearly_growth; // n_children is also the number of measured growth (number of intervals)!
 
-	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
-	array [n_inventories] real sigmaObs; // Std. Dev. of a normal distrib /!\
-	for (i in 1:n_inventories)
-		sigmaObs[i] = 3.0/sd_dbh; // Assessing Precision in Conventional Field Measurements of Individual Tree Attributes (Luoma 2017)
-
+	// --- Routine observation error, Assessing Precision in Conventional Field Measurements of Individual Tree Attributes (Luoma 2017)
+	real sigmaObs = 3.0/sd_dbh; // Std. Dev. of a normal distrib /!\
+	
 	// Priors
 	// --- Growth parameters
 	target += normal_lpdf(averageGrowth | 0, 20);
@@ -256,6 +254,6 @@ model {
 		for (i in start_nfi_avg_growth[k]:end_nfi_avg_growth[k])
 			target += log_mix(proba[k],
 				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*etaObs[k]/deltaYear[i]),
-				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*sigmaObs[k]/deltaYear[i]));
+				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*sigmaObs/deltaYear[i]));
 	}
 }
