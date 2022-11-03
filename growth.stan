@@ -155,8 +155,6 @@ model {
 	real temporary;
 	real temporary_tm1; // temporary at time t - 1 (useful for trees measured more than twice)
 	vector [n_children] latent_avg_yearly_growth; // n_children is also the number of measured growth (number of intervals)!
-	real growth_mean_logNormal;
-	real growth_sd_logNormal;
 
 	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
 	array [n_inventories] real sigmaObs; // Std. Dev. of a normal distrib /!\
@@ -165,20 +163,20 @@ model {
 
 	// Priors
 	// --- Growth parameters
-	target += normal_lpdf(averageGrowth | 0, 5);
-	target += normal_lpdf(dbh_slope | 0, 5);
-	target += normal_lpdf(dbh_slope2 | 0, 5);
+	target += normal_lpdf(averageGrowth | 0, 20);
+	target += normal_lpdf(dbh_slope | 0, 20);
+	target += normal_lpdf(dbh_slope2 | 0, 20);
 	
-	target += normal_lpdf(pr_slope | 0, 5);
-	target += normal_lpdf(pr_slope2 | 0, 5);
+	target += normal_lpdf(pr_slope | 0, 20);
+	target += normal_lpdf(pr_slope2 | 0, 20);
 
-	target += normal_lpdf(tas_slope | 0, 5);
-	target += normal_lpdf(tas_slope2 | 0, 5);
+	target += normal_lpdf(tas_slope | 0, 20);
+	target += normal_lpdf(tas_slope2 | 0, 20);
 
-	target += normal_lpdf(ph_slope | 0, 5);
-	target += normal_lpdf(ph_slope2 | 0, 5);
+	target += normal_lpdf(ph_slope | 0, 20);
+	target += normal_lpdf(ph_slope2 | 0, 20);
 
-	target += normal_lpdf(competition_slope | 0, 5);
+	target += normal_lpdf(competition_slope | 0, 20);
 
 	// --- Errors
 	/*
