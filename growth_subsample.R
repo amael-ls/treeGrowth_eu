@@ -389,7 +389,6 @@ print(paste("Number of latent growth:", n_latentGrowth))
 
 # Define parents, children, and last child
 parents_index = treeData[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1]
-children_index = treeData[, .I[which(year != min(year))], by = .(plot_id, tree_id)][, V1]
 last_child_index = treeData[, .I[which.max(year)], by = .(plot_id, tree_id)][, V1]
 
 if (length(parents_index) != n_indiv)
@@ -399,35 +398,21 @@ if (length(children_index) != n_obs - n_indiv)
 	stop("Dimension mismatch between children_index and number of children")
 
 # Define for each NFI at which individual they start and end (given treeData is sorted by plot_id, with the country first)!
-start_nfi_parents = integer(n_inventories)
-end_nfi_parents = integer(n_inventories)
-start_nfi_children = integer(n_inventories)
-end_nfi_children = integer(n_inventories)
 start_nfi_avg_growth = integer(n_inventories)
 end_nfi_avg_growth = integer(n_inventories)
 
 ls_countries = treeData[, unique(country)]
-start_nfi_parents[1] = 1
-start_nfi_children[1] = 1
 start_nfi_avg_growth[1] = 1
 
 if (n_inventories > 1)
 {
 	for (k in 1:(n_inventories - 1))
 	{
-		end_nfi_parents[k] = start_nfi_parents[k] + indices[(type == "parent") & (stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
-		start_nfi_parents[k + 1] = end_nfi_parents[k] + 1
-
-		end_nfi_children[k] = start_nfi_children[k] + indices[(type == "child") & (stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
-		start_nfi_children[k + 1] = end_nfi_children[k] + 1
-
 		end_nfi_avg_growth = start_nfi_avg_growth[k] + growth_dt[(stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
 		start_nfi_avg_growth[k + 1] = end_nfi_avg_growth[k] + 1
 	}
 }
 
-end_nfi_parents[n_inventories] = n_indiv
-end_nfi_children[n_inventories] = n_obs - n_indiv # Which is n_children
 end_nfi_avg_growth[n_inventories] = n_obs - n_indiv # Which is n_children
 
 if (growth_dt[, .N] != n_obs - n_indiv)
@@ -435,10 +420,6 @@ if (growth_dt[, .N] != n_obs - n_indiv)
 
 if (n_inventories == 1)
 {
-	start_nfi_parents = as.array(start_nfi_parents)
-	end_nfi_parents = as.array(end_nfi_parents)
-	start_nfi_children = as.array(start_nfi_children)
-	end_nfi_children = as.array(end_nfi_children)
 	start_nfi_avg_growth = as.array(start_nfi_avg_growth)
 	end_nfi_avg_growth = as.array(end_nfi_avg_growth)
 }
@@ -489,18 +470,11 @@ stanData = list(
 	nbYearsGrowth = nbYearsGrowth, # Number of years for each individual
 	deltaYear = growth_dt[, deltaYear],
 	n_inventories = n_inventories, # Number of forest inventories involving different measurement errors in the data
-	last_child_index = last_child_index, # Not used in stan, but useful for analyse_growth
 
 	# Indices
-	parents_index = parents_index, # Index of each parent in the 'observation space'
-	children_index = children_index, # Index of children in the 'observation space'
 	latent_children_index = indices[type == "child", index_gen], # Index of children in the 'latent space'
 	climate_index = indices[type == "parent", index_clim_start], # Index of the climate associated to each parent
 
-	start_nfi_parents = start_nfi_parents, # Starting point of each NFI for parents
-	end_nfi_parents = end_nfi_parents, # Ending point of each NFI for parents
-	start_nfi_children = start_nfi_children, # Starting point of each NFI for children
-	end_nfi_children = end_nfi_children, # Ending point of each NFI for children
 	start_nfi_avg_growth = start_nfi_avg_growth,
 	end_nfi_avg_growth = end_nfi_avg_growth,
 
