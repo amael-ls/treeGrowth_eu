@@ -95,7 +95,7 @@ data {
 }
 
 transformed data {
-	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
+	vector[n_obs] normalised_dbh_init = dbh_init/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_children] normalised_avg_yearly_growth_obs = avg_yearly_growth_obs/sd_dbh; // Normalised but NOT centred averaged yearly growth
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
@@ -129,11 +129,7 @@ parameters {
 	
 	array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
-	// Latent states
-	// --- Parent (i.e., primary) dbh
-	vector<lower = 0.1/sd_dbh, upper = 3000/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
-
-	// --- Growth
+	// Latent growth
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
@@ -207,9 +203,9 @@ model {
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
 	{
-		temporary = latent_dbh_parents[i];
+		temporary = normalised_dbh_init[i];
 		temporary_tm1 = temporary;
-		for (j in 1:nbYearsGrowth[i]) // Loop for all years but the first (which is the parent of indiv i)
+		for (j in 1:nbYearsGrowth[i]) // Loop over growing years
 		{
 			// Process model
 			expected_growth_meanlog = growth(temporary, normalised_precip[climate_index[i] + j - 1],
@@ -232,20 +228,17 @@ model {
 				temporary_tm1 = temporary;
 			}
 		}
-		record_children_counter += 1; // The growth counter stops one year earlier! Indeed 3 measurements implies only 2 growing years!
+		record_children_counter += 1; // The growth counter stops one year earlier! Indeed n measurements implies only n - 1 growing years!
 	}
-	
-	// Prior on initial hidden state: This is a diffuse initialisation
-	target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 3000/sd_dbh); // Remember that the dbh is in mm and standardised
 	
 	// --- Observation model
 	for (k in 1:n_inventories)
 	{
-		// Compare true (i.e., hidden or latent) latent averaged yearly growth with observed averaged yearly growth
 		/*
+			Compare true (i.e., hidden or latent) latent averaged yearly growth with observed averaged yearly growth
 			Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
 
-			Note that here, I use 2*etaObs[k]/deltaYear[i]. This is because the yearly growth error is twice the error on the dbh
+			Note that here, I use 2 * error/Δt. This is because the yearly growth error is twice the error on the dbh,
 			divided by the number of years between the two measurement (i.e., averageing the growth error). See Rüger et al 2011.
 		*/
 		for (i in start_nfi_avg_growth[k]:end_nfi_avg_growth[k])
