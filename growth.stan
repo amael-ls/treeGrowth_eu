@@ -95,7 +95,7 @@ data {
 }
 
 transformed data {
-	vector[n_obs] normalised_dbh_init = dbh_init/sd_dbh; // Normalised but NOT centred dbh
+	vector[n_indiv] normalised_dbh_init = dbh_init/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_children] normalised_avg_yearly_growth_obs = avg_yearly_growth_obs/sd_dbh; // Normalised but NOT centred averaged yearly growth
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
