@@ -27,16 +27,13 @@ library(stringi)
 
 #### Get parameters for run
 args = commandArgs(trailingOnly = TRUE)
+# args = c("38", "1", "1000")
 if (length(args) != 3)
 	stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
 species_id = as.integer(args[1]) # 17, 48
 run_id = as.integer(args[2]) # 1, 2, 3, 4
 max_indiv = as.integer(args[3]) # 8000
-
-# species_id = 2
-# run_id = 1
-# max_indiv = 8000
 
 set.seed(run_id)
 
@@ -388,9 +385,6 @@ last_child_index = treeData[, .I[which.max(year)], by = .(plot_id, tree_id)][, V
 
 if (length(parents_index) != n_indiv)
 	stop("Dimension mismatch between parents_index and n_indiv")
-
-if (length(children_index) != n_obs - n_indiv)
-	stop("Dimension mismatch between children_index and number of children")
 
 # Define for each NFI at which individual they start and end (given treeData is sorted by plot_id, with the country first)!
 start_nfi_avg_growth = integer(n_inventories)
