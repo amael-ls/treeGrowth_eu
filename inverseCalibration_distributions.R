@@ -6,12 +6,13 @@ library(moments)
 inverseCalibration = function(fun, ...)
 {
 	# Check if distribution is included
-	if (!isTRUE(all.equal(fun, dgamma)) &
+	if (!isTRUE(all.equal(fun, dchisq)) &
+		!isTRUE(all.equal(fun, dgamma)) &
 		!isTRUE(all.equal(fun, dlnorm)) &
 		!isTRUE(all.equal(fun, dnorm)) &
 		!isTRUE(all.equal(fun, dwald)) &
 		!isTRUE(all.equal(fun, dweibull)))
-		stop("This function only accepts dgamma, dlnorm, dnorm, dwald or dweibull as priors")
+		stop("This function only accepts dchisq, dgamma, dlnorm, dnorm, dwald or dweibull as priors")
 	
 	# Get list of arguments
 	providedArgs = list(...)
@@ -20,23 +21,57 @@ inverseCalibration = function(fun, ...)
 	# Define output
 	output = list(mean = NA, sd = NA, var = NA, skewness = NA, arg1 = NA, arg2 = NA)
 
-	# Get parameters
-	if (isTRUE(all.equal(fun, dnorm))) # Checked and validated computation
+	# Chi-square
+	if (isTRUE(all.equal(fun, dchisq))) # Checked and validated computation
 	{
-		if (!all(c("mean", "sd") %in% names(providedArgs)))
-			stop("You must provide mean and sd for dnorm")
+		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("df", "ncp") %in% names(providedArgs))))
+			stop("You must provide either mean and var or df and ncp for dchisq")
 		
-		arg1 = providedArgs[["mean"]]
-		arg2 = providedArgs[["sd"]]
+		if (all(c("mean", "var") %in% names(providedArgs)))
+		{
+			temp1 = providedArgs[["mean"]]
+			temp2 = providedArgs[["var"]]
 
-		output[["mean"]] = arg1
-		output[["sd"]] = arg2
-		output[["var"]] = arg2^2
-		output[["skewness"]] = 0
+			arg1 = 2*temp1 - temp2/2 # degrees of freedom
+			arg2 = temp2/2 - temp1 # non-central parameter
+		} else {
+			arg1 = providedArgs[["df"]]
+			arg2 = providedArgs[["ncp"]]
+		}
+		output[["mean"]] = arg1 + arg2
+		output[["var"]] = 2*arg1 + 4*arg2
+		output[["sd"]] = sqrt(output[["var"]])
+		output[["skewness"]] = sqrt(8)*(arg1 + 3*arg2)/(arg1 + 2*arg2)^1.3
 		output[["arg1"]] = arg1
 		output[["arg2"]] = arg2
 	}
 
+	# Gamma
+	if (isTRUE(all.equal(fun, dgamma))) # Checked and validated computation
+	{
+		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "rate") %in% names(providedArgs))))
+			stop("You must provide either mean and var or shape and rate for dgamma")
+		
+		if (all(c("mean", "var") %in% names(providedArgs)))
+		{
+			temp1 = providedArgs[["mean"]]
+			temp2 = providedArgs[["var"]]
+
+			arg1 = temp1^2/temp2 # shape
+			arg2 = temp1/temp2 # rate
+		} else {
+			arg1 = providedArgs[["shape"]]
+			arg2 = providedArgs[["rate"]]
+		}
+		output[["mean"]] = arg1/arg2
+		output[["var"]] = arg1/arg2^2
+		output[["sd"]] = sqrt(output[["var"]])
+		output[["skewness"]] = 2/sqrt(arg1)
+		output[["arg1"]] = arg1
+		output[["arg2"]] = arg2
+	}
+
+	# Lognormal
 	if (isTRUE(all.equal(fun, dlnorm))) # Checked and validated computation
 	{
 		if ((!all(c("mean", "sd") %in% names(providedArgs))) &  (!all(c("meanlog", "sdlog") %in% names(providedArgs))))
@@ -65,30 +100,47 @@ inverseCalibration = function(fun, ...)
 		output[["arg2"]] = arg2
 	}
 
-	if (isTRUE(all.equal(fun, dgamma))) # Checked and validated computation
+	# Normal
+	if (isTRUE(all.equal(fun, dnorm))) # Checked and validated computation
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "rate") %in% names(providedArgs))))
-			stop("You must provide either mean and var or shape and rate for dgamma")
+		if (!all(c("mean", "sd") %in% names(providedArgs)))
+			stop("You must provide mean and sd for dnorm")
 		
-		if (all(c("mean", "var") %in% names(providedArgs)))
-		{
-			temp1 = providedArgs[["mean"]]
-			temp2 = providedArgs[["var"]] # Squared because in this case it is a variance, not a std. dev.
+		arg1 = providedArgs[["mean"]]
+		arg2 = providedArgs[["sd"]]
 
-			arg1 = temp1^2/temp2 # shape
-			arg2 = temp1/temp2 # rate
-		} else {
-			arg1 = providedArgs[["shape"]]
-			arg2 = providedArgs[["rate"]]
-		}
-		output[["mean"]] = arg1/arg2
-		output[["var"]] = arg1/arg2^2
-		output[["sd"]] = sqrt(output[["var"]])
-		output[["skewness"]] = 2/sqrt(arg1)
+		output[["mean"]] = arg1
+		output[["sd"]] = arg2
+		output[["var"]] = arg2^2
+		output[["skewness"]] = 0
 		output[["arg1"]] = arg1
 		output[["arg2"]] = arg2
 	}
 
+	# Wald
+	if (isTRUE(all.equal(fun, dwald))) # Checked and validated computation
+	{
+		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("location", "scale") %in% names(providedArgs))))
+			stop("You must provide either mean and var or shape and scale for dwald")
+
+		if (all(c("mean", "var") %in% names(providedArgs)))
+		{
+			arg1 = providedArgs[["mean"]] # location
+			arg2 = arg1^3/providedArgs[["var"]] # scale
+		} else {
+			arg1 = providedArgs[["location"]]
+			arg2 = providedArgs[["scale"]]
+		}
+		
+		output[["mean"]] = arg1
+		output[["var"]] = arg1^3/arg2
+		output[["sd"]] = sqrt(output[["var"]])
+		output[["skewness"]] = 3*sqrt(arg1/arg2)
+		output[["arg1"]] = arg1
+		output[["arg2"]] = arg2
+	}
+
+	# Weibull
 	if (isTRUE(all.equal(fun, dweibull))) # Checked and validated computation
 	{
 		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "scale") %in% names(providedArgs))))
@@ -127,28 +179,12 @@ inverseCalibration = function(fun, ...)
 		output[["arg2"]] = arg2
 	}
 
-	if (isTRUE(all.equal(fun, dwald))) # Checked and validated computation
-	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("location", "scale") %in% names(providedArgs))))
-			stop("You must provide either mean and var or shape and scale for dwald")
-
-		if (all(c("mean", "var") %in% names(providedArgs)))
-		{
-			arg1 = providedArgs[["mean"]] # location
-			arg2 = arg1^3/providedArgs[["var"]] # scale
-		} else {
-			arg1 = providedArgs[["location"]]
-			arg2 = providedArgs[["scale"]]
-		}
-		
-		output[["mean"]] = arg1
-		output[["var"]] = arg1^3/arg2
-		output[["sd"]] = sqrt(output[["var"]])
-		output[["skewness"]] = 3*sqrt(arg1/arg2)
-		output[["arg1"]] = arg1
-		output[["arg2"]] = arg2
-	}
-
 	return (output)
 }
 
+aa = inverseCalibration(dchisq, mean = 4, var = 8)
+qq = rchisq(n = 1e7, df = aa[["arg1"]], ncp = aa[["arg2"]])
+
+mean(qq)
+var(qq)
+skewness(qq)
