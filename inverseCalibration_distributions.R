@@ -1,6 +1,7 @@
 
 library(extraDistr)
 library(rootSolve)
+library(nakagami)
 library(moments)
 
 inverseCalibration = function(fun, ...)
@@ -9,10 +10,11 @@ inverseCalibration = function(fun, ...)
 	if (!isTRUE(all.equal(fun, dchisq)) &
 		!isTRUE(all.equal(fun, dgamma)) &
 		!isTRUE(all.equal(fun, dlnorm)) &
+		!isTRUE(all.equal(fun, dnaka)) &
 		!isTRUE(all.equal(fun, dnorm)) &
 		!isTRUE(all.equal(fun, dwald)) &
 		!isTRUE(all.equal(fun, dweibull)))
-		stop("This function only accepts dchisq, dgamma, dlnorm, dnorm, dwald or dweibull as priors")
+		stop("This function only accepts dchisq, dgamma, dlnorm, dnaka, dnorm, dwald or dweibull as priors")
 	
 	# Get list of arguments
 	providedArgs = list(...)
@@ -100,6 +102,50 @@ inverseCalibration = function(fun, ...)
 		output[["arg2"]] = arg2
 	}
 
+	# Nakagami
+	if (isTRUE(all.equal(fun, nakagami::dnaka)))
+	{
+		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "scale") %in% names(providedArgs))))
+			stop("You must provide either mean and var or shape and rate for dnaka")
+		
+		if (all(c("mean", "var") %in% names(providedArgs)))
+		{
+			temp1 = providedArgs[["mean"]]
+			temp2 = providedArgs[["var"]]
+
+			eqnarray = function(shape, ...)
+			{
+				providedArgs = list(...)
+				meanArg = providedArgs[["meanArg"]]
+				varArg = providedArgs[["varArg"]]
+
+				F1 = meanArg^2*(shape*gamma(shape)^2/gamma(shape + 0.5)^2 - 1) - varArg
+
+				return (c(F1 = F1))
+			}
+
+			if ("start" %in% ls_names)
+			{
+				start = providedArgs[["start"]]
+			} else {
+				start = 5
+			}
+
+			arg1 = multiroot(f = eqnarray, start = start, meanArg = temp1, varArg = temp2)$root # shape
+			arg2 = temp1*sqrt(arg1)*gamma(arg1)/gamma(arg1 + 0.5) # scale
+		} else {
+			arg1 = providedArgs[["shape"]]
+			arg2 = providedArgs[["scale"]]
+		}
+		output[["mean"]] = arg2*gamma(arg1 + 0.5)/(sqrt(arg1)*gamma(arg1))
+		output[["var"]] = arg2^2*(1 - gamma(arg1 + 0.5)^2/(arg1 * gamma(arg1)^2))
+		output[["sd"]] = sqrt(output[["var"]])
+		output[["skewness"]] = arg2^3*(2*gamma(arg1 + 0.5)^3 + 0.5*(1 - 4*arg1)*gamma(arg1)^2*gamma(arg1 + 0.5))/(arg1^1.5*gamma(arg1)^3)
+		output[["arg1"]] = arg1
+		# Necessary to put a square here, as dnaka uses the Wikipedia paramtrisation, while I used another one for analytical calculus
+		output[["arg2"]] = arg2^2
+	}
+
 	# Normal
 	if (isTRUE(all.equal(fun, dnorm))) # Checked and validated computation
 	{
@@ -116,6 +162,29 @@ inverseCalibration = function(fun, ...)
 		output[["arg1"]] = arg1
 		output[["arg2"]] = arg2
 	}
+
+	# # Pareto
+	# if (isTRUE(all.equal(fun, dpareto))) # Checked and validated computation
+	# {
+	# 	if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("location", "scale") %in% names(providedArgs))))
+	# 		stop("You must provide either mean and var or shape and scale for dwald")
+
+	# 	if (all(c("mean", "var") %in% names(providedArgs)))
+	# 	{
+	# 		arg1 = providedArgs[["mean"]] # location
+	# 		arg2 = arg1^3/providedArgs[["var"]] # scale
+	# 	} else {
+	# 		arg1 = providedArgs[["location"]]
+	# 		arg2 = providedArgs[["scale"]]
+	# 	}
+		
+	# 	output[["mean"]] = arg1
+	# 	output[["var"]] = arg1^3/arg2
+	# 	output[["sd"]] = sqrt(output[["var"]])
+	# 	output[["skewness"]] = 3*sqrt(arg1/arg2)
+	# 	output[["arg1"]] = arg1
+	# 	output[["arg2"]] = arg2
+	# }
 
 	# Wald
 	if (isTRUE(all.equal(fun, dwald))) # Checked and validated computation
@@ -163,7 +232,14 @@ inverseCalibration = function(fun, ...)
 				return (c(F1 = F1))
 			}
 
-			arg1 = multiroot(f = eqnarray, start = 5, meanArg = temp1, varArg = temp2)$root # shape
+			if ("start" %in% ls_names)
+			{
+				start = providedArgs[["start"]]
+			} else {
+				start = 5
+			}
+
+			arg1 = multiroot(f = eqnarray, start = start, meanArg = temp1, varArg = temp2)$root # shape
 			arg2 = temp1/gamma(1 + 1/arg1) # scale
 		} else {
 			arg1 = providedArgs[["shape"]]
