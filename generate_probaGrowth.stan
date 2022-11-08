@@ -37,59 +37,53 @@ functions {
 
 data {
 	// Number of data
-	int<lower = 1> n_indiv; // Number of individuals
-	int<lower = 1> n_climate; // Dimension of the climate vector
+	int<lower = 1> n_indiv; // Total number of individuals (all NFIs together)
+	int<lower = 1> n_climate; // Dimension of the climate vector (all NFIs together)
 	int<lower = 1, upper = n_indiv> n_plots; // Number of plots (all NFIs together)
-	int<lower = 1> n_obs; // Number of trees observations
-	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth
-	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children trees observations = n_obs - n_indiv
+	int<lower = 1> n_obs; // Total number of tree observations (all NFIs together)
+	int<lower = 1> n_latentGrowth; // Dimension of the state space vector for latent growth (all NFIs together)
+	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_children; // Number of children tree observations = n_obs - n_indiv
 	array [n_indiv] int<lower = 2, upper = n_obs> nbYearsGrowth; // Number of years of growth for each individual
+	array [n_children] int<lower = 1> deltaYear; // Number of years between two measurements of an individual
 	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 
 	int<lower = 1> n_dbh; // Dimension of the dbh vector (new data)
 	int<lower = 1> n_threshold; // Dimension of the threshold vector (new data, lower bound of integral, i.e., variable of cdf function)
 
 	// Indices
-	array [n_indiv] int<lower = 1, upper = n_obs - 1> parents_index; // Index of each parent in the 'observation space'
-	array [n_children] int<lower = 2, upper = n_obs> children_index; // Index of children in the 'observation space'
 	array [n_children] int<lower = 2> latent_children_index; // Index of children in the 'latent space'
 	array [n_indiv] int<lower = 1, upper = n_climate - 1> climate_index; // Index of the climate associated to each parent
-
-	array [n_inventories] int<lower = 1, upper = n_indiv - 1> start_nfi_parents; // Starting point of each NFI for parents
-	array [n_inventories] int<lower = 2, upper = n_indiv> end_nfi_parents; // Ending point of each NFI for parents
-	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_children; // Starting point of each NFI for children
-	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_children; // Ending point of each NFI for children
+	
 	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_avg_growth; // Starting point of each NFI for averaged obs growth
 	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_avg_growth; // Ending point of each NFI for averaged obs growth
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
-	array [n_indiv] int<lower = 0, upper = 1> onlyTwoMeasures; // Indicates whether there are only two measurements or more (boolean)
-
 	// Observations
-	vector<lower = 0>[n_obs] Yobs;
 	vector[n_children] avg_yearly_growth_obs;
 
-	// sd_dbh is for the whole species and should not be more than 5% different from the sd of the subsample, namely sd(Yobs)
-	real<lower = 0.95*sd(Yobs), upper = 1.05*sd(Yobs)> sd_dbh;
-
 	// Explanatory variables
+	// --- Data required by the model
+	vector<lower = 0>[n_indiv] dbh_init; // Initial dbh, considered here as a known data
+	real<lower = 0> sd_dbh; // To standardise the initial dbh (sd_dbh is however the sd of all the dbh, not only initial ones)
+
 	vector<lower = 0>[n_climate] precip; // Precipitations
-	real<lower = 0> pr_mu; // To standardise the precipitations
+	real<lower = 0> pr_mu; // To centre the precipitations
 	real<lower = 0> pr_sd; // To standardise the precipitations
 
 	vector[n_climate] tas; // Temperature
-	real tas_mu; // To standardise the temperature
+	real tas_mu; // To centre the temperature
 	real<lower = 0> tas_sd; // To standardise the temperature
 
 	vector<lower = 0, upper = 14>[n_plots] ph; // pH of the soil measured with CaCl2
-	real<lower = 0, upper = 14> ph_mu; // To standardise the pH
+	real<lower = 0, upper = 14> ph_mu; // To centre the pH
 	real<lower = 0> ph_sd; // To standardise the pH
 
 	vector<lower = 0>[n_climate] standBasalArea; // Sum of the tree basal area for a given plot at a given time (interpolation for NA data)
-	real ba_mu; // To standardise the basal area
+	real ba_mu; // To centre the basal area
 	real<lower = 0> ba_sd; // To standardise the basal area
 
+	// --- New data used for posterior simulations
 	vector<lower = 0>[n_dbh] dbh0; // DBH used as a predictor (new data)
 	vector<lower = 0>[n_threshold] threshold; // Lower bound of integral, i.e., variable of cdf function (new data)
 
