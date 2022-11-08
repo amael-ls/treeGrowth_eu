@@ -97,6 +97,10 @@ transformed data {
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
 	vector[n_plots] normalised_ph = (ph - ph_mu)/ph_sd; // Normalised and centred pH
 	vector[n_climate] normalised_standBasalArea = (standBasalArea - ba_mu)/ba_sd; // Normalised and centred BA
+
+	// New data (note that environmental data are already standardised, see data block)
+	vector[n_dbh] normalised_DBH = dbh0/sd_dbh; // Normalised but NOT centred dbh
+	vector[n_threshold] normalised_threshold = threshold/sd_dbh; // Normalised threshold
 }
 
 parameters {
@@ -130,29 +134,21 @@ parameters {
 }
 
 generated quantities {
-	array[n_dbh*n_threshold] real probaGrowth_beyondThreshold;
+	array[n_dbh, n_threshold] real probaGrowth_beyondThreshold; // 2 dimension array, each column is for a given threshold
 	{
-		real expected_growth;
-		real growth_mean_logNormal;
-		real growth_sd_logNormal;
-		int count = 1;
+		real expected_growth_meanlog;
 
 		// for (i in 1:n_dbh)
 		for (i in 1:n_threshold)
 		{
 			for (j in 1:n_dbh)
 			{
-				expected_growth = growth(normalised_DBH[j],
+				expected_growth_meanlog = growth(normalised_DBH[j],
 					environment[1], environment[2], environment[3], environment[4],
 					averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
-				
-				growth_mean_logNormal = log(expected_growth^2/sqrt(sigmaProc^2 + expected_growth^2));
-				growth_sd_logNormal = sqrt(log(sigmaProc^2/expected_growth^2 + 1));
 
 				// Compute the probability that growth > threshold for a given dbh, environment, and set of parameters.
-				probaGrowth_beyondThreshold[count] = 1 - lognormal_cdf(normalised_threshold[i] | growth_mean_logNormal, growth_sd_logNormal);
-
-				count += 1;
+				probaGrowth_beyondThreshold[j, i] = 1 - lognormal_cdf(normalised_threshold[i] | expected_growth_meanlog, sigmaProc);
 			}
 		}
 	}
