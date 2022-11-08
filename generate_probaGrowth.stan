@@ -5,7 +5,7 @@
 */
 
 functions {
-	// Function for growth. This returns the expected growth in mm, for 1 year.
+	// Function for growth. This returns the expected growth in mm, for 1 year on the log scale (meanlog).
 	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope, real dbh_slope2,
 		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real ph_slope, real ph_slope2, real competition_slope)
 	{
