@@ -117,15 +117,15 @@ parameters {
 	real competition_slope;
 	
 	// Errors (observation and process)
-	// --- Process error, which is the sd of a lognormal distrib /!\
+	// --- Process error, which is the sdlog parameter of a lognormal distrib /!\
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
 
-	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
+	// --- Extreme error, by default at least twice the min observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
+	
 	array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
-	vector<lower = 0.1/sd_dbh, upper = 3000/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
-
+	// Latent growth
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
