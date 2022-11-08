@@ -5,7 +5,7 @@
 */
 
 functions {
-	// Function computing the expected annual diameter-growth in mm for a given dbh, environment, and set of parameters
+	// Function for growth. This returns the expected growth in mm, for 1 year.
 	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope, real dbh_slope2,
 		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real ph_slope, real ph_slope2, real competition_slope)
 	{
@@ -20,17 +20,18 @@ functions {
 			It takes the following parameters:
 				- averageGrowth: The basic growth, when all the explanatory variables are set to zero
 				- dbh_slope: The slope for dbh
+				- dbh_slope2: The slope for dbh (quadratic term)
 				- pr_slope: The slope for precipitation
-				- pr_slope2: The slope for precipitation (squared term)
+				- pr_slope2: The slope for precipitation (quadratic term)
 				- tas_slope: The slope for temperature (tas)
-				- tas_slope2: The slope for temperature (tas, squared term)
+				- tas_slope2: The slope for temperature (tas, quadratic term)
 				- ph_slope: The slope for pH
-				- ph_slope2: The slope for pH (squared term)
+				- ph_slope2: The slope for pH (quadratic term)
 				- competition_slope: The slope for competition
 		*/
 
-		return (exp(averageGrowth + dbh_slope*dbh0 + dbh_slope2*dbh0^2 + pr_slope*precip + pr_slope2*precip^2 +
-			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea));
+		return (averageGrowth + dbh_slope*dbh0 + dbh_slope2*dbh0^2 + pr_slope*precip + pr_slope2*precip^2 +
+			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea);
 	}
 }
 
