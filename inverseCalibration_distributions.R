@@ -103,7 +103,7 @@ inverseCalibration = function(fun, ...)
 	}
 
 	# Nakagami
-	if (isTRUE(all.equal(fun, nakagami::dnaka)))
+	if (isTRUE(all.equal(fun, nakagami::dnaka))) # Checked and validated computation (with a trick for arg2)
 	{
 		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "scale") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape and rate for dnaka")
