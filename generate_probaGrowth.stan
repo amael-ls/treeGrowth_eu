@@ -91,12 +91,10 @@ data {
 }
 
 transformed data {
-	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
-	vector[n_dbh] normalised_DBH = dbh0/sd_dbh; // Normalised but NOT centred dbh
-	vector[n_threshold] normalised_threshold = threshold/sd_dbh; // Normalised threshold
+	vector[n_indiv] normalised_dbh_init = dbh_init/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_children] normalised_avg_yearly_growth_obs = avg_yearly_growth_obs/sd_dbh; // Normalised but NOT centred averaged yearly growth
-	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centered precipitations
-	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centered temperatures
+	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
+	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
 	vector[n_plots] normalised_ph = (ph - ph_mu)/ph_sd; // Normalised and centred pH
 	vector[n_climate] normalised_standBasalArea = (standBasalArea - ba_mu)/ba_sd; // Normalised and centred BA
 }
