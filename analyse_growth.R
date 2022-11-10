@@ -22,10 +22,11 @@ infoSpecies = readRDS("./speciesInformations.rds")
 
 n_runs = 1 # Number of runs used in growth_subsample.R
 threshold_indiv = 1000 # Minimal number of individuals required to use multi runs
-threshold_time = as.Date("2022/09/12") # Results anterior to this date will not be considered
+threshold_time = as.Date("2022/11/07") # Results anterior to this date will not be considered
 
 infoSpecies[, multiRun := if (n_indiv > threshold_indiv) TRUE else FALSE, by = speciesName_sci]
-infoSpecies[, processed := isProcessed(speciesName_sci, multiRun, threshold_time, lower = 1, upper = n_runs), by = speciesName_sci]
+infoSpecies[, processed := isProcessed(path = speciesName_sci, multi = multiRun, lim_time =  threshold_time,
+	extension = "_germany_1000_dbh_is_not_latent_gamma_fixedSigma.rds$", lower = 1, upper = n_runs), by = speciesName_sci]
 infoSpecies = infoSpecies[(processed)]
 
 infoSpecies[, n_nfi := 1]
@@ -48,8 +49,8 @@ names(ls_files) = infoSpecies[, speciesName_sci]
 params_dt = data.table(parameters = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2",
 	"tas_slope", "tas_slope2", "ph_slope", "ph_slope2", "competition_slope"),
 	priors = c(dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm, dnorm),
-	arg1 = c(-4, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-	arg2 = c(10, 5, 5, 5, 5, 5, 5, 5, 5, 5),
+	arg1 = c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+	arg2 = c(20, 20, 20, 20, 20, 20, 20, 20, 20, 20),
 	title = c("Average growth (mean)", "Dbh slope", "Dbh slope (quadratic term)", "Precipitation slope",
 		"Precipitation slope (quadratic term)", "Temperature slope", "Temperature slope (quadratic term)", "Soil acidity slope (pH)",
 		"Soil acidity slope (pH, quadratic term)", "Competition slope"),
@@ -62,7 +63,7 @@ for (species in infoSpecies[, speciesName_sci])
 {
 	multi = infoSpecies[species, multiRun]
 	ls_nfi = unlist(stri_split(infoSpecies[species, ls_nfi], regex = ", "))
-	summary_dt = centralised_fct(species, multi, n_runs, ls_nfi, params_dt, run = if (multi) NULL else 1, simulatePosterior = TRUE)
+	summary_dt = centralised_fct(species, multi, n_runs, ls_nfi, params_dt, run = if (multi) NULL else 1, simulatePosterior = FALSE)
 	error_ls[[species]] = summary_dt[["error_dt"]]
 	correl_ls[[species]] = summary_dt[["correl_energy"]]
 	posterior_ls[[species]] = summary_dt[["posteriorSim"]]
@@ -609,7 +610,7 @@ dev.off()
 
 ## Check the proportion of unrealistic growth
 # Load results
-results = readRDS("Fagus sylvatica/growth-run=1-2022-09-13_13h26_widerEtaPrior_widerProba_germany_1000.rds")
+results = readRDS("Fagus sylvatica/growth-run=1-2022-11-03_16h42_germany_1000_reparametrisation.rds")
 stanData = readRDS("Fagus sylvatica/1_stanData.rds")
 sd_dbh = readRDS("Fagus sylvatica/1_dbh_normalisation.rds")[, sd]
 
@@ -655,10 +656,10 @@ stanData$environment = c(precip = (precip - stanData$pr_mu)/stanData$pr_sd,
 	ph = (ph - stanData$ph_mu)/stanData$ph_sd,
 	basalArea = (basalArea - stanData$ba_mu)/stanData$ba_sd)
 
-stanData$n_dbh = 1000
+stanData$n_dbh = 2000
 stanData$n_threshold = 3
 
-stanData$dbh0 = seq(50, 550, length.out = stanData$n_dbh)
+stanData$dbh0 = seq(50, 1000, length.out = stanData$n_dbh)
 stanData$threshold = seq(10, 20, length.out = stanData$n_threshold)
 
 # Simulations
@@ -667,7 +668,7 @@ probaGrowth = generate_quantities$draws("probaGrowth_beyondThreshold") # iter_sa
 
 probaGrowth_mean = apply(probaGrowth, 3, mean)
 
-probaGrowth_dt = data.table(dbh = rep(stanData$dbh0, stanData$n_threshold),
+probaGrowth_dt2 = data.table(dbh = rep(stanData$dbh0, stanData$n_threshold),
 	threshold = rep(stanData$threshold, each = stanData$n_dbh),
 	proba = probaGrowth_mean)
 
