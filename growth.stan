@@ -74,7 +74,6 @@ data {
 	vector[n_children] avg_yearly_growth_obs;
 
 	// Explanatory variables
-	vector<lower = 0>[n_indiv] dbh_init; // Initial dbh, considered here as a known data
 	real<lower = 0> sd_dbh; // To standardise the initial dbh (sd_dbh is however the sd of all the dbh, not only initial ones)
 
 	vector<lower = 0>[n_climate] precip; // Precipitations
@@ -95,7 +94,6 @@ data {
 }
 
 transformed data {
-	vector[n_indiv] normalised_dbh_init = dbh_init/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_children] normalised_avg_yearly_growth_obs = avg_yearly_growth_obs/sd_dbh; // Normalised but NOT centred averaged yearly growth
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
@@ -129,7 +127,11 @@ parameters {
 	
 	array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
 
-	// Latent growth
+	// Latent states
+	// --- Parent (i.e., primary) dbh
+	vector<lower = 0.1/sd_dbh, upper = 3000/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
+
+	// --- Growth
 	vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
 }
 
@@ -203,7 +205,7 @@ model {
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
 	{
-		temporary = normalised_dbh_init[i];
+		temporary = latent_dbh_parents[i];
 		temporary_tm1 = temporary;
 		for (j in 1:nbYearsGrowth[i]) // Loop over growing years
 		{
@@ -230,6 +232,9 @@ model {
 		}
 		record_children_counter += 1; // The growth counter stops one year earlier! Indeed n measurements implies only n - 1 growing years!
 	}
+	
+	// Prior on initial hidden state: This is a diffuse initialisation
+	target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 3000/sd_dbh); // Remember that the dbh is in mm and standardised
 	
 	// --- Observation model
 	for (k in 1:n_inventories)
