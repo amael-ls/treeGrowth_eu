@@ -15,6 +15,15 @@
 #! TRY ON GERMAN DATA, THE FRENCH DATA ARE NOT ADAPTED TO THE WAY WE MODEL GROWTH!
 #! THE FRENCH DATA DO NOT MEASURE DBH THE FIRST TIME, THEY DO A DENDROCHRONO. THIS IS WHY THERE IS NO ERROR ON THAT PART.
 
+#?   r$> info_sample
+#?        distrib     mean      sd      var   skewness
+#?   1:     chisq 3.332272 1.38651 1.922411 -4.1981732
+#?   2:      data 3.332272 1.38651 1.922411  0.3519962
+#?   3:     gamma 3.332272 1.38651 1.922411  0.8321711
+#?   4: lognormal 3.332272 1.38651 1.922411  1.3202924
+#?   5:      naka 3.332272 1.38651 1.922411  1.2726553
+#?   6:      wald 3.332272 1.38651 1.922411  1.2482567
+
 #### Clear memory and load packages
 rm(list = ls())
 graphics.off()
@@ -471,9 +480,9 @@ stanData = list(
 
 	# Observations
 	avg_yearly_growth_obs = growth_dt[, growth],
+	dbh_init = treeData[parents_index, dbh],
 
 	# Explanatory variables
-	dbh_init = treeData[parents_index, dbh],
 	sd_dbh = ifelse(subsamplingActivated, checkSampling[["sd_dbh_beforeSubsample"]], treeData[, sd(dbh)]),
 
 	precip = climate[, pr], # Annual precipitations (sum over 12 months)
@@ -510,7 +519,8 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_germany_1000_reparametrisation.rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, 
+	"_germany_1000_latent_init_dbh_notDiffuse_reparametrisation.rds"))
 
 results$cmdstan_diagnose()
 
