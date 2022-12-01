@@ -1,6 +1,9 @@
 
 #### Aim of prog: Create dummy data to check parameters recovery
-##
+## Comments
+# The creation of these data is based on Quercus robur data. I noticed that the diameters distribution of the data is bimodal, with a
+# 	clear separation between the two modes around 300 mm. Therefore, I decided to sample two gamma distributions with means and variances
+#	taken from the Quercus data with dbh above or below 300 mm.
 
 #### Clear memory and load packages
 rm(list = ls())

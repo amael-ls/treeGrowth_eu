@@ -11,6 +11,9 @@ library(data.table)
 library(cmdstanr)
 library(stringi)
 
+#### Tool functions
+source("../toolFunctions.R")
+
 #### Load data
 ## General data (list)
 data = readRDS("./dummyData.rds")
@@ -32,13 +35,22 @@ stanData = list(
 
 	# Observations
 	avg_yearly_growth_obs = data[["treeData"]][, ..growth_cols],
+	dbh_init = unlist(data[["treeData"]][, "dbh1"]),
 
 	# Explanatory variables
 	sd_dbh = data[["scaling"]]["sd_dbh_orig"], # To standardise the initial dbh
 
 	tas = data[["treeData"]][, ..temperature_cols], # Temperature
 	tas_mu = data[["scaling"]]["mu_temp"], # To centre the temperature
-	tas_sd = data[["scaling"]]["sd_temp"] # To standardise the temperature
+	tas_sd = data[["scaling"]]["sd_temp"], # To standardise the temperature
+
+	# Provided parameters
+	beta0 = data[["parameters"]]["beta0"],
+	beta1 = data[["parameters"]]["beta1"],
+	beta2 = data[["parameters"]]["beta2"],
+
+	beta3 = data[["parameters"]]["beta3"],
+	beta4 = data[["parameters"]]["beta4"]
 )
 
 ## Compile model
@@ -49,7 +61,20 @@ start_time = Sys.time()
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
-	iter_warmup = 1500, iter_sampling = 1000, save_warmup = TRUE,
-	max_treedepth = 11, adapt_delta = 0.9)
+	iter_warmup = 750, iter_sampling = 1500, save_warmup = TRUE,
+	max_treedepth = 12, adapt_delta = 0.9)
 
 end_time = Sys.time()
+
+results$cmdstan_diagnose()
+
+data[["parameters"]]
+
+lazyTrace(draws = results$draws("beta0"), val1 = data[["parameters"]]["beta0"])
+lazyTrace(draws = results$draws("beta1"), val1 = data[["parameters"]]["beta1"])
+lazyTrace(draws = results$draws("beta2"), val1 = data[["parameters"]]["beta2"])
+lazyTrace(draws = results$draws("sigmaProc"), val1 = data[["parameters"]]["sigmaProc"])
+lazyTrace(draws = results$draws("latent_dbh_parents[1]"), val1 = data[["treeData"]][1, dbh1]/data[["scaling"]]["sd_dbh_orig"])
+
+
+mean(results$draws("sigmaProc"))

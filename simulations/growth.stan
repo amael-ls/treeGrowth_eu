@@ -20,8 +20,8 @@
 
 functions {
 	// Function for growth. This returns the expected growth in mm, for 1 year.
-	real growth(real dbh0, real temperature, real averageGrowth, real dbh_slope, real dbh_slope2,
-		real tas_slope, real tas_slope2)
+	real growth(real dbh0, real temperature, real beta0, real beta1, real beta2,
+		real beta3, real beta4)
 	{
 		/*
 			It takes the following variables:
@@ -29,14 +29,14 @@ functions {
 				- temperature: The temperature
 			
 			It takes the following parameters:
-				- averageGrowth: The basic growth, when all the explanatory variables are set to zero
-				- dbh_slope: The slope for dbh
-				- dbh_slope2: The slope for dbh (quadratic term)
-				- tas_slope: The slope for temperature (tas)
-				- tas_slope2: The slope for temperature (tas, quadratic term)
+				- beta0: The basic growth, when all the explanatory variables are set to zero
+				- beta1: The slope for dbh
+				- beta2: The slope for dbh (quadratic term)
+				- beta3: The slope for temperature (tas)
+				- beta4: The slope for temperature (tas, quadratic term)
 		*/
 
-		return (averageGrowth + dbh_slope*dbh0 + dbh_slope2*dbh0^2 + tas_slope*temperature + tas_slope2*temperature^2);
+		return (beta0 + beta1*dbh0 + beta2*dbh0^2 + beta3*temperature + beta4*temperature^2);
 	}
 }
 
@@ -49,6 +49,7 @@ data {
 
 	// Observations
 	array[n_indiv, n_obs_growth] real avg_yearly_growth_obs;
+	array[n_indiv] real <lower = 0> dbh_init; // Initial dbh data
 
 	// Explanatory variables
 	real<lower = 0> sd_dbh; // To standardise the initial dbh (sd_dbh is however the sd of all the dbh, not only initial ones)
@@ -56,6 +57,13 @@ data {
 	array[n_indiv, n_latent_growth] real tas; // Temperature
 	real tas_mu; // To centre the temperature
 	real<lower = 0> tas_sd; // To standardise the temperature
+
+	// Provided parameters
+	// real beta0;
+	// real beta1;
+	// real beta2;
+	// real beta3;
+	// real beta4;
 }
 
 transformed data {
@@ -74,16 +82,16 @@ transformed data {
 
 parameters {
 	// Parameters for growth function
-	real averageGrowth;
-	real dbh_slope;
-	real dbh_slope2;
+	real beta0;
+	real beta1;
+	real beta2;
 
-	real tas_slope;
-	real tas_slope2;
+	real beta3;
+	real beta4;
 	
 	// Errors (observation and process)
 	// --- Process error, which is the sdlog parameter of a lognormal distrib /!\
-	real<lower = 0.5/sd_dbh^2> sigmaProc;
+	real<lower = 0, upper = 2> sigmaProc;
 	
 	// Latent states
 	// --- Parent (i.e., primary) dbh
@@ -103,27 +111,34 @@ model {
 	
 	// Priors
 	// --- Growth parameters
-	target += normal_lpdf(averageGrowth | 0, 20);
-	target += normal_lpdf(dbh_slope | 0, 20);
-	target += normal_lpdf(dbh_slope2 | 0, 20);
+	target += normal_lpdf(beta0 | 0, 20);
+	target += normal_lpdf(beta1 | 0, 20);
+	target += normal_lpdf(beta2 | 0, 20);
 
-	target += normal_lpdf(tas_slope | 0, 20);
-	target += normal_lpdf(tas_slope2 | 0, 20);
+	target += normal_lpdf(beta3 | 0, 20);
+	target += normal_lpdf(beta4 | 0, 20);
 
 	// --- Errors
-	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16);
+	// target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16);
+	target += uniform_lpdf(sigmaProc | 0, 2);
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
 	{
+		// Initial values
 		temporary = latent_dbh_parents[i];
 		temporary_tm1 = temporary;
 		obs_counter = 1;
+		
+		// Prior on initial hidden state: remember that latent_dbh_parents is in mm and standardised.
+		target += gamma_lpdf(latent_dbh_parents[i] | dbh_init[i]^2/5.0, sd_dbh*dbh_init[i]/5.0);
+
+		// Markov process
 		for (j in 1:n_latent_growth) // Loop over growing years
 		{
 			// Process model
 			expected_growth_meanlog = growth(temporary, normalised_tas[i, j],
-				averageGrowth, dbh_slope, dbh_slope2, tas_slope, tas_slope2);
+				beta0, beta1, beta2, beta3, beta4);
 
 			target += lognormal_lpdf(latent_growth[i, j] | expected_growth_meanlog, sigmaProc);
 
@@ -141,16 +156,13 @@ model {
 			}
 		}
 	}
-	
-	// Prior on initial hidden state: This is a diffuse initialisation
-	target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 3000/sd_dbh); // Remember that the dbh is in mm and standardised
 
 	// --- Observation model (likelihood)
 	for (i in 1:n_indiv)
 	{
 		for (j in 1:n_obs_growth)
 		{
-			target += normal_lpdf(normalised_avg_yearly_growth_obs[i, j] | latent_avg_yearly_growth[i, j], 3/sd_dbh);
+			target += normal_lpdf(normalised_avg_yearly_growth_obs[i, j] | latent_avg_yearly_growth[i, j], 0.5/sd_dbh);
 		}
 	}
 
