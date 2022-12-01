@@ -18,6 +18,12 @@ source("../toolFunctions.R")
 ## General data (list)
 data = readRDS("./dummyData.rds")
 
+## Saving options
+savingPath = "./"
+
+basename = paste0("indiv=", data[["infos"]]["n_indiv"], "_plot=", data[["infos"]]["n_plot"],
+	"_measurements=", data[["infos"]]["n_measurements"], "_deltaT=", data[["infos"]]["delta_t"])
+
 #### Fit data
 ## Common variables
 growth_cols = colnames(data[["treeData"]])[stri_detect(colnames(data[["treeData"]]), regex = "growth[:digit:]")]
@@ -68,13 +74,13 @@ end_time = Sys.time()
 
 results$cmdstan_diagnose()
 
-data[["parameters"]]
-
 lazyTrace(draws = results$draws("beta0"), val1 = data[["parameters"]]["beta0"])
 lazyTrace(draws = results$draws("beta1"), val1 = data[["parameters"]]["beta1"])
 lazyTrace(draws = results$draws("beta2"), val1 = data[["parameters"]]["beta2"])
+lazyTrace(draws = results$draws("beta3"), val1 = data[["parameters"]]["beta3"])
+lazyTrace(draws = results$draws("beta4"), val1 = data[["parameters"]]["beta4"])
 lazyTrace(draws = results$draws("sigmaProc"), val1 = data[["parameters"]]["sigmaProc"])
 lazyTrace(draws = results$draws("latent_dbh_parents[1]"), val1 = data[["treeData"]][1, dbh1]/data[["scaling"]]["sd_dbh_orig"])
 
-
-mean(results$draws("sigmaProc"))
+results$save_output_files(dir = savingPath, basename = paste0(basename, "_diagnose"), timestamp = FALSE, random = TRUE)
+results$save_object(file = paste0(basename, "_results.rds"))
