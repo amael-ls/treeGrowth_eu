@@ -72,6 +72,7 @@ data {
 
 	// Observations
 	vector[n_children] avg_yearly_growth_obs;
+	vector<lower = 0>[n_indiv] dbh_init; // Initial dbh data
 
 	// Explanatory variables
 	real<lower = 0> sd_dbh; // To standardise the initial dbh (sd_dbh is however the sd of all the dbh, not only initial ones)
@@ -205,6 +206,9 @@ model {
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
 	{
+		// Prior on initial hidden state: remember that latent_dbh_parents is in mm and standardised.
+		target += gamma_lpdf(latent_dbh_parents[i] | dbh_init[i]^2/5.0, sd_dbh*dbh_init[i]/5.0);
+
 		temporary = latent_dbh_parents[i];
 		temporary_tm1 = temporary;
 		for (j in 1:nbYearsGrowth[i]) // Loop over growing years
@@ -232,9 +236,6 @@ model {
 		}
 		record_children_counter += 1; // The growth counter stops one year earlier! Indeed n measurements implies only n - 1 growing years!
 	}
-	
-	// Prior on initial hidden state: This is a diffuse initialisation
-	target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 3000/sd_dbh); // Remember that the dbh is in mm and standardised
 	
 	// --- Observation model
 	for (k in 1:n_inventories)
