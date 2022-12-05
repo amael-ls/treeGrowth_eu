@@ -64,6 +64,9 @@ data {
 	// real beta2;
 	// real beta3;
 	// real beta4;
+
+	// Observation error (not yet simulated in the data actually, just used for the likelihood)
+	real <lower = 0> sigmaObs;
 }
 
 transformed data {
@@ -162,7 +165,7 @@ model {
 	{
 		for (j in 1:n_obs_growth)
 		{
-			target += normal_lpdf(normalised_avg_yearly_growth_obs[i, j] | latent_avg_yearly_growth[i, j], 0.5/sd_dbh);
+			target += normal_lpdf(normalised_avg_yearly_growth_obs[i, j] | latent_avg_yearly_growth[i, j], 2*sigmaObs/delta_t);
 		}
 	}
 
