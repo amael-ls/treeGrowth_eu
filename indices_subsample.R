@@ -42,7 +42,7 @@ indices_subsample = function(run_id, treeData, savingPath, mainFolder, climFolde
 		nbIndiv = unique(trees_NFI[, .(plot_id, tree_id)])[, .N]
 		length_filled_years = sum(trees_NFI[, max(year) - min(year) + 1, by = .(plot_id, tree_id)][, V1])
 
-		indices = data.table(year = integer(trees_NFI[, .N]), tree_id = integer(trees_NFI[, .N]),
+		indices = data.table(year = integer(trees_NFI[, .N]), tree_id = character(trees_NFI[, .N]),
 			plot_id = character(trees_NFI[, .N]), index_gen = integer(trees_NFI[, .N]),
 			index_clim_start = integer(trees_NFI[, .N]), index_clim_end = integer(trees_NFI[, .N]))
 
