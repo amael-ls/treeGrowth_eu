@@ -12,4 +12,4 @@ Fagus_sylvatica/
 Picea_abies/
 Tilia_platyphyllos/
 *.csv
-
+*.vscode/
