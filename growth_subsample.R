@@ -36,7 +36,7 @@ library(stringi)
 
 #### Get parameters for run
 args = commandArgs(trailingOnly = TRUE)
-# args = c("16", "1", "12000")
+# args = c("16", "1", "4000")
 if (length(args) != 3)
 	stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
@@ -550,7 +550,8 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_de-fr-sw_8000_latent_init_dbh_notDiffuse_reparametrisation.rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_de-fr-sw_", max_indiv,
+	"_latent_init_dbh_notDiffuse_gamma.rds"))
 
 results$cmdstan_diagnose()
 
