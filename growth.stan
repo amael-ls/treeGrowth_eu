@@ -142,6 +142,8 @@ model {
 	int children_counter = 1; // Counter in the 'observation space' for chidlren
 	int record_children_counter = 1; // Counter to know when we should compute the latent average yearly growth and store it
 	real expected_growth_meanlog;
+	real expected_growth_gamma;
+	real var_growth_gamma;
 	real temporary;
 	real temporary_tm1; // temporary at time t - 1 (useful for trees measured more than twice)
 	vector [n_children] latent_avg_yearly_growth; // n_children is also the number of measured growth (number of intervals)!
@@ -218,7 +220,10 @@ model {
 				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[climate_index[i] + j - 1],
 				averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 
-			target += lognormal_lpdf(latent_growth[growth_counter] | expected_growth_meanlog, sigmaProc);
+			expected_growth_gamma = exp(expected_growth_meanlog + sigmaProc^2/2); // Computed from meanlog and sdlog
+			var_growth_gamma = (exp(sigmaProc^2) - 1)*exp(2*expected_growth_meanlog + sigmaProc^2); // Computed from meanlog and sdlog
+
+			target += gamma_lpdf(latent_growth[growth_counter] | expected_growth_gamma^2/var_growth_gamma, expected_growth_gamma/var_growth_gamma);
 
 			// Dbh at time t + 1
 			temporary += latent_growth[growth_counter];
