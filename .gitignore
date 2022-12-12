@@ -11,3 +11,5 @@ sutton_measurementError/measurementError
 Fagus_sylvatica/
 Picea_abies/
 Tilia_platyphyllos/
+*.csv
+
