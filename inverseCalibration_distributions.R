@@ -1,4 +1,11 @@
 
+#### Aim of prog: Compute different moments from mean and variance for few distributions
+## Comments:
+# It is easy to prove that the skewness of the gamma is always less than the skewness of the lognormal.
+# Skewness(gamma) = 2*sd/mean
+# Skewness(lognormal) = (var/mean^2 + 3)*sd/mean
+# And therefore the difference (gamma - lognormal) is - sd/mean*(var/mean^2 + 1) < 0
+
 library(extraDistr)
 library(rootSolve)
 library(nakagami)
@@ -68,7 +75,7 @@ inverseCalibration = function(fun, ...)
 		output[["mean"]] = arg1/arg2
 		output[["var"]] = arg1/arg2^2
 		output[["sd"]] = sqrt(output[["var"]])
-		output[["skewness"]] = 2/sqrt(arg1)
+		output[["skewness"]] = 2/sqrt(arg1) # = 2*sd/mean
 		output[["arg1"]] = arg1
 		output[["arg2"]] = arg2
 	}
@@ -97,7 +104,7 @@ inverseCalibration = function(fun, ...)
 		output[["mean"]] = m*exp(arg2^2/2)
 		output[["var"]] = m^2*omega*(omega - 1)
 		output[["sd"]] = sqrt(output[["var"]])
-		output[["skewness"]] = (omega + 2)*sqrt(omega - 1)
+		output[["skewness"]] = (omega + 2)*sqrt(omega - 1) # = (var/mean^2 + 3)*var/mean
 		output[["arg1"]] = arg1
 		output[["arg2"]] = arg2
 	}
