@@ -36,26 +36,26 @@ library(DHARMa)
 #### Tool functions
 ## Related to checking/cleaning data
 # To check that each tree has only one species associated (i.e., individuals do not change species)
-checkSpecies = function(dt, usedKey = "Arbre", option = "simplify")
+checkSpecies = function(dt, usedKey = "tree_id", option = "simplify")
 {
 	if ("usedKey" %in% names(dt))
 		warning("Data table might be confused by the argument usedKey. It is both an argument of the function and a column name")
 
-	dt[, species_nb := length(unique(Esp)), by = usedKey]
+	dt[, species_nb := length(unique(species)), by = usedKey]
 	if (dt[species_nb > 1, .N] != 0)
 	{
 		warning("Some trees have more than one species!")
 		if (option == "simplify")
 		{
 			warning("You chose the option to simplify, species will be rewritten as unknown")
-			dt[species_nb > 1, Esp := "unknown"]
+			dt[species_nb > 1, species := "unknown"]
 		}
 	}
 	dt[, species_nb := NULL]
 }
 
 # To check that each tree id is unique (not that multi-trunk trees can have more than one row. Use the ... argument with toKeep)
-checkIndividuals = function(dt, usedKey = "Arbre", option = "remove", ...)
+checkIndividuals = function(dt, usedKey = "tree_id", option = "remove", ...)
 {
 	if ("usedKey" %in% names(dt))
 		warning("Data table might be confused by the argument usedKey. It is both an argument of the function and a column name")
@@ -80,6 +80,21 @@ checkIndividuals = function(dt, usedKey = "Arbre", option = "remove", ...)
 	dt[, nb_indiv := NULL]
 	return (dt) # No other choice than returning because I am removing some data. Not possible to do it by reference
 }
+
+# To use scientific names rather than codes
+sciNames = function(species)
+{
+	refSpecies = data.table(code = c("ACPE", "ACSA", "ABBA", "FAGR", "BEAL", "PIRU", "BEPA", "ACRU", "PIGL", "PIRE", "SODE"),
+	sciNames = c("Acer_pensylvanicum", "Acer_saccharum", "Abies_balsamea", "Fagus_grandifolia",
+		"Betula_alleghaniensis", "Picea_rubens", "Betula_papyrifera", "Acer_rubrum", "Picea_glauca", "Pinus_resinosa", "Sorbus_decora"))
+	setkey(refSpecies, code)
+
+	for (sp in refSpecies[, code])
+		species[species == sp] = refSpecies[sp, sciNames]
+
+	return (species)
+}
+
 
 ## Related to Stan
 ## Function to create the individual indices for the state-space model (stan)
@@ -185,17 +200,33 @@ lazyTrace = function(draws, ...)
 treeData_remeasured = readRDS("./trees_remeasured.rds")
 print(paste("The data set contains", treeData_remeasured[, .N], "measures"))
 print(paste("The data set contains", length(treeData_remeasured[, unique(Arbre)]), "individuals"))
+setnames(treeData_remeasured, c("Arbre", "Esp", "Etat", "Multi"), c("tree_id", "species", "isAlive", "isMulti"))
+treeData_remeasured[, species := sciNames(species)]
+treeData_remeasured[isAlive == "V", isAlive := TRUE]
+treeData_remeasured[isAlive == "M", isAlive := FALSE]
+treeData_remeasured[, isAlive := as.logical(isAlive)]
+treeData_remeasured[isMulti == "O", isMulti := TRUE]
+treeData_remeasured[isMulti == "N", isMulti := FALSE]
+treeData_remeasured[, isMulti := as.logical(isMulti)]
 
 treeData_campaign_1 = readRDS("./trees_campaign1.rds")
-setnames(treeData_campaign_1, "DHP_mm_", "dbh_in_mm")
+setnames(treeData_campaign_1, c("Arbre", "Esp", "Etat", "DHP_mm_", "Date"), c("tree_id", "species", "isAlive", "dbh_in_mm", "date"))
+treeData_campaign_1[, species := sciNames(species)]
+treeData_campaign_1[isAlive == "V", isAlive := TRUE]
+treeData_campaign_1[isAlive == "M", isAlive := FALSE]
+treeData_campaign_1[, isAlive := as.logical(isAlive)]
 
 treeData_campaign_2 = readRDS("./trees_campaign2.rds")
-setnames(treeData_campaign_2, "DHP1.mm.", "dbh_in_mm")
+setnames(treeData_campaign_2, c("Arbre", "Esp", "Etat", "DHP1.mm.", "Date"), c("tree_id", "species", "isAlive", "dbh_in_mm", "date"))
+treeData_campaign_2[, species := sciNames(species)]
+treeData_campaign_2[isAlive == "V", isAlive := TRUE]
+treeData_campaign_2[isAlive == "M", isAlive := FALSE]
+treeData_campaign_2[, isAlive := as.logical(isAlive)]
 
 ## Checking the data and correcting them
 # Error in the dates the 19th May 2016 for the dataset treeData_campaign_2
-treeData_campaign_2[Date == "206-05-19", Date := "2016-05-19"] # I know from the lab Gravel that 2016 is the only possible date
-treeData_campaign_2[Date == "20165-19", Date := "2016-05-19"]
+treeData_campaign_2[date == "206-05-19", date := "2016-05-19"] # I know from the lab Gravel that 2016 is the only possible date
+treeData_campaign_2[date == "20165-19", date := "2016-05-19"]
 
 # Checking species
 checkSpecies(treeData_remeasured)
@@ -203,59 +234,66 @@ checkSpecies(treeData_campaign_1)
 checkSpecies(treeData_campaign_2)
 
 # Checking uniqueness of the individuals (see crash test zone to keep few more data). I will remove the multi-trunk trees
-multiTrunk = treeData_remeasured[Multi == "O", Arbre] # List the trees that have multi-trunk! Those trees for sure have more than one line
+multiTrunk = treeData_remeasured[(isMulti), tree_id] # List the trees that have multi-trunk! Those trees for sure have more than one line
 
-treeData_remeasured = treeData_remeasured[!(Arbre %in% multiTrunk)]
-treeData_campaign_1 = treeData_campaign_1[!(Arbre %in% multiTrunk)]
-treeData_campaign_2 = treeData_campaign_2[!(Arbre %in% multiTrunk)]
+treeData_remeasured = treeData_remeasured[!(tree_id %in% multiTrunk)]
+treeData_campaign_1 = treeData_campaign_1[!(tree_id %in% multiTrunk)]
+treeData_campaign_2 = treeData_campaign_2[!(tree_id %in% multiTrunk)]
 
-treeData_remeasured = checkIndividuals(treeData_remeasured, usedKey = "Arbre")
-treeData_campaign_1 = checkIndividuals(treeData_campaign_1, usedKey = "Arbre")
-treeData_campaign_2 = checkIndividuals(treeData_campaign_2, usedKey = "Arbre")
+treeData_remeasured = checkIndividuals(treeData_remeasured)
+treeData_campaign_1 = checkIndividuals(treeData_campaign_1)
+treeData_campaign_2 = checkIndividuals(treeData_campaign_2)
 
 ## Keep only living trees
-treeData_remeasured = treeData_remeasured[Etat == "V"]
-treeData_campaign_1 = treeData_campaign_1[Etat == "V"]
-treeData_campaign_2 = treeData_campaign_2[Etat == "V"]
+treeData_remeasured = treeData_remeasured[(isAlive)]
+treeData_campaign_1 = treeData_campaign_1[(isAlive)]
+treeData_campaign_2 = treeData_campaign_2[(isAlive)]
 
 ## Remove rows containing empty fields for treeData_campaign_2
 treeData_campaign_2[, dbh_in_mm := as.integer(dbh_in_mm)]
+na_dbh_id = treeData_campaign_2[is.na(dbh_in_mm), unique(tree_id)]
+dbh_in_remeasured = treeData_remeasured[tree_id %in% na_dbh_id, tree_id]
+
+# The following line is ok (trees in the same order, and dbh1_in_mm is almost the same as dbh2_in_mm)
+treeData_campaign_2[tree_id %in% dbh_in_remeasured, dbh_in_mm := treeData_remeasured[tree_id %in% dbh_in_remeasured, dbh1_in_mm]]
 treeData_campaign_2 = na.omit(treeData_campaign_2)
 
 ## Last check-up
-if (treeData_remeasured[, length(unique(Arbre))] != treeData_remeasured[, .N])
+if (treeData_remeasured[, length(unique(tree_id))] != treeData_remeasured[, .N])
 	warning("Check the uniqueness of the data again!")
 
-if (treeData_campaign_1[, length(unique(Arbre))] != treeData_campaign_1[, .N])
+if (treeData_campaign_1[, length(unique(tree_id))] != treeData_campaign_1[, .N])
 	warning("Check the uniqueness of the data again!")
 
-if (treeData_campaign_2[, length(unique(Arbre))] != treeData_campaign_2[, .N])
+if (treeData_campaign_2[, length(unique(tree_id))] != treeData_campaign_2[, .N])
 	warning("Check the uniqueness of the data again!")
 
 ## Few descriptions
-treeData_campaign_1[, range(Date)]
-treeData_campaign_2[, range(Date)]
+treeData_campaign_1[, range(date)]
+treeData_campaign_2[, range(date)]
 
 ## Keep only the years for the dates
 # Add a date to treeData_remeasured (done the last week of May 2016). I chose the 25th May 2016 (middle of the week)
-treeData_remeasured[, Date := as.Date("2016-05-25", format = "%Y-%m-%d")]
-treeData_campaign_1[, Date := as.Date(Date, format = "%Y-%m-%d")]
-treeData_campaign_2[, Date := as.Date(Date, format = "%Y-%m-%d")]
+treeData_remeasured[, date := as.Date("2016-05-25", format = "%Y-%m-%d")]
+treeData_campaign_1[, date := as.Date(date, format = "%Y-%m-%d")]
+treeData_campaign_2[, date := as.Date(date, format = "%Y-%m-%d")]
 
 #### Merging the dataset
-## Set key "Arbre" for merging. This key is unique since I removed the multi-trunk trees
-setkey(treeData_remeasured, "Arbre")
-setkey(treeData_campaign_1, "Arbre")
-setkey(treeData_campaign_2, "Arbre")
+## Set key "tree_id" for merging. This key is unique since I removed the multi-trunk trees
+setkey(treeData_remeasured, "tree_id")
+setkey(treeData_campaign_1, "tree_id")
+setkey(treeData_campaign_2, "tree_id")
 
 ## Keep only the column of interest
-treeData_remeasured = treeData_remeasured[, .(Arbre, Esp, dbh1_in_mm, dbh2_in_mm, Date)]
-treeData_campaign_1 = treeData_campaign_1[, .(Arbre, dbh_in_mm, Date)]
-treeData_campaign_2 = treeData_campaign_2[, .(Arbre, dbh_in_mm, Date)]
+treeData_remeasured = treeData_remeasured[, .(tree_id, species, dbh1_in_mm, dbh2_in_mm)]
+treeData_campaign_1 = treeData_campaign_1[, .(tree_id, species, dbh_in_mm, date)]
+treeData_campaign_2 = treeData_campaign_2[, .(tree_id, species, dbh_in_mm, date)]
 
 ## Merging data sets
 # Actually, I just discovered that the second dataset is useless... The interesting trees are the same as in the first dataset!
-treeData = treeData_campaign_1[treeData_remeasured, on = "Arbre"] 
+treeData = treeData_campaign_1[treeData_remeasured, on = "tree_id"]
+# treeData = treeData[treeData_campaign_2, on = "tree_id"] # For trees that have been measured three times in 2016!
+treeData[species != i.species]
 
 ## Remove NA
 treeData = na.omit(treeData)
@@ -266,7 +304,9 @@ treeData[, sd(dbh1_in_mm)]
 treeData[, mean(dbh2_in_mm)]
 treeData[, sd(dbh2_in_mm)]
 
-plot(treeData[, dbh1_in_mm], treeData[, dbh2_in_mm])
+plot(treeData[, dbh1_in_mm], treeData[, dbh2_in_mm], pch = 20)
+points(treeData[dbh1_in_mm/dbh2_in_mm > 1.05, dbh1_in_mm], treeData[dbh1_in_mm/dbh2_in_mm > 1.05, dbh2_in_mm], pch = 20, col = "#CD212A")
+points(treeData[dbh1_in_mm/dbh2_in_mm < 0.95, dbh1_in_mm], treeData[dbh1_in_mm/dbh2_in_mm < 0.95, dbh2_in_mm], pch = 20, col = "#CD212A")
 
 #### Compute the growth beween the first measure and the remeasurements
 ## Change colnames
