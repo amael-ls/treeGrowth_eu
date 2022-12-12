@@ -16,7 +16,7 @@ library(terra)
 #### Load data
 ## Folders
 treeData_folder = "/home/amael/project_ssm/inventories/growth/"
-shapefile_folder = "/home/amael/shapefiles/europe/"
+shapefile_folder = "/home/amael/shapefiles/europe/continent/"
 
 ## Tree data and shapefile
 treeData = readRDS(paste0(treeData_folder, "standardised_european_growth_data_reshaped.rds"))
