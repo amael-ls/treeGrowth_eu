@@ -34,8 +34,8 @@ data {
 	int<lower = 1> n_states; // Number of states
 
 	// indices
-	int<lower = 1> index_parents[n_trees]; // index of the measurement corresponding to the first campaign (2011-2013)
-	int<lower = 1> index_children[n_trees]; // index of the measurement corresponding to the campaign in 2016
+	array [n_trees] int<lower = 1> index_parents; // index of the measurement corresponding to the first campaign (2011-2013)
+	array [n_trees] int<lower = 1> index_children; // index of the measurement corresponding to the campaign in 2016
 
 	// Parameters growth
 	real a; // For var_G
@@ -49,10 +49,10 @@ data {
 	real<lower = 0> scaling; // Scaling dbh that was USED to parameterise growth
 
 	// Data
-	int<lower = 0> dbh0[n_trees]; // dbh measured in the first campaign (2011-2013) neither by person 1 nor 2
-	int<lower = 0> dbh1[n_trees]; // dbh measured by person 1 in 2016
-	int<lower = 0> dbh2[n_trees]; // dbh measured by person 2 in 2016
-	int<lower = 0> years[n_trees]; // Number of years spent between the first campaign and 2016
+	array [n_trees] int<lower = 0> dbh0; // dbh measured in the first campaign (2011-2013) neither by person 1 nor 2
+	array [n_trees] int<lower = 0> dbh1; // dbh measured by person 1 in 2016
+	array [n_trees] int<lower = 0> dbh2; // dbh measured by person 2 in 2016
+	array [n_trees] int<lower = 0> years; // Number of years spent between the first campaign and 2016
 }
 
 parameters {
