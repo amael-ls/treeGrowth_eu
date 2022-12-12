@@ -36,7 +36,7 @@ library(stringi)
 
 #### Get parameters for run
 args = commandArgs(trailingOnly = TRUE)
-# args = c("38", "1", "1000")
+# args = c("16", "1", "12000")
 if (length(args) != 3)
 	stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
@@ -55,12 +55,16 @@ init_fun = function(...)
 	if (!all(requiredArgs %in% names(providedArgs)))
 		stop("You must provide dbh_parents, n_latentGrowth, average_yearlyGrowth, nbYearsGrowth, and normalise")
 
-	# chain_id = providedArgs[["chain_id"]]
 	dbh_parents = providedArgs[["dbh_parents"]]
 	n_latentGrowth = providedArgs[["n_latentGrowth"]]
 	average_yearlyGrowth = providedArgs[["average_yearlyGrowth"]]
 	nbYearsGrowth = providedArgs[["nbYearsGrowth"]]
 	normalise = providedArgs[["normalise"]]
+
+	useMean = FALSE
+
+	if ("useMean" %in% names(providedArgs))
+		useMean = providedArgs[["useMean"]]
 
 	if (normalise & !all(c("mu_dbh", "sd_dbh") %in% names(providedArgs)))
 		stop("You must provide mu_dbh and sd_dbh in order to normalise")
@@ -76,8 +80,8 @@ init_fun = function(...)
 
 	if (any(average_yearlyGrowth < 0))
 	{
-		warning("Some average yearly growth were negative. They have been replaced by 0.1")
-		average_yearlyGrowth[average_yearlyGrowth < 0] = 0.1
+		warning("Some average yearly growth were negative. They have been replaced by 0.5")
+		average_yearlyGrowth[average_yearlyGrowth < 0] = 0.5
 	}
 
 	n_indiv = length(dbh_parents)
@@ -86,24 +90,47 @@ init_fun = function(...)
 	latent_growth_gen = numeric(n_latentGrowth)
 	counter_growth = 0
 
-	# Change extreme growth to more plausible values
-	q_90 = quantile(average_yearlyGrowth, seq(0, 1, 0.1))["90%"]
-	n_above_q90 = length(average_yearlyGrowth[average_yearlyGrowth > q_90])
-	average_yearlyGrowth[average_yearlyGrowth > q_90] = rgamma(n_above_q90, shape = q_90^2/1, rate = q_90/1)
-
-	for (i in 1:n_indiv) # Not that this forbid trees to shrink
+	if (useMean)
 	{
-		for (j in 1:nbYearsGrowth[i])
+		avg_growth = mean(average_yearlyGrowth)
+		var_growth = avg_growth/5
+		if (avg_growth <= 0)
 		{
-			counter_growth = counter_growth + 1
-			latent_growth_gen[counter_growth] = rgamma(n = 1, shape = average_yearlyGrowth[i]^2/0.5, rate = average_yearlyGrowth[i]/0.5)
+			warning("Average yearly growth is, in average, negative. Value set to default: 3")
+			avg_growth = 3
+		}
+	}
+
+	# Change extreme growth to more plausible values
+	if (!useMean)
+	{
+		q_90 = quantile(average_yearlyGrowth, seq(0, 1, 0.1))["90%"]
+		n_above_q90 = length(average_yearlyGrowth[average_yearlyGrowth > q_90])
+		average_yearlyGrowth[average_yearlyGrowth > q_90] = rgamma(n_above_q90, shape = q_90^2/1, rate = q_90/1)
+
+		for (i in 1:n_indiv) # Not that this forbid trees to shrink
+		{
+			for (j in 1:nbYearsGrowth[i])
+			{
+				counter_growth = counter_growth + 1
+				latent_growth_gen[counter_growth] = rgamma(n = 1, shape = 2*average_yearlyGrowth[i], rate = 2) # => var = 2*mean
+			}
+		}
+	} else {
+		for (i in 1:n_indiv) # Not that this forbid trees to shrink
+		{
+			for (j in 1:nbYearsGrowth[i])
+			{
+				counter_growth = counter_growth + 1
+				latent_growth_gen[counter_growth] = rgamma(n = 1, shape = avg_growth^2/var_growth, rate = avg_growth/var_growth)
+			}
 		}
 	}
 
 	if (any(latent_growth_gen == 0))
 	{
 		warning("Some generated latent growth were 0. There have been replaced by 1e-5 (before standardising)")
-		latent_growth_gen[latent_growth_gen == 0] = 1e-5
+		latent_growth_gen[latent_growth_gen == 0] = 1e-2
 	}
 
 	# Normalise dbh
@@ -302,15 +329,13 @@ if ((species_id < 1) | (species_id > length(ls_species)))
 speciesCountry = treeData[, .N, by = .(speciesName_sci, country)]
 setkey(speciesCountry, speciesName_sci)
 setnames(speciesCountry, "N", "n_measurements")
+speciesCountry[, prop := round(100*n_measurements/sum(n_measurements), 2), by = speciesName_sci]
 
 species = ls_species[species_id]
 print(paste("Script running for species:", species))
 print(speciesCountry[species])
 
-if (!("germany" %in% speciesCountry[species, country]))
-	stop("Germany is missing")
-
-treeData = treeData[speciesName_sci == species & country == "germany"]
+treeData = treeData[speciesName_sci == species]
 
 savingPath = paste0("./", species, "/")
 
@@ -355,6 +380,12 @@ computeDiametralGrowth(treeData, byCols = c("speciesName_sci", "plot_id", "tree_
 growth_dt = na.omit(treeData)
 
 print(paste0(round(100*growth_dt[growth < 0 | growth > 10, .N]/growth_dt[, .N], 3), "% negative or above 10 mm/yr"))
+
+## Print number of measurements per country
+print("Number of growth measurements per country:")
+countryStats = growth_dt[, .N, by = country]
+countryStats[, prop := round(100*N/sum(N), 2)]
+print(countryStats)
 
 ## Read climate
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
@@ -406,7 +437,7 @@ if (n_inventories > 1)
 {
 	for (k in 1:(n_inventories - 1))
 	{
-		end_nfi_avg_growth = start_nfi_avg_growth[k] + growth_dt[(stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
+		end_nfi_avg_growth[k] = start_nfi_avg_growth[k] + growth_dt[(stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
 		start_nfi_avg_growth[k + 1] = end_nfi_avg_growth[k] + 1
 	}
 }
@@ -449,7 +480,7 @@ if (length(average_yearlyGrowth) != n_indiv)
 
 initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_index, dbh],
 	n_latentGrowth = n_latentGrowth, average_yearlyGrowth = average_yearlyGrowth, nbYearsGrowth = nbYearsGrowth,
-	normalise = TRUE, mu_dbh = 0, sd_dbh = sd(treeData[, dbh]))
+	normalise = TRUE, mu_dbh = 0, sd_dbh = sd(treeData[, dbh]), useMean = FALSE)
 
 length(initVal_Y_gen)
 
@@ -519,8 +550,7 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, 
-	"_germany_1000_latent_init_dbh_notDiffuse_reparametrisation.rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_de-fr-sw_8000_latent_init_dbh_notDiffuse_reparametrisation.rds"))
 
 results$cmdstan_diagnose()
 
