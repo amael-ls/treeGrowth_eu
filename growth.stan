@@ -44,8 +44,8 @@ functions {
 				- competition_slope: The slope for competition
 		*/
 
-		return (exp(averageGrowth + dbh_slope*dbh0 + dbh_slope2*dbh0^2 + pr_slope*precip + pr_slope2*precip^2 +
-			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea));
+		return (averageGrowth + dbh_slope*dbh0 + dbh_slope2*dbh0^2 + pr_slope*precip + pr_slope2*precip^2 +
+			tas_slope*temperature + tas_slope2*temperature^2 + ph_slope*ph + ph_slope2*ph^2 + competition_slope*standBasalArea);
 	}
 }
 
@@ -62,49 +62,39 @@ data {
 	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 
 	// Indices
-	array [n_indiv] int<lower = 1, upper = n_obs - 1> parents_index; // Index of each parent in the 'observation space'
-	array [n_children] int<lower = 2, upper = n_obs> children_index; // Index of children in the 'observation space'
 	array [n_children] int<lower = 2> latent_children_index; // Index of children in the 'latent space'
 	array [n_indiv] int<lower = 1, upper = n_climate - 1> climate_index; // Index of the climate associated to each parent
 	
-	array [n_inventories] int<lower = 1, upper = n_indiv - 1> start_nfi_parents; // Starting point of each NFI for parents
-	array [n_inventories] int<lower = 2, upper = n_indiv> end_nfi_parents; // Ending point of each NFI for parents
-	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_children; // Starting point of each NFI for children
-	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_children; // Ending point of each NFI for children
 	array [n_inventories] int<lower = 1, upper = n_children - 1> start_nfi_avg_growth; // Starting point of each NFI for averaged obs growth
 	array [n_inventories] int<lower = 2, upper = n_children> end_nfi_avg_growth; // Ending point of each NFI for averaged obs growth
 	
 	array [n_indiv] int<lower = 1, upper = n_plots> plot_index; // Indicates to which plot individuals belong to
 
-	array [n_indiv] int<lower = 0, upper = 1> onlyTwoMeasures; // Indicates whether there are only two measurements or more (boolean)
-
 	// Observations
-	vector<lower = 0>[n_obs] Yobs;
 	vector[n_children] avg_yearly_growth_obs;
-
-	// sd_dbh is for the whole species and should not be more than 5% different from the sd of the subsample, namely sd(Yobs)
-	real<lower = 0.95*sd(Yobs), upper = 1.05*sd(Yobs)> sd_dbh;
+	vector<lower = 0>[n_indiv] dbh_init; // Initial dbh data
 
 	// Explanatory variables
+	real<lower = 0> sd_dbh; // To standardise the initial dbh (sd_dbh is however the sd of all the dbh, not only initial ones)
+
 	vector<lower = 0>[n_climate] precip; // Precipitations
-	real<lower = 0> pr_mu; // To standardise the precipitations
+	real<lower = 0> pr_mu; // To centre the precipitations
 	real<lower = 0> pr_sd; // To standardise the precipitations
 
 	vector[n_climate] tas; // Temperature
-	real tas_mu; // To standardise the temperature
+	real tas_mu; // To centre the temperature
 	real<lower = 0> tas_sd; // To standardise the temperature
 
 	vector<lower = 0, upper = 14>[n_plots] ph; // pH of the soil measured with CaCl2
-	real<lower = 0, upper = 14> ph_mu; // To standardise the pH
+	real<lower = 0, upper = 14> ph_mu; // To centre the pH
 	real<lower = 0> ph_sd; // To standardise the pH
 
 	vector<lower = 0>[n_climate] standBasalArea; // Sum of the tree basal area for a given plot at a given time (interpolation for NA data)
-	real ba_mu; // To standardise the basal area
+	real ba_mu; // To centre the basal area
 	real<lower = 0> ba_sd; // To standardise the basal area
 }
 
 transformed data {
-	vector[n_obs] normalised_Yobs = Yobs/sd_dbh; // Normalised but NOT centred dbh
 	vector[n_children] normalised_avg_yearly_growth_obs = avg_yearly_growth_obs/sd_dbh; // Normalised but NOT centred averaged yearly growth
 	vector[n_climate] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
 	vector[n_climate] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
@@ -130,11 +120,8 @@ parameters {
 	real competition_slope;
 	
 	// Errors (observation and process)
-	// --- Process error, which is the sd of a lognormal distrib /!\
+	// --- Process error, which is the sdlog parameter of a lognormal distrib /!\
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
-
-	// --- Routine observation error, which is constrained by default, see appendix D Eitzel for the calculus.
-	array [n_inventories] real<lower = 0.1/sqrt(12)*25.4/sd_dbh> sigmaObs; // Std. Dev. of a normal distrib /!\
 
 	// --- Extreme error, by default at least twice the min observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
@@ -154,29 +141,30 @@ model {
 	int growth_counter = 1; // Counter in the latent space
 	int children_counter = 1; // Counter in the 'observation space' for chidlren
 	int record_children_counter = 1; // Counter to know when we should compute the latent average yearly growth and store it
-	real expected_growth;
+	real expected_growth_meanlog;
 	real temporary;
 	real temporary_tm1; // temporary at time t - 1 (useful for trees measured more than twice)
 	vector [n_children] latent_avg_yearly_growth; // n_children is also the number of measured growth (number of intervals)!
-	real growth_mean_logNormal;
-	real growth_sd_logNormal;
 
+	// --- Routine observation error, Assessing Precision in Conventional Field Measurements of Individual Tree Attributes (Luoma 2017)
+	real sigmaObs = 3.0/sd_dbh; // Std. Dev. of a normal distrib /!\
+	
 	// Priors
 	// --- Growth parameters
-	target += normal_lpdf(averageGrowth | -4, 10); // sd_dbh * exp(-4) is around 2 to 3 mm (reasonable average growth) for sd_dbh = 130
-	target += normal_lpdf(dbh_slope | 0, 5);
-	target += normal_lpdf(dbh_slope2 | 0, 5);
+	target += normal_lpdf(averageGrowth | 0, 20);
+	target += normal_lpdf(dbh_slope | 0, 20);
+	target += normal_lpdf(dbh_slope2 | 0, 20);
 	
-	target += normal_lpdf(pr_slope | 0, 5);
-	target += normal_lpdf(pr_slope2 | 0, 5);
+	target += normal_lpdf(pr_slope | 0, 20);
+	target += normal_lpdf(pr_slope2 | 0, 20);
 
-	target += normal_lpdf(tas_slope | 0, 5);
-	target += normal_lpdf(tas_slope2 | 0, 5);
+	target += normal_lpdf(tas_slope | 0, 20);
+	target += normal_lpdf(tas_slope2 | 0, 20);
 
-	target += normal_lpdf(ph_slope | 0, 5);
-	target += normal_lpdf(ph_slope2 | 0, 5);
+	target += normal_lpdf(ph_slope | 0, 20);
+	target += normal_lpdf(ph_slope2 | 0, 20);
 
-	target += normal_lpdf(competition_slope | 0, 5);
+	target += normal_lpdf(competition_slope | 0, 20);
 
 	// --- Errors
 	/*
@@ -209,31 +197,28 @@ model {
 
 		The average values of the priors on the standardised scale are approximately (obtained with one sample of 1e8):
 		sigmaProc: 0.008977944
-		sigmaObs: 0.01209929
 		etaObs: 0.1788352
 	*/
-	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.09); // <=> procError = 1.29 mm/yr ± 0.12 mm/yr
-	target += gamma_lpdf(sigmaObs | 3.5/1, sd_dbh*sqrt(3.5)/1); // <=> routine measurement error (sd) = sqrt(3.5) mm ± 1 mm
+	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16);
 	target += gamma_lpdf(etaObs | 30^2/45.0, sd_dbh*30/45.0); // <=> extreme measurement error (sd) = 30 mm ± 6.7 mm
-	
 	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
 	{
+		// Prior on initial hidden state: remember that latent_dbh_parents is in mm and standardised.
+		target += gamma_lpdf(latent_dbh_parents[i] | dbh_init[i]^2/5.0, sd_dbh*dbh_init[i]/5.0);
+
 		temporary = latent_dbh_parents[i];
 		temporary_tm1 = temporary;
-		for (j in 1:nbYearsGrowth[i]) // Loop for all years but the first (which is the parent of indiv i)
+		for (j in 1:nbYearsGrowth[i]) // Loop over growing years
 		{
 			// Process model
-			expected_growth = growth(temporary, normalised_precip[climate_index[i] + j - 1],
+			expected_growth_meanlog = growth(temporary, normalised_precip[climate_index[i] + j - 1],
 				normalised_tas[climate_index[i] + j - 1], normalised_ph[plot_index[i]], normalised_standBasalArea[climate_index[i] + j - 1],
 				averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 
-			growth_mean_logNormal = log(expected_growth^2/sqrt(sigmaProc^2 + expected_growth^2));
-			growth_sd_logNormal = sqrt(log(sigmaProc^2/expected_growth^2 + 1));
-
-			target += lognormal_lpdf(latent_growth[growth_counter] | growth_mean_logNormal, growth_sd_logNormal);
+			target += lognormal_lpdf(latent_growth[growth_counter] | expected_growth_meanlog, sigmaProc);
 
 			// Dbh at time t + 1
 			temporary += latent_growth[growth_counter];
@@ -249,41 +234,22 @@ model {
 				temporary_tm1 = temporary;
 			}
 		}
-		record_children_counter += 1; // The growth counter stops one year earlier! Indeed 3 measurements implies only 2 growing years!
+		record_children_counter += 1; // The growth counter stops one year earlier! Indeed n measurements implies only n - 1 growing years!
 	}
-	
-	// Prior on initial hidden state: This is a diffuse initialisation
-	target += uniform_lpdf(latent_dbh_parents | 0.1/sd_dbh, 3000/sd_dbh); // Remember that the dbh is in mm and standardised
 	
 	// --- Observation model
 	for (k in 1:n_inventories)
 	{
-		// Compare true (i.e., hidden or latent) parents with observed parents
-		// Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
-		for (i in start_nfi_parents[k]:end_nfi_parents[k])
-		{
-			if (onlyTwoMeasures[i] == 1) // Like C++, BUGS, and R, Stan uses 0 to encode false, and 1 to encode true.
-			{
-				target += normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]); // Assume first measure correct
-			}
-			else
-			{
-				target += log_mix(proba[k],
-					normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], etaObs[k]),
-					normal_lpdf(normalised_Yobs[parents_index[i]] | latent_dbh_parents[i], sigmaObs[k]));
-			}
-		}
-
-		// Compare true (i.e., hidden or latent) latent averaged yearly growth with observed averaged yearly growth
 		/*
-			Note that here, I use 2*etaObs[k]/deltaYear[i]. This is because the yearly growth error is twice the error on the dbh
-			divided by the number of years between the two measurement (i.e., averageing the growth error).
+			Compare true (i.e., hidden or latent) latent averaged yearly growth with observed averaged yearly growth
+			Do not try to vectorise here! https://mc-stan.org/docs/2_29/stan-users-guide/vectorizing-mixtures.html
 
-			See Rüger et al 2011
+			Note that here, I use 2 * error/Δt. This is because the yearly growth error is twice the error on the dbh,
+			divided by the number of years between the two measurement (i.e., averageing the growth error). See Rüger et al 2011.
 		*/
 		for (i in start_nfi_avg_growth[k]:end_nfi_avg_growth[k])
 			target += log_mix(proba[k],
 				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*etaObs[k]/deltaYear[i]),
-				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*sigmaObs[k]/deltaYear[i]));
+				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*sigmaObs/deltaYear[i]));
 	}
 }

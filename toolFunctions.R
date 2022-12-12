@@ -25,17 +25,28 @@
 ## Get fixed values parameters
 getParams = function(model_cmdstan, params_names, type = "mean")
 {
-	if (!(type %in% c("mean", "median")))
-		stop("Unknown type. Please choose median or mean")
+	if (!(type %in% c("mean", "median", "quantile")))
+		stop("Unknown type. Please choose median, quantile, or mean")
 	
-	vals = numeric(length(params_names))
-	names(vals) = params_names
-	for (i in 1:length(params_names))
+	if (type != "quantile")
 	{
-		vals[i] = ifelse(type == "mean",
-			mean(model_cmdstan$draws(params_names[i])),
-			median(model_cmdstan$draws(params_names[i])))
+		vals = numeric(length(params_names))
+		names(vals) = params_names
+		for (i in seq_along(params_names))
+		{
+			vals[i] = ifelse(type == "mean",
+				mean(model_cmdstan$draws(params_names[i])),
+				median(model_cmdstan$draws(params_names[i])))
+		}
+	} else {
+		vals = data.table(parameter = params_names, q5 = 0, med = 0, avg = 0, q95 = 0)
+		for (i in seq_along(params_names))
+		{
+			vals[i, c("q5", "med", "q95") := as.list(quantile(model_cmdstan$draws(params_names[i]), c(0.05, 0.5, 0.95)))]
+			vals[i, avg := mean(model_cmdstan$draws(params_names[i]))]
+		}
 	}
+	
 	return (vals)
 }
 
@@ -499,13 +510,13 @@ expand = function(base_names, nb_nfi, patterns = c("Obs", "proba"))
 	
 	new_names = vector(mode = "list", length = length(patterns))
 	old_names = base_names
-	for (i in 1:length(patterns))
+	for (i in seq_along(patterns))
 	{
 		reg = patterns[i]
 		toModify = base_names[stri_detect(base_names, regex = reg)]
 		base_names = base_names[!stri_detect(base_names, regex = reg)]
 		new_names[[i]] = character(length = nb_nfi*length(toModify))
-		for (j in 1:length(toModify))
+		for (j in seq_along(toModify))
 			new_names[[i]][((j - 1)*nb_nfi + 1):(j*nb_nfi)] = paste0(toModify[j], "[", 1:nb_nfi, "]")
 	}
 
@@ -519,8 +530,8 @@ energyPairs = function(path, run, results, nb_nfi, energy, rm_names = c("latent"
 	filename = paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "pairs.pdf")
 
 	params_names = results$metadata()$stan_variables
-	params_names = params_names[params_names != "averageGrowth"]
-	for (i in 1:length(rm_names))
+
+	for (i in seq_along(rm_names))
 		params_names = params_names[!stri_detect(params_names, regex = rm_names[i])]
 	
 	if (nb_nfi > 1)
@@ -764,7 +775,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 			sd = c(stanData$pr_sd, stanData$tas_sd, stanData$ph_sd, stanData$ba_sd))
 
 		params = getParams(results, c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "tas_slope", "ph_slope", "competition_slope",
-			"pr_slope2", "tas_slope2", "ph_slope2"))
+			"pr_slope2", "tas_slope2", "ph_slope2", "sigmaProc"))
 
 		
 		pdf(paste0(path, "growth_curve.pdf"))
@@ -989,9 +1000,8 @@ plot_correl_error = function(error_dt, correl_dt, threshold_correl = 0.1, rm_cor
 checkFunnels = function(results, param, nb_nfi, rm_names = c("latent", "Effect", "lp__"), n_rows = 3, n_cols = 6, filename = NULL)
 {
 	params_names = results$metadata()$stan_variables
-	params_names = params_names[params_names != "averageGrowth"]
 	
-	for (i in 1:length(rm_names))
+	for (i in seq_along(rm_names))
 		params_names = params_names[!stri_detect(params_names, regex = rm_names[i])]
 
 	if (nb_nfi > 1)
@@ -1145,7 +1155,7 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 		iter_div = divergences %% n_iter
 		iter_div[iter_div == 0] = n_iter
 		chain_div = (divergences - iter_div) %% n_chains + 1
-		for (i in 1:length(divergences))
+		for (i in seq_along(divergences))
 			lines(x = min_yr:max_yr, y = draws[iter, chain, ], col = "#EF8A47", lwd = 0.75)
 		output = append(output, list(divergences = c(iter_div = iter_div, chain_div = chain_div)))
 	}
@@ -1300,7 +1310,7 @@ probaExtremeObs = function(posteriorSim, ...)
 ## Function to rescale parameters (intercept and slopes)
 rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 {
-	required_params = c("averageGrowth_mu", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope",
+	required_params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope",
 		"tas_slope2", "ph_slope", "ph_slope2", "competition_slope", "sigmaProc")
 	
 	if (!all(names(params) %in% required_params))
@@ -1313,7 +1323,7 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 		stop("Some required sd are missing")
 	
 	# beta_0 = scaled beta_0 - Σ scaled gamma_i * mu_i/sd_i + Σ scaled delta_j * mu_j^2/sd_j^2
-	intercept_rescale = params["averageGrowth_mu"] - params["pr_slope"]*mu_predictors["pr"]/sd_predictors["pr"] -
+	intercept_rescale = params["averageGrowth"] - params["pr_slope"]*mu_predictors["pr"]/sd_predictors["pr"] -
 		params["tas_slope"]*mu_predictors["tas"]/sd_predictors["tas"] - params["ph_slope"]*mu_predictors["ph"]/sd_predictors["ph"] -
 		params["competition_slope"]*mu_predictors["basalArea"]/sd_predictors["basalArea"] +
 		params["pr_slope2"]*mu_predictors["pr"]^2/sd_predictors["pr"]^2 +
@@ -1348,7 +1358,7 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 	errors_rescale = numeric(1)
 	names(errors_rescale) = c("sigmaProc")
 
-	errors_rescaled["sigmaProc"] = sd_dbh^2*params["sigmaProc"]
+	errors_rescaled["sigmaProc"] = sd_dbh^2*params["sigmaProc"] #! NOT SURE OF THIS!!! I THINK IT DOES NOT WORK NOW THAT I USE LOGNORMAL
 
 	return (list(intercept_rescale = intercept_rescale, slope_dbh_rescale = slope_dbh_rescale,
 		slope_quadratic_dbh_rescale = slope_quadratic_dbh_rescale, slope_predictors_rescale = slope_predictors_rescale,
@@ -1375,7 +1385,19 @@ computeGrowth = function(dt, col = "growth", byCols = c("plot_id", "tree_id"), r
 		dt[, deltaYear := shift(year, n = 1, type = "lead", fill = NA) - year, by = byCols]
 }
 
+## Function computing the expected growth in the case growth ~ lognormal
 growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_dbh = TRUE, standardised_params = TRUE,
+	standardised_variables = FALSE, ...)
+{
+	sigmaProc = params[["sigmaProc"]]
+	G_average = exp(growth_fct_meanlog(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_dbh,
+		standardised_params, standardised_variables, ...) + sigmaProc^2/2) # Formula from the average of a lognormal
+	
+	return (G_average);
+}
+
+## Function computing the expected growth on the log scale (i.e., corresponds to the parameter meanlog of lognormal distribution)
+growth_fct_meanlog = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_dbh = TRUE, standardised_params = TRUE,
 	standardised_variables = FALSE, ...)
 {
 	G = NaN
@@ -1467,35 +1489,3 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 		warning("This combination of scaled and non scaled is not coded")
 	return (G)	
 }
-
-# f = function(m, v, percentage = TRUE)
-# {
-# 	if (percentage)
-# 	{
-# 		m = m/100
-# 		v = v/1e4
-# 	}
-
-# 	if ((m <= 0) | (m >= 1))
-# 		stop ("Mean is out of bound")
-
-# 	if ((v >= m*(1 - m)) | v <= 0)
-# 		stop ("Variance is out of bound")
-
-
-# 	alpha = (m*(1 - m)/v - 1)*m
-# 	beta = (m*(1 - m)/v - 1)*(1 - m)
-
-# 	return (list(alpha = alpha, beta = beta))
-# }
-
-# r = f(0.5, 0.2)
-# print(r)
-
-# curve(dbeta(x, shape1 = r[["alpha"]], shape2 = r[["beta"]]), to = 0.08)
-# aa = rbeta(1e7, shape1 = r[["alpha"]], shape2 = r[["beta"]])
-# 100*mean(aa)
-# 100*sd(aa)
-# 10000*var(aa)
-
-# var_ana = 1e4*r[["alpha"]]*r[["beta"]]/((r[["alpha"]] + r[["beta"]])^2*(r[["alpha"]] + r[["beta"]] + 1))
