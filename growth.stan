@@ -1,19 +1,27 @@
 
 /*
 	Comments:
-		- Yobs is an vector, containing all dbh observations
-		- I call "parent" the first measured dbh of each individual. The parents have to be treated separately
-		- The observation error for the French data is different from the other countries because there have been corrections in the data.
-			Therefore, there is no extrem error due to, for instance, typos.
+		- avg_yearly_growth_obs is a vector, containing all growth observations (averaged per year, i.e., (dbh1 - dbh0)/(t1 - t0))
+		- I call "parent" the first measured dbh of each individual.
 		- Note that the dbh is standardised but not centred. The reason was that in a previous version of the model, it would have
 			implied a division by 0. Since then, I do not have this problem anymore, but I kept the dbh non-centred.
+		- The error structure is as follow:
+			1. sigmaProc (process error) is the unexplained variance for growth
+			2. sigmaObs (observation error) is the routine error done when measuring dbh
+			3. etaObs (observation error) is the extreme error done when measuring dbh occurring with probability proba
+		- Note that the routine observation error, sigmaObs, is a fixed parameter taken from the literature. Indeed it was impossible to
+			estimate this parameter together with etaObs, proba, and sigmaProc.
 	
-	Reminder (method of first and second moments, i.e., mean and variance or standard deviation):
+	Reminder (method of first and second moments, i.e., mean and variance or standard deviation, see Appendix C 'Rescaling'):
 		- The gamma distribution of stan uses, in this order, shape (alpha) and rate (beta). It can however be reparametrised
 			using mean and var: alpha = mean^2/var, beta = mean/var
+
+		- When the gamma distribution is scaled by a constant C, it is equivalent to multiply the rate by C
 		
 		- The lognormal distribution of stan uses, in this order, meanlog (mu) and sdlog (sigma). It can however be reparametrised
-			using mean and sd: mu = log(mean^2/sqrt(sd^2 + mean^2)), sigma = sqrt(log(sd^2/mean^2 + 1))
+			using mean and var: mu = log(mean^2/sqrt(var + mean^2)), sigma = sqrt(log(var/mean^2 + 1))
+
+		- When the lognoraml distribution is scaled by a constant C, it is equivalent to substract log(C) to the meanlog parameter
 
 	Like C++, BUGS, and R, Stan uses 0 to encode false, and 1 to encode true. https://mc-stan.org/docs/functions-reference/logical-functions.html
 */
