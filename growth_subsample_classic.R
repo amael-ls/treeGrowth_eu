@@ -283,4 +283,103 @@ subsampling = function(dt, n_indiv_target, mode = "spatial")
 		sd_dbh_beforeSubsample = sd_dbh_beforeSubsample, quantile_beforeSubsample_25_75 = quantile_beforeSubsample_25_75))
 }
 
+## Function to recompute indices when subsetting
+source("./indices_subsample_classic.R")
+
+#### Load data
+## Paths
+mainFolder = "/home/amael/project_ssm/inventories/growth/"
+if (!dir.exists(mainFolder))
+	stop(paste0("Folder\n\t", mainFolder, "\ndoes not exist"))
+
+clim_folder = "/home/amael/project_ssm/inventories/growth/"
+if (!dir.exists(clim_folder))
+	stop(paste0("Folder\n\t", clim_folder, "\ndoes not exist"))
+
+soil_folder = "/home/amael/project_ssm/inventories/growth/"
+if (!dir.exists(soil_folder))
+	stop(paste0("Folder\n\t", soil_folder, "\ndoes not exist"))
+
+standBasalArea_folder = "/home/amael/project_ssm/inventories/growth/"
+if (!dir.exists(standBasalArea_folder))
+	stop(paste0("Folder\n\t", standBasalArea_folder, "\ndoes not exist"))
+
+## Tree inventories data
+treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshaped.rds"))
+ls_species = sort(treeData[, unique(speciesName_sci)])
+
+if ((species_id < 1) | (species_id > length(ls_species)))
+	stop(paste0("Species id = ", species_id, " has no corresponding species (i.e., either negative or larger than the number of species)"))
+
+speciesCountry = treeData[, .N, by = .(speciesName_sci, country)]
+setkey(speciesCountry, speciesName_sci)
+setnames(speciesCountry, "N", "n_measurements")
+speciesCountry[, prop := round(100*n_measurements/sum(n_measurements), 2), by = speciesName_sci]
+
+species = ls_species[species_id]
+print(paste("Script running for species:", species))
+print(speciesCountry[species])
+
+treeData = treeData[speciesName_sci == species]
+
+savingPath = paste0("./", species, "/")
+
+if (!dir.exists(savingPath))
+	dir.create(savingPath)
+
+## Subsample tree data if necessary
+n_indiv = unique(treeData[, .(tree_id, plot_id)])[, .N]
+print(paste("Number of individuals:", n_indiv))
+subsamplingActivated = FALSE
+
+if (n_indiv > max_indiv)
+{
+	print("Too many individuals, subsampling")
+	subsamplingActivated = TRUE
+
+	checkSampling = subsampling(treeData, n_indiv_target = max_indiv, mode = "spatial")
+	treeData = checkSampling[["sampledData"]]
+	n_indiv = checkSampling[["n_indiv"]]
+
+	if (checkSampling[["diffAverage"]])
+		stop("The subsample does not look representative of the whole data set, check the average")
+
+	if (checkSampling[["diffSD"]])
+		stop("The subsample does not look representative of the whole data set, check the std. dev")
+
+	if (checkSampling[["diffQuantile_25_75"]])
+		stop("The subsample does not look representative of the whole data set, check the quantiles 0.25, 0.5, and 0.75")
+}
+
+if ((!subsamplingActivated) & (run_id != 1))
+	stop("Running the model only once (i.e., with run_id = 1) is enough: There is no subsampling")
+
+n_inventories = length(treeData[, unique(nfi_id)])
+
+## Compute if there are two measurements or more
+if (treeData[, .N, by = .(plot_id, tree_id)][, min(N) < 2])
+	stop("There are individuals measured only once")
+
+## Compute growth
+computeDiametralGrowth(treeData, byCols = c("speciesName_sci", "plot_id", "tree_id"))
+growth_dt = na.omit(treeData)
+
+print(paste0(round(100*growth_dt[growth < 0 | growth > 10, .N]/growth_dt[, .N], 3), "% negative or above 10 mm/yr"))
+
+## Print number of measurements per country
+print("Number of growth measurements per country:")
+countryStats = growth_dt[, .N, by = country]
+countryStats[, prop := round(100*N/sum(N), 2)]
+print(countryStats)
+
+## Read climate
+climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
+
+## Read soil data (pH)
+soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
+
+## Read interpolated basal area data
+standBasalArea = readRDS(paste0(standBasalArea_folder, "europe_reshaped_standBasalArea.rds"))
+
+## Average climate
 
