@@ -22,16 +22,13 @@ infoSpecies = readRDS("./speciesInformations.rds")
 
 n_runs = 1 # Number of runs used in growth_subsample.R
 threshold_indiv = 1000 # Minimal number of individuals required to use multi runs
-threshold_time = as.Date("2022/11/07") # Results anterior to this date will not be considered
+threshold_time = as.Date("2022/12/09") # Results anterior to this date will not be considered
 
 infoSpecies[, multiRun := if (n_indiv > threshold_indiv) TRUE else FALSE, by = speciesName_sci]
 infoSpecies[, processed := isProcessed(path = speciesName_sci, multi = multiRun, lim_time =  threshold_time,
-	extension = "_germany_1000_dbh_is_not_latent_gamma_fixedSigma.rds$", lower = 1, upper = n_runs), by = speciesName_sci]
+	extension = ".rds$", lower = 1, upper = n_runs), by = speciesName_sci]
 infoSpecies = infoSpecies[(processed)]
 
-infoSpecies[, n_nfi := 1]
-infoSpecies[, ls_nfi := "DE BWI"]
-infoSpecies[, ls_countries := "germany"]
 infoSpecies[, multiRun := FALSE]
 
 error_ls = vector(mode = "list", length = infoSpecies[, .N])
@@ -78,6 +75,46 @@ saveRDS(correl_dt, "./correlation_energy_species.rds")
 saveRDS(posterior_ls, "./posterior_ls.rds")
 
 plot_correl_error(error_dt, correl_dt, threshold_correl = 0.2, rm_correl = "lp__")
+
+####! TEST, WEIRD STUFF WITH growth_curve.pdf
+results_logN = readRDS("Fagus sylvatica/growth-run=1-2022-12-10_18h30_de-fr-sw_8000_latent_init_dbh_notDiffuse_reparametrisation.rds")
+stanData_logN = readRDS("Fagus sylvatica/1_stanData_logN8000.rds")
+treeData_logN = readRDS("Fagus sylvatica/1_treeData_logN8000.rds")
+ls_treePlots_logN = treeData_logN[, unique(paste(tree_id, plot_id, sep = "_"))]
+
+results_gamma = readRDS("Fagus sylvatica/growth-run=1-2022-12-13_00h01_de-fr-sw_4000_latent_init_dbh_notDiffuse_gamma.rds")
+stanData_gamma = readRDS("Fagus sylvatica/1_stanData_gamma4000.rds")
+treeData_gamma = readRDS("Fagus sylvatica/1_treeData_gamma4000.rds")
+ls_treePlots_gamma = treeData_gamma[, unique(paste(tree_id, plot_id, sep = "_"))]
+
+common_indiv = ls_treePlots_gamma[which(ls_treePlots_gamma %in% ls_treePlots_logN)]
+
+which(ls_treePlots_logN == "14_france_501878") # Number 1!
+which(ls_treePlots_gamma == "14_france_501878") # Number 1!
+
+mean_sd = data.table(model = rep(c("logN", "gamma"), 5), mean = numeric(10), sd = numeric(10), iter = integer(10))
+
+for (i in 1:5)
+{
+	growth_array = stanData_logN[["sd_dbh"]]*results_logN$draws(variable = paste0("latent_growth[", i, "]"))
+	lazyPosterior(growth_array, fun = NULL, xlab = paste("logN,", i))
+	mean_sd[2*i - 1, mean := mean(growth_array)]
+	mean_sd[2*i - 1, sd := sd(growth_array)]
+	mean_sd[2*i - 1, iter := i]
+	
+	growth_array = stanData_gamma[["sd_dbh"]]*results_gamma$draws(variable = paste0("latent_growth[", i, "]"))
+	lazyPosterior(growth_array, fun = NULL, xlab = paste("gamma,", i))
+
+	mean_sd[2*i, mean := mean(growth_array)]
+	mean_sd[2*i, sd := sd(growth_array)]
+	mean_sd[2*i, iter := i]
+}
+
+setorder(mean_sd, model)
+mean_sd
+
+plot(1:5, mean_sd[model == "gamma", mean], col = "red", pch = 19)
+points(1:5, mean_sd[model == "logN", mean], col = "blue", pch = 19)
 
 # selected_indiv = data.table(speciesName_sci = infoSpecies[, speciesName_sci],
 # 	plot_id = c("france_738952", "france_804256", "france_873749"), tree_id = c(1, 3, 5))
