@@ -1,5 +1,5 @@
 
-#### Aim of prog: Fit the French growth data. (This objective will be updated to part of Europe later)
+#### Aim of prog: Fit the growth data
 ## Comments:
 # 1. To use the GPU with Stan, it is first needed to run clinfo -l. On Bayreuth, I get:
 #	clinfo -l
@@ -11,9 +11,6 @@
 #	Finally, to run the model with the function sample, use the argument opencl_ids
 #	The opencl_ids is supplied as a vector of length 2, where the first element is the platform ID and the second argument is the device ID.
 #	In this case it is (0, 0) or (0, 1) if the second device is desired
-
-#! TRY ON GERMAN DATA, THE FRENCH DATA ARE NOT ADAPTED TO THE WAY WE MODEL GROWTH!
-#! THE FRENCH DATA DO NOT MEASURE DBH THE FIRST TIME, THEY DO A DENDROCHRONO. THIS IS WHY THERE IS NO ERROR ON THAT PART.
 
 #?   r$> info_sample
 #?        distrib     mean      sd      var   skewness
@@ -69,9 +66,6 @@ init_fun = function(...)
 	if (normalise & !all(c("mu_dbh", "sd_dbh") %in% names(providedArgs)))
 		stop("You must provide mu_dbh and sd_dbh in order to normalise")
 
-	if (!normalise)
-		Warning("This function has been coded for normalise only. The parameters potential growth, etc are scaled with sd_dbh = 135")
-
 	if (any(average_yearlyGrowth == 0))
 	{
 		warning("Some average yearly growth were 0. They have been replaced by 0.5")
@@ -93,7 +87,7 @@ init_fun = function(...)
 	if (useMean)
 	{
 		avg_growth = mean(average_yearlyGrowth)
-		var_growth = avg_growth/5
+		var_growth = avg_growth/2
 		if (avg_growth <= 0)
 		{
 			warning("Average yearly growth is, in average, negative. Value set to default: 3")
@@ -113,7 +107,7 @@ init_fun = function(...)
 			for (j in 1:nbYearsGrowth[i])
 			{
 				counter_growth = counter_growth + 1
-				latent_growth_gen[counter_growth] = rgamma(n = 1, shape = 2*average_yearlyGrowth[i], rate = 2) # => var = 2*mean
+				latent_growth_gen[counter_growth] = rgamma(n = 1, shape = 2*average_yearlyGrowth[i], rate = 2) # => var = mean/2
 			}
 		}
 	} else {
