@@ -9,7 +9,7 @@
 #	tree x is measured in 2000 and in 2005. The index in the data are for instance 4 and 5.
 #	However, the yearly time-step state space model will fill the missing years, so that the year 2005 will be in position 9!
 
-indices_subsample = function(run_id, treeData, savingPath, mainFolder, climFolder)
+indices_subsample = function(run_id, treeData, climate, savingPath, mainFolder, climFolder)
 {
 	#### Tool functions
 	## Function to fill the gap between two years and get the index of the provided years
@@ -115,17 +115,9 @@ indices_subsample = function(run_id, treeData, savingPath, mainFolder, climFolde
 	}
 
 	#### Load data
-	## Climate
-	climate = readRDS(paste0(climFolder, "europe_reshaped_climate.rds"))
-	climate[, row_id := 1:.N]
-
 	## Time space coordinates (combination of where and when)
 	time_space = readRDS(paste0(mainFolder, "time_coordinates_growth.rds"))
-
-	## Setting keys
-	setkey(climate, plot_id, year)
 	setkey(time_space, plot_id)
-	setkey(treeData, plot_id, tree_id, year)
 
 	#### Create indices
 	## For the state space model (*.stan file)
