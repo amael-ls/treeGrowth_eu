@@ -400,3 +400,58 @@ if (indices[, .N] != treeData[, .N])
 avgClimate(climate, indices_avgClim, ls_vars = c("tas", "tasmin", "tasmax", "pr"))
 
 
+
+
+#### Stan model
+## Define stan variables
+# Common variables
+maxIter = 2500
+n_chains = 3
+
+# Initial values for states only
+
+
+# Data to provide
+stanData = list(
+	# Number of data
+	n_indiv = n_indiv, # Total number of individuals (all NFIs together)
+	n_climate = indices_avgClim[, .N], # Dimension of the climate vector (all NFIs together)
+	n_plots = length(treeData[, unique(plot_id)]), # Number of plots (all NFIs together)
+	n_obs = n_obs, # Total number of tree observations (all NFIs together)
+	n_growth = n_obs - n_indiv, # Number of measured growth = n_obs - n_indiv
+	nbIntervalGrowth = unique(indices[, .(plot_id, tree_id, nbIntervalGrowth)])[, nbIntervalGrowth], # Number of growth intervals
+	deltaYear = growth_dt[, deltaYear], # Number of years between two measurements of an individual
+	n_inventories = n_inventories, # Number of forest inventories involving different measurement errors in the data
+
+	# Indices
+	climate_index = unique(indices[, .(tree_id, plot_id, plot_index)])[, plot_index], # Index of the climate associated to each parent
+	
+	start_nfi_avg_growth = start_nfi_avg_growth, # Starting point of each NFI for averaged obs growth
+	end_nfi_avg_growth = end_nfi_avg_growth, # Ending point of each NFI for averaged obs growth
+	
+	plot_index = , # Indicates to which plot individuals belong to
+
+	# Observations
+	avg_annual_growth_obs = growth_dt[, growth],
+	dbh_init = treeData[parents_index, dbh], # Initial dbh data
+
+	# Explanatory variables
+	sd_dbh = ifelse(subsamplingActivated, checkSampling[["sd_dbh_beforeSubsample"]], treeData[, sd(dbh)]),
+
+	precip = indices_avgClim[, pr_avg], # Precipitations
+	pr_mu = indices_avgClim[, mean(pr_avg)], # To centre the precipitations
+	pr_sd = indices_avgClim[, sd(pr_avg)], # To standardise the precipitations
+
+	tas = indices_avgClim[, tas_avg], # Temperature
+	tas_mu = indices_avgClim[, mean(tas_avg)], # To centre the temperature
+	tas_sd = indices_avgClim[, sd(tas_avg)], # To standardise the temperature
+
+	ph = , # pH of the soil measured with CaCl2
+	ph_mu = , # To centre the pH
+	ph_sd = , # To standardise the pH
+
+	standBasalArea = , # Sum of the tree basal area for a given plot at a given time (interpolation for NA data)
+	ba_mu = , # To centre the basal area
+	ba_sd =  # To standardise the basal area
+)
+
