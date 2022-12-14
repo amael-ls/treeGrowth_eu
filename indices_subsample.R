@@ -48,9 +48,9 @@ indices_subsample = function(run_id, treeData, savingPath, mainFolder, climFolde
 
 		for (plot in trees_NFI[, unique(plot_id)])
 		{
-			for (indiv in trees_NFI[plot_id == plot, unique(tree_id)])
+			for (indiv in trees_NFI[plot, unique(tree_id)])
 			{
-				years_indices = fillYears(trees_NFI[plot_id == plot & tree_id == indiv, year])
+				years_indices = fillYears(trees_NFI[.(plot, indiv), year])
 				
 				start = end + 1
 				end = start + length(years_indices[["indices"]]) - 1
@@ -76,16 +76,39 @@ indices_subsample = function(run_id, treeData, savingPath, mainFolder, climFolde
 	{
 		for (plot in indices_dt[, unique(plot_id)])
 		{
-			min_year = time_space[plot_id == plot, min_year]
-			max_year = time_space[plot_id == plot, max_year]
-			tree = indices_dt[plot_id == plot, unique(tree_id)][1]
-			for (tree in indices_dt[plot_id == plot, unique(tree_id)])
+			min_year = time_space[plot, min_year]
+			max_year = time_space[plot, max_year]
+			tree = indices_dt[plot, unique(tree_id)][1]
+			for (tree in indices_dt[plot, unique(tree_id)])
 			{
-				clim_start = climate[plot_id == plot & year == min_year, row_id]
-				clim_end = climate[plot_id == plot & year == max_year, row_id]
+				clim_start = climate[.(plot, min_year), row_id]
+				clim_end = climate[.(plot, max_year), row_id]
 
-				indices_dt[tree_id == tree & plot_id == plot,
+				indices_dt[.(plot, tree),
 					c("index_clim_start", "index_clim_end") := .(clim_start, clim_end)]
+			}
+		}
+		print("100% done")
+	}
+
+	## Function to create the (plot-year) indices to compute average climate
+	# This function will modify the indices data table by reference and avoiding a copy.
+	indices_climate_avg = function(indices_dt, climate)
+	{
+		for (plot in indices_dt[, unique(plot_id)])
+		{
+			all_years = indices_dt[plot, unique(year)]
+
+			for (i in 1:(length(all_years) - 1))
+			{
+				clim_start = climate[.(plot, all_years[i]), row_id]
+				clim_end = climate[.(plot, all_years[i + 1]), row_id]
+
+				indices_dt[.(plot, all_years[i]),
+					c("index_clim_start", "index_clim_end") := .(clim_start, clim_end)]
+
+				indices_dt[.(plot, all_years[i]),
+					c("year_start", "year_end") := .(all_years[i], all_years[i + 1])]
 			}
 		}
 		print("100% done")
@@ -99,12 +122,25 @@ indices_subsample = function(run_id, treeData, savingPath, mainFolder, climFolde
 	## Time space coordinates (combination of where and when)
 	time_space = readRDS(paste0(mainFolder, "time_coordinates_growth.rds"))
 
+	## Setting keys
+	setkey(climate, plot_id, year)
+	setkey(time_space, plot_id)
+	setkey(treeData, plot_id, tree_id, year)
+
 	#### Create indices
 	## For the state space model (*.stan file)
 	indices = indices_state_space(trees_NFI = treeData)
+	setkey(indices, plot_id, tree_id, year)
 
 	## For the climate
 	indices_climate(indices, climate, time_space)
+
+	## For the average climate
+	indices_avg = unique(indices[, .(plot_id, year, index_clim_start, index_clim_end)])
+	setkey(indices_avg, plot_id, year)
+
+	indices_climate_avg(indices_avg, climate)
+	indices_avg = na.omit(indices_avg)
 
 	## Add an index per plot
 	indices[, plot_index := .GRP, by = plot_id]
@@ -122,11 +158,20 @@ indices_subsample = function(run_id, treeData, savingPath, mainFolder, climFolde
 	## Compute the number of growing years per individual
 	indices[, nbYearsGrowth := max(year) - min(year), by = .(plot_id, tree_id)]
 
+	## Compute the number of growth intervals per individual
+	indices[, nbIntervalGrowth := .N, by = .(plot_id, tree_id)]
+
 	## Saving indices for the chosen species
 	checkUp = all(indices[, nbYearsGrowth <= index_clim_end - index_clim_start])
 	if(!checkUp)
-		stop("Suspicious indexing. Review the indices data.table")
+		stop("Suspicious indexing for nbYearsGrowth. Review the indices data.table")
+
+	## Saving indices for the chosen species
+	checkUp = all(indices_avg[, year_end - year_start == index_clim_end - index_clim_start])
+	if(!checkUp)
+		stop("Suspicious indexing, review the indices_avg data.table")
 	
-	saveRDS(indices, paste0(savingPath, run_id, "_indices.rds"))
-	return (indices)
+	saveRDS(list(indices = indices, indices_avg = indices_avg), paste0(savingPath, run_id, "_indices.rds"))
+
+	return (list(indices = indices, indices_avg = indices_avg))
 }
