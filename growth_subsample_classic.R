@@ -39,12 +39,12 @@ set.seed(run_id)
 init_fun = function(...)
 {
 	providedArgs = list(...)
-	requiredArgs = c("dbh_parents", "n_latentGrowth", "average_yearlyGrowth", "nbIntervalGrowth", "normalise")
+	requiredArgs = c("dbh_parents", "n_growth", "average_yearlyGrowth", "nbIntervalGrowth", "normalise")
 	if (!all(requiredArgs %in% names(providedArgs)))
-		stop("You must provide dbh_parents, n_latentGrowth, average_yearlyGrowth, nbIntervalGrowth, and normalise")
+		stop("You must provide dbh_parents, n_growth, average_yearlyGrowth, nbIntervalGrowth, and normalise")
 
 	dbh_parents = providedArgs[["dbh_parents"]]
-	n_latentGrowth = providedArgs[["n_latentGrowth"]]
+	n_growth = providedArgs[["n_growth"]]
 	average_yearlyGrowth = providedArgs[["average_yearlyGrowth"]]
 	nbIntervalGrowth = providedArgs[["nbIntervalGrowth"]]
 	normalise = providedArgs[["normalise"]]
@@ -72,7 +72,7 @@ init_fun = function(...)
 	n_indiv = length(dbh_parents)
 	Y_gen = rgamma(n_indiv, dbh_parents^2/0.5, dbh_parents/0.5) # Average = dbh_parents, variance = 0.5
 
-	latent_growth_gen = numeric(n_latentGrowth)
+	latent_growth_gen = numeric(n_growth)
 	counter_growth = 0
 
 	if (useMean)
@@ -384,9 +384,11 @@ climate[, row_id := 1:.N]
 
 ## Read soil data (pH)
 soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
+soil = soil[plot_id %in% treeData[, plot_id]]
 
 ## Read interpolated basal area data
 standBasalArea = readRDS(paste0(standBasalArea_folder, "europe_reshaped_standBasalArea.rds"))
+setkey(standBasalArea, plot_id, year)
 
 ## Set-up indices
 indices_list = indices_subsample(run_id, treeData, climate, savingPath, mainFolder, clim_folder)
@@ -396,11 +398,67 @@ indices_avgClim = indices_list[["indices_avg"]]
 if (indices[, .N] != treeData[, .N])
 	stop(paste0("Dimension mismatch between indices and treeData for species `", species, "`"))
 
+n_obs = treeData[, .N]
+print(paste("Number of data:", n_obs))
+
+# Compute the number of measured averaged growth (it is also the number of latent growth)
+n_growth = n_obs - n_indiv
+nbIntervalGrowth = unique(indices[, .(plot_id, tree_id, nbIntervalGrowth)])[, nbIntervalGrowth]
+
+if (n_growth != sum(nbIntervalGrowth))
+	stop("Dimensions mismatch between latent growth and nb intervals growth")
+
+print(paste("Number of latent growth:", n_growth))
+
+# Define parents, children, and last child
+parents_index = treeData[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1]
+last_child_index = treeData[, .I[which.max(year)], by = .(plot_id, tree_id)][, V1]
+
+if (length(parents_index) != n_indiv)
+	stop("Dimension mismatch between parents_index and n_indiv")
+
+# Define for each NFI at which individual they start and end (given treeData is sorted by plot_id, with the country first)!
+start_nfi_avg_growth = integer(n_inventories)
+end_nfi_avg_growth = integer(n_inventories)
+
+ls_countries = treeData[, unique(country)]
+start_nfi_avg_growth[1] = 1
+
+if (n_inventories > 1)
+{
+	for (k in 1:(n_inventories - 1))
+	{
+		end_nfi_avg_growth[k] = start_nfi_avg_growth[k] + growth_dt[(stri_detect_regex(plot_id, ls_countries[k])), .N] - 1
+		start_nfi_avg_growth[k + 1] = end_nfi_avg_growth[k] + 1
+	}
+}
+
+end_nfi_avg_growth[n_inventories] = n_obs - n_indiv # Which is n_children
+
+if (growth_dt[, .N] != n_obs - n_indiv)
+	stop("Dimension mismatch between growth_dt and number of observations")
+
+if (n_inventories == 1)
+{
+	start_nfi_avg_growth = as.array(start_nfi_avg_growth)
+	end_nfi_avg_growth = as.array(end_nfi_avg_growth)
+}
+
 ## Average climate
 avgClimate(climate, indices_avgClim, ls_vars = c("tas", "tasmin", "tasmax", "pr"))
+avgClimate(standBasalArea, indices_avgClim, ls_vars = c("standBasalArea_interp"))
 
+#### Compute and save normalising constants
+normalisation(dt = treeData, colnames = "dbh", folder = savingPath, filename = paste0(run_id, "_dbh_normalisation_classic.rds"))
+normalisation(dt = indices_avgClim, colnames = c("pr_avg", "tas_avg"), folder = savingPath,
+	filename = paste0(run_id, "_climate_normalisation_classic.rds"))
+normalisation(dt = soil, colnames = "ph", folder = savingPath, filename = paste0(run_id, "_ph_normalisation_classic.rds"))
+normalisation(dt = indices_avgClim, colnames = "standBasalArea_interp_avg", folder = savingPath,
+	filename = paste0(run_id, "_ba_normalisation_classic.rds"))
 
-
+climate_mu_sd = readRDS(paste0(savingPath, run_id, "_climate_normalisation_classic.rds"))
+ph_mu_sd = readRDS(paste0(savingPath, run_id, "_ph_normalisation_classic.rds"))
+ba_mu_sd = readRDS(paste0(savingPath, run_id, "_ba_normalisation_classic.rds"))
 
 #### Stan model
 ## Define stan variables
@@ -409,7 +467,20 @@ maxIter = 2500
 n_chains = 3
 
 # Initial values for states only
+average_yearlyGrowth = (treeData[last_child_index, dbh] - treeData[parents_index, dbh])/
+	(treeData[last_child_index, year] - treeData[parents_index, year])
 
+if (length(average_yearlyGrowth) != n_indiv)
+	stop("Dimensions mismatch between average_yearlyGrowth and number of individuals")
+
+initVal_Y_gen = lapply(1:n_chains, init_fun, dbh_parents = treeData[parents_index, dbh],
+	n_growth = n_growth, average_yearlyGrowth = average_yearlyGrowth, nbIntervalGrowth = nbIntervalGrowth,
+	normalise = TRUE, mu_dbh = 0, sd_dbh = sd(treeData[, dbh]), useMean = FALSE)
+
+length(initVal_Y_gen)
+
+for (i in 1:n_chains)
+	print(range(initVal_Y_gen[[i]][["latent_avg_annual_growth"]]))
 
 # Data to provide
 stanData = list(
@@ -418,8 +489,8 @@ stanData = list(
 	n_climate = indices_avgClim[, .N], # Dimension of the climate vector (all NFIs together)
 	n_plots = length(treeData[, unique(plot_id)]), # Number of plots (all NFIs together)
 	n_obs = n_obs, # Total number of tree observations (all NFIs together)
-	n_growth = n_obs - n_indiv, # Number of measured growth = n_obs - n_indiv
-	nbIntervalGrowth = unique(indices[, .(plot_id, tree_id, nbIntervalGrowth)])[, nbIntervalGrowth], # Number of growth intervals
+	n_growth = n_growth, # Number of measured growth = n_obs - n_indiv
+	nbIntervalGrowth = nbIntervalGrowth, # Number of growth intervals
 	deltaYear = growth_dt[, deltaYear], # Number of years between two measurements of an individual
 	n_inventories = n_inventories, # Number of forest inventories involving different measurement errors in the data
 
@@ -429,7 +500,7 @@ stanData = list(
 	start_nfi_avg_growth = start_nfi_avg_growth, # Starting point of each NFI for averaged obs growth
 	end_nfi_avg_growth = end_nfi_avg_growth, # Ending point of each NFI for averaged obs growth
 	
-	plot_index = , # Indicates to which plot individuals belong to
+	plot_index = unique(indices[, .(tree_id, plot_id, plot_index)])[, plot_index], # Indicates to which plot individuals belong to
 
 	# Observations
 	avg_annual_growth_obs = growth_dt[, growth],
@@ -439,19 +510,43 @@ stanData = list(
 	sd_dbh = ifelse(subsamplingActivated, checkSampling[["sd_dbh_beforeSubsample"]], treeData[, sd(dbh)]),
 
 	precip = indices_avgClim[, pr_avg], # Precipitations
-	pr_mu = indices_avgClim[, mean(pr_avg)], # To centre the precipitations
-	pr_sd = indices_avgClim[, sd(pr_avg)], # To standardise the precipitations
+	pr_mu = climate_mu_sd[variable == "pr_avg", mu], # To centre the precipitations
+	pr_sd = climate_mu_sd[variable == "pr_avg", sd], # To standardise the precipitations
 
 	tas = indices_avgClim[, tas_avg], # Temperature
-	tas_mu = indices_avgClim[, mean(tas_avg)], # To centre the temperature
-	tas_sd = indices_avgClim[, sd(tas_avg)], # To standardise the temperature
+	tas_mu = climate_mu_sd[variable == "tas_avg", mu], # To centre the temperature
+	tas_sd = climate_mu_sd[variable == "tas_avg", sd], # To standardise the temperature
 
-	ph = , # pH of the soil measured with CaCl2
-	ph_mu = , # To centre the pH
-	ph_sd = , # To standardise the pH
+	ph = soil, # pH of the soil measured with CaCl2
+	ph_mu = ph_mu_sd[variable == "ph", mu], # To centre the pH
+	ph_sd = ph_mu_sd[variable == "ph", sd], # To standardise the pH
 
-	standBasalArea = , # Sum of the tree basal area for a given plot at a given time (interpolation for NA data)
-	ba_mu = , # To centre the basal area
-	ba_sd =  # To standardise the basal area
+	standBasalArea = indices_avgClim, # Sum of the tree basal area for a given plot at a given time (interpolation for NA data)
+	ba_mu = ba_mu_sd[variable == "standBasalArea_interp_avg", mu], # To centre the basal area
+	ba_sd = ba_mu_sd[variable == "standBasalArea_interp_avg", sd] # To standardise the basal area
 )
 
+saveRDS(object = stanData, file = paste0(savingPath, run_id, "_stanData_classic.rds"))
+saveRDS(object = treeData, file = paste0(savingPath, run_id, "_treeData_classic.rds"))
+
+## Compile model
+model = cmdstan_model("./growth_classic.stan", cpp_options = list(stan_opencl = TRUE))
+
+start_time = Sys.time()
+
+## Run model
+results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
+	iter_warmup = 1500, iter_sampling = 1000, save_warmup = TRUE, init = initVal_Y_gen,
+	max_treedepth = 13, adapt_delta = 0.95, opencl_ids = c(0, ifelse(species_id %% 2 == 0, 0, 1)))
+
+end_time = Sys.time()
+
+time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
+results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_de-fr-sw_8000_latent_init_dbh_notDiffuse_reparametrisation.rds"))
+
+results$cmdstan_diagnose()
+
+print(end_time - start_time)
+results$print(c("lp__", "averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+	"ph_slope", "ph_slope2", "competition_slope", "etaObs", "proba", "sigmaProc"), max_rows = 20)
