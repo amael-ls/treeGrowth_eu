@@ -253,22 +253,18 @@ subsampling = function(dt, n_indiv_target, mode = "spatial")
 	{
 		n_indiv_per_plot_avg = dt[, length(unique(tree_id)), by = plot_id][, mean(V1)]
 		n_plots_sampling = round(n_indiv_target/n_indiv_per_plot_avg)
-		coords = unique(dt[, plot_id])
+		coords = dt[, unique(plot_id)]
 		sample_plots = sample(x = coords, size = n_plots_sampling)
 
-		setkey(dt, plot_id)
-		dt = dt[sample_plots]
-		setorder(dt, plot_id, tree_id, year)
+		dt = dt[plot_id %in% sample_plots]
 	}
 
 	if (mode == "numeric")
 	{
-		setkey(dt, tree_id, plot_id)
 		parents_index = dt[, .I[which.min(year)], by = .(plot_id, tree_id)][, V1]
 		sampled_indices = sort(sample(x = parents_index, size = n_indiv_target, replace = FALSE))
-		chosen_individuals = dt[sampled_indices, .(tree_id, plot_id)]
+		chosen_individuals = dt[sampled_indices, .(plot_id, tree_id)]
 		dt = dt[chosen_individuals]
-		setorder(dt, plot_id, tree_id, year)
 	}
 
 	diffAverage = (dt[, mean(dbh)]/mean_dbh_beforeSubsample > 1.05) | (dt[, mean(dbh)]/mean_dbh_beforeSubsample < 0.95)
@@ -283,8 +279,16 @@ subsampling = function(dt, n_indiv_target, mode = "spatial")
 		sd_dbh_beforeSubsample = sd_dbh_beforeSubsample, quantile_beforeSubsample_25_75 = quantile_beforeSubsample_25_75))
 }
 
+## Function to average environment
+avgClimate = function(climate_dt, indices_avgClim, ls_vars = c("tas", "tasmin", "tasmax", "pr"))
+{
+	indices_avgClim[, paste0(ls_vars, "_avg") := 0]
+	for (i in 1:indices_avgClim[, .N])
+		indices_avgClim[i, paste0(ls_vars, "_avg") := climate_dt[index_clim_start:index_clim_end, lapply(.SD, mean), .SDcols = c(ls_vars)]]
+}
+
 ## Function to recompute indices when subsetting
-source("./indices_subsample_classic.R")
+source("./indices_subsample.R")
 
 #### Load data
 ## Paths
@@ -306,6 +310,7 @@ if (!dir.exists(standBasalArea_folder))
 
 ## Tree inventories data
 treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshaped.rds"))
+setkey(treeData, plot_id, tree_id, year)
 ls_species = sort(treeData[, unique(speciesName_sci)])
 
 if ((species_id < 1) | (species_id > length(ls_species)))
@@ -374,6 +379,8 @@ print(countryStats)
 
 ## Read climate
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
+setkey(climate, plot_id, year)
+climate[, row_id := 1:.N]
 
 ## Read soil data (pH)
 soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
@@ -381,5 +388,15 @@ soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
 ## Read interpolated basal area data
 standBasalArea = readRDS(paste0(standBasalArea_folder, "europe_reshaped_standBasalArea.rds"))
 
+## Set-up indices
+indices_list = indices_subsample(run_id, treeData, climate, savingPath, mainFolder, clim_folder)
+indices = indices_list[["indices"]]
+indices_avgClim = indices_list[["indices_avg"]]
+
+if (indices[, .N] != treeData[, .N])
+	stop(paste0("Dimension mismatch between indices and treeData for species `", species, "`"))
+
 ## Average climate
+avgClimate(climate, indices_avgClim, ls_vars = c("tas", "tasmin", "tasmax", "pr"))
+
 
