@@ -151,7 +151,7 @@ indices_subsample = function(run_id, treeData, climate, savingPath, mainFolder, 
 	indices[, nbYearsGrowth := max(year) - min(year), by = .(plot_id, tree_id)]
 
 	## Compute the number of growth intervals per individual
-	indices[, nbIntervalGrowth := .N, by = .(plot_id, tree_id)]
+	indices[, nbIntervalGrowth := .N - 1, by = .(plot_id, tree_id)] # -1 because between n points, there are only n - 1 intervals
 
 	## Saving indices for the chosen species
 	checkUp = all(indices[, nbYearsGrowth <= index_clim_end - index_clim_start])
