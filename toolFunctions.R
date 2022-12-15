@@ -568,12 +568,12 @@ lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi
 	# Create and fill list of posteriors
 	density_ls = vector(mode = "list", length = nDraws)
 
+	min_x = +Inf
+	max_x = -Inf
+	max_y = -Inf
+	
 	for (i in seq_along(draws_ls))
-	{
-		min_x = +Inf
-		max_x = -Inf
-		max_y = -Inf
-		
+	{	
 		# --- get posterior
 		if (multi_nfi)
 		{
