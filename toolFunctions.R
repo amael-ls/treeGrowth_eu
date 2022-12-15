@@ -198,15 +198,23 @@ reshapeDraws = function(draws_array, id_latent, regex = "latent_dbh")
 }
 
 ## Function to plot the prior and posterior of a parameter
-lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = NULL, run = NULL, multi = FALSE, ls_nfi = NULL, ...)
+lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NULL, run = NULL, multi = FALSE, ls_nfi = NULL, ...)
 {
 	# Check-up
 	if (!is.array(draws))
 		stop("Draws should be an array extracted from a CmdStanMCMC object")
 		
 	# isFALSE will not work here, hence !isTRUE
-	if (!isTRUE(all.equal(fun, dnorm)) & !isTRUE(all.equal(fun, dlnorm)) & !isTRUE(all.equal(fun, dgamma)) & !isTRUE(all.equal(fun, dbeta)))
-		stop("This function only accepts dnorm, dlnorm, dgamma, or dbeta as priors")
+	if (!is.null(fun))
+	{
+		if (!isTRUE(all.equal(fun, dnorm)) &
+			!isTRUE(all.equal(fun, dlnorm)) &
+			!isTRUE(all.equal(fun, dgamma)) &
+			!isTRUE(all.equal(fun, dbeta)))
+		{
+			stop("This function only accepts dnorm, dlnorm, dgamma, or dbeta as priors")
+		}
+	}
 
 	# Get list of arguments
 	providedArgs = list(...)
@@ -445,7 +453,8 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 			}
 		}
 	}
-	max_y = max(max_y, max_y_prior)
+	if (!is.null(fun))
+		max_y = max(max_y, max_y_prior)
 	max_y = ifelse (max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
 
 	# Plot
@@ -475,8 +484,11 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 	}
 
 	# Plot prior
-	curve(fun(x, arg1, arg2), add = TRUE, lwd = 2, col = "#F4C430")
-	DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#F4C43066", density = NA)
+	if (!is.null(fun))
+	{
+		curve(fun(x, arg1, arg2), add = TRUE, lwd = 2, col = "#F4C430")
+		DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#F4C43066", density = NA)
+	}
 
 	# Add legend
 	if (multi & !is.null(ls_nfi))
@@ -489,16 +501,25 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 
 	if (multi)
 	{
-		legend(x = "topleft", legend = c("Prior", paste("Posterior", if (!is.null(ls_nfi)) ls_nfi else 1:length_params)),
-			fill = c("#F4C430", colours_str), box.lwd = 0)
+		legend_text = ifelse(is.null(fun), paste("Posterior", if (!is.null(ls_nfi)) ls_nfi else 1:length_params),
+			c("Prior", paste("Posterior", if (!is.null(ls_nfi)) ls_nfi else 1:length_params)))
+		legend_colours = ifelse(is.null(fun), colours_str, c("#F4C430", colours_str))
+		
+		legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
 	} else {
-		legend(x = "topleft", legend = c("Prior", paste("Posterior", ifelse(!is.null(ls_nfi), ls_nfi, ""))),
-			fill = c("#F4C430", "#295384"), box.lwd = 0)
+		legend_text = ifelse(is.null(fun), paste("Posterior", ifelse(!is.null(ls_nfi), ls_nfi, "")),
+			c("Prior", paste("Posterior", ifelse(!is.null(ls_nfi), ls_nfi, ""))))
+		legend_colours = ifelse(is.null(fun), "#295384", c("#F4C430", "#295384"))
+
+		legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
 	}
 
 	if (!is.null(filename))
 		dev.off()
 
+	if (is.null(fun))
+		return(list(arg1 = NA, arg2 = NA, min_x = min_x, max_x = max_x, max_y = max_y, max_y_prior = NA, filename = filename))
+	
 	return(list(arg1 = arg1, arg2 = arg2, min_x = min_x, max_x = max_x, max_y = max_y, max_y_prior = max_y_prior, filename = filename))
 }
 
@@ -594,9 +615,8 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 {
 	path = paste0("./", species, "/")
 	n_nfi = length(ls_nfi)
-	error_dt = data.table(nfi = rep(c(ls_nfi, "all")), sigmaProc = numeric(n_nfi + 1), sigmaObs = numeric(n_nfi + 1),
-		etaObs = numeric(n_nfi + 1), proba = numeric(n_nfi + 1), correl_sigma_eta = numeric(n_nfi + 1),
-		correl_sigma_proba = numeric(n_nfi + 1), correl_eta_proba = numeric(n_nfi + 1))
+	error_dt = data.table(nfi = rep(c(ls_nfi, "all")), sigmaProc = numeric(n_nfi + 1),
+		etaObs = numeric(n_nfi + 1), proba = numeric(n_nfi + 1), correl_eta_proba = numeric(n_nfi + 1))
 	setkey(error_dt, nfi)
 	
 	if (multi & !is.null(run))
@@ -633,7 +653,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		# Load results and associated data set
 		results = readRDS(paste0(path, lastRun))
 
-		results$print(c("lp__", params_dt[, parameters], "sigmaObs", "etaObs", "proba", "sigmaProc"), max_rows = 20)
+		results$print(c("lp__", params_dt[, parameters], "etaObs", "proba", "sigmaProc"), max_rows = 20)
 
 		Sys.sleep(5)
 
@@ -658,12 +678,6 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		# --- Common variable
 		multi_NFI = if (n_nfi > 1) TRUE else FALSE
 
-		# --- Routine measurement error (sigmaObs), it is a sd (of a normal distrib)
-		sigmaObs_array = results$draws("sigmaObs")
-		lazyPosterior(draws = sigmaObs_array, fun = dgamma, filename = paste0(path, "sigmaObs_posterior"), run = run, xlab = "Error in mm",
-			shape = 3.5/2.5, rate = sd_dbh*sqrt(3.5)/2.5, params = "routine obs error", multi = multi_NFI, scaling = sd_dbh,
-			ls_nfi = ls_nfi, expand_bounds = TRUE)
-
 		# --- Extreme error (etaObs), it is a sd (of a normal distrib)...
 		etaObs_array = results$draws("etaObs")
 		lazyPosterior(draws = etaObs_array, fun = dgamma, filename = paste0(path, "etaObs_posterior"), run = run, xlab = "Error in mm",
@@ -678,19 +692,14 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		
 		for (i in 1:n_nfi)
 		{
-			lazyTrace(draws = results$draws(paste0("sigmaObs[", i, "]"), inc_warmup = FALSE),
-				filename = paste0(path, "sigmaObs[", i, "]_traces"), run = run)
 			lazyTrace(draws = results$draws(paste0("etaObs[", i, "]"), inc_warmup = FALSE),
 				filename = paste0(path, "etaObs[", i, "]_traces"), run = run)
 			lazyTrace(draws = results$draws(paste0("proba[", i, "]"), inc_warmup = FALSE),
 				filename = paste0(path, "proba[", i, "]_traces"), run = run)
 		}
 
-		error_dt["all", sigmaObs := sd_dbh*mean(sigmaObs_array)]
 		error_dt["all", etaObs := sd_dbh*mean(etaObs_array)]
 		error_dt["all", proba := mean(proba_array)]
-		error_dt["all", correl_sigma_eta := cor(sigmaObs_array, etaObs_array)]
-		error_dt["all", correl_sigma_proba := cor(sigmaObs_array, proba_array)]
 		error_dt["all", correl_eta_proba := cor(etaObs_array, proba_array)]
 
 		count = 0
@@ -698,16 +707,12 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		for (nfi in ls_nfi)
 		{
 			count = count + 1
-			sigmaObs_array = results$draws(paste0("sigmaObs[", count, "]"))
 			etaObs_array = results$draws(paste0("etaObs[", count, "]"))
 			proba_array = results$draws(paste0("proba[", count, "]"))
 
 			error_dt[nfi, sigmaProc := NA]
-			error_dt[nfi, sigmaObs := sd_dbh*mean(sigmaObs_array)]
-			error_dt[nfi, etaObs := sd_dbh*mean(etaObs_array)]
+			error_dt[nfi, etaObs := mean(etaObs_array)]
 			error_dt[nfi, proba := mean(proba_array)]
-			error_dt[nfi, correl_sigma_eta := cor(sigmaObs_array, etaObs_array)]
-			error_dt[nfi, correl_sigma_proba := cor(sigmaObs_array, proba_array)]
 			error_dt[nfi, correl_eta_proba := cor(etaObs_array, proba_array)]
 		}
 
@@ -782,9 +787,9 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		par(mar = c(5, 4, 4, 10), xpd = TRUE)
 		# Empty plot
 		# --- Bounds for x-axis
-		v = seq(50, 3500, by = 50)
-		dbh_min = min(stanData[["Yobs"]])
-		dbh_max = max(stanData[["Yobs"]])
+		v = seq(20, 3520, by = 50)
+		dbh_min = min(stanData[["dbh_init"]])
+		dbh_max = max(stanData[["dbh_init"]])
 
 		if ((dbh_min < 50) | (dbh_max > 3000))
 			stop("dbh range out of bounds 50 and 3500")
@@ -817,7 +822,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 
 		# Plot curves
 		curve(
-			growth_fct(x, pr_q25, tas_q25, ph_q25, ba_q25, params, sd_dbh, scaling = scaling, standardised_dbh = FALSE),
+			growth_fct(x, pr_q25, tas_q25, ph_q25, ba_q25, params, sd_dbh, standardised_dbh = FALSE, scaling = scaling),
 				from = x_min, to = x_max, lwd = 2, lty = 2, col = "#34568B", add = TRUE)
 		
 		curve(
@@ -898,7 +903,7 @@ plot_correl_error = function(error_dt, correl_dt, threshold_correl = 0.1, rm_cor
 
 		# Plot correlations among errors and proba
 		current_error = error_dt[speciesName_sci == species]
-		ls_cols = c("correl_sigma_eta", "correl_sigma_proba", "correl_eta_proba")
+		ls_cols = c("correl_eta_proba")
 		ls_nfi = current_error[nfi != "all", unique(nfi)]
 		n_nfi = length(ls_nfi)
 		col_counter = 1
