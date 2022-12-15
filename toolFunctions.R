@@ -523,6 +523,171 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	return(list(arg1 = arg1, arg2 = arg2, min_x = min_x, max_x = max_x, max_y = max_y, max_y_prior = max_y_prior, filename = filename))
 }
 
+## Function to plot the prior and posterior of a parameter
+lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi = FALSE, ls_nfi = NULL, ...)
+{
+	# Check-up
+	if (!is.list(draws_ls))
+		stop("Draws should be a list of arrays extracted from a CmdStanMCMC object")
+
+	nDraws = length(draws_ls)
+	len = data.table(nIter = integer(nDraws), nChains = integer(nDraws), nVariables = integer(nDraws))
+	for (i in seq_along(draws_ls))
+	{
+		if (!all(class(draws_ls[[i]]) == c("draws_array", "draws", "array")))
+			stop(paste0("draws_ls[", i,"] is not an array extracted from a CmdStanMCMC object"))
+
+		len[i, c("nIter", "nChains", "nVariables") := as.list(dim(draws_ls[[i]]))]
+	}
+	if (unique(len)[, .N] != 1)
+		stop("Dimensions mismatch within the provided draws")
+
+	# Get list of arguments
+	providedArgs = list(...)
+	ls_names = names(providedArgs)
+	nbArgs = length(providedArgs)
+
+	# Get the argument for density if provided
+	n = 512
+	n_ind = (ls_names == "n")
+	if (any(n_ind))
+	{
+		n = providedArgs[["n"]]
+		print(paste0("Using n = ", n, " for the density plot"))
+	}
+
+	# Get the parameter's name if provided
+	params = ""
+	params_ind = (ls_names == "params")
+	if (any(params_ind))
+		params = providedArgs[["params"]]
+
+	# Get the index of the x-axis label
+	xlab_ind = (ls_names == "xlab")
+
+	# Create and fill list of posteriors
+	density_ls = vector(mode = "list", length = nDraws)
+
+	for (i in seq_along(draws_ls))
+	{
+		min_x = +Inf
+		max_x = -Inf
+		max_y = -Inf
+		
+		# --- get posterior
+		if (multi_nfi)
+		{
+			info = summary(draws_ls[[i]])
+			setDT(info)
+			length_params = info[, .N]
+			density_ls[[i]] = vector(mode = "list", length = length_params)
+			x = vector(mode = "list", length = length_params)
+			y = vector(mode = "list", length = length_params)
+			names(density_ls[[i]]) = info[, variable]
+			names(x) = info[, variable]
+			names(y) = info[, variable]
+			for (varName in info[, variable])
+			{
+				density_ls[[i]][[varName]] = density(draws_ls[[i]][, , varName], n = n)
+				x[[varName]] = density_ls[[i]][[varName]]$x
+				y[[varName]] = density_ls[[i]][[varName]]$y
+			}
+			temporary_min_x = min(sapply(x, min))
+			temporary_max_x = max(sapply(x, max))
+			temporary_max_y = max(sapply(y, max))
+		} else {
+			density_ls[[i]] = density(draws_ls[[i]], n = n)
+			x = density_ls[[i]]$x
+			y = density_ls[[i]]$y
+			temporary_min_x = min(x)
+			temporary_max_x = max(x)
+			temporary_max_y = max(y)
+		}
+		
+		if (temporary_min_x < min_x)
+			min_x = temporary_min_x
+		if (temporary_max_x > max_x)
+			max_x = temporary_max_x
+		if (temporary_max_y > max_y)
+			max_y = temporary_max_y
+	}
+
+	min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+	max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+
+	max_y = ifelse (max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
+
+	names(density_ls) = paste("draw", 1:nDraws, sep = "_")
+
+	# Open file if plot printed in a pdf
+	if (!is.null(filename))
+	{
+		filename = paste0(filename, ifelse(!is.null(run), paste0("_", run), ""), ".pdf")
+		pdf(filename)
+		print(paste0("Figure saved under the name: ", filename))
+	}
+	
+	# Plot posterior
+	# --- Prepare the posteriors colour
+	nbPosteriors = ifelse(multi_nfi, length_params*nDraws, nDraws)
+
+	colours = MetBrewer::met.brewer("Austria", nbPosteriors)
+	colours_str = grDevices::colorRampPalette(colours)(nbPosteriors)
+	colours_str_pol = paste0(colours_str, "66")
+
+	counterColour = 1
+	plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), ylab = "frequence", main = paste("Posteriors", params),
+		xlab = ifelse(any(xlab_ind), providedArgs[["xlab"]], ""))
+
+	for (i in seq_along(draws_ls))
+	{
+		if (multi_nfi)
+		{
+			for (j in 1:length_params)
+			{
+				lines(x = density_ls[[i]][[j]]$x, y = density_ls[[i]][[j]]$y, col = colours_str[counterColour], lwd = 4, lty = i)
+				polygon(density_ls[[i]][[j]], col = colours_str_pol[counterColour])
+				counterColour = counterColour + 1
+			}
+		} else {
+			lines(density_ls[[i]], col = colours_str[counterColour], lwd = 4, lty = i)
+			polygon(density_ls[[i]], col = colours_str_pol[counterColour])
+			counterColour = counterColour + 1
+		}
+	}
+
+	# Add legend
+	if (multi_nfi & !is.null(ls_nfi))
+		if (length(ls_nfi) != length_params)
+			warning("Dimension mismatch between ls_nfi and length_params! The legend might not be correctly printed")
+
+	if (!multi_nfi & !is.null(ls_nfi))
+		if (length(ls_nfi) != 1)
+			warning("To many NFI provided in ls_nfi! The legend might not be correctly printed")
+
+	if (multi_nfi)
+	{
+		posterior_num = paste("Posterior", 1:nDraws)
+		posterior_country = if (!is.null(ls_nfi)) ls_nfi else 1:length_params
+		legend_text = CJ(posterior_num, posterior_country, sorted = FALSE)[, paste(posterior_num, posterior_country, sep =" ")]
+		legend_colours = colours_str
+		
+		legend(x = "topright", legend = legend_text, col = legend_colours, lty = rep(1:nDraws, each = length_params), lwd = 2, box.lwd = 0)
+	} else {
+		posterior_num = paste("Posterior", 1:nDraws)
+		posterior_country = if (!is.null(ls_nfi)) ls_nfi else ""
+		legend_text = CJ(posterior_num, posterior_country, sorted = FALSE)[, paste(posterior_num, posterior_country, sep =" ")]
+		legend_colours = colours_str_pol
+
+		legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
+	}
+
+	if (!is.null(filename))
+		dev.off()
+	
+	return(list(min_x = min_x, max_x = max_x, max_y = max_y, filename = filename))
+}
+
 ## Function to expand the basic names when there is more than one NFI
 expand = function(base_names, nb_nfi, patterns = c("Obs", "proba"))
 {
