@@ -517,11 +517,11 @@ stanData = list(
 	tas_mu = climate_mu_sd[variable == "tas_avg", mu], # To centre the temperature
 	tas_sd = climate_mu_sd[variable == "tas_avg", sd], # To standardise the temperature
 
-	ph = soil, # pH of the soil measured with CaCl2
+	ph = soil[, ph], # pH of the soil measured with CaCl2
 	ph_mu = ph_mu_sd[variable == "ph", mu], # To centre the pH
 	ph_sd = ph_mu_sd[variable == "ph", sd], # To standardise the pH
 
-	standBasalArea = indices_avgClim, # Sum of the tree basal area for a given plot at a given time (interpolation for NA data)
+	standBasalArea = indices_avgClim[, standBasalArea_interp_avg], # Average stand basal area for a given plot at a given time interval
 	ba_mu = ba_mu_sd[variable == "standBasalArea_interp_avg", mu], # To centre the basal area
 	ba_sd = ba_mu_sd[variable == "standBasalArea_interp_avg", sd] # To standardise the basal area
 )
@@ -543,7 +543,7 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_de-fr-sw_8000_latent_init_dbh_notDiffuse_reparametrisation.rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_de-fr-sw_", max_indiv, "_main_classic.rds"))
 
 results$cmdstan_diagnose()
 
