@@ -64,7 +64,7 @@ data {
 	int<lower = 1, upper = n_indiv> n_plots; // Number of plots (all NFIs together)
 	int<lower = 1> n_obs; // Total number of tree observations (all NFIs together)
 	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_growth; // Number of measured growth = n_obs - n_indiv
-	array [n_growth] int<lower = 1, upper = n_obs> nbIntervalGrowth; // Number of growth intervals for each individual
+	array [n_indiv] int<lower = 1, upper = n_obs> nbIntervalGrowth; // Number of growth intervals for each individual
 	array [n_growth] int<lower = 1> deltaYear; // Number of years between two measurements of an individual
 	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 
@@ -212,7 +212,7 @@ model {
 		target += gamma_lpdf(latent_dbh_parents[i] | dbh_init[i]^2/5.0, sd_dbh*dbh_init[i]/5.0);
 
 		current_latent_dbh = latent_dbh_parents[i];
-		for (j in 1:nbIntervalGrowth[growth_counter]) // Loop over number of intervals measured for individual i
+		for (j in 1:nbIntervalGrowth[i]) // Loop over number of intervals measured for individual i
 		{
 			// Process model
 			expected_avg_growth_meanlog = avg_growth(current_latent_dbh, normalised_precip[climate_index[i] + j - 1],
