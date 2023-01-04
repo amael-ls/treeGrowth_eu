@@ -20,6 +20,56 @@
 #?   4: lognormal 3.332272 1.38651 1.922411  1.3202924
 #?   5:      naka 3.332272 1.38651 1.922411  1.2726553
 #?   6:      wald 3.332272 1.38651 1.922411  1.2482567
+#
+# Species done or running: 2-5, 7-9, 11, 14, 15, 18-20
+# Abundant species: 1, 6, 10, 12, 13, 16, 17, 21, 28, 30, 32-35, 37
+#?          speciesName_sci    tot
+#  1:            Abies alba  45166
+#  2:        Acer campestre   8454
+#  3:           Acer opalus   1466
+#  4:      Acer platanoides   1900
+#  5:   Acer pseudoplatanus  14383
+#  6:       Alnus glutinosa  26480
+#  7:          Alnus incana   6144
+#  8:         Arbutus unedo   1970
+#  9:           Aria edulis   2996
+# 10:        Betula pendula  28987
+# 11:      Betula pubescens  17676
+# 12:      Carpinus betulus  55507
+# 13:       Castanea sativa  33626
+# 14:      Corylus avellana   8498
+# 15:    Crataegus monogyna   3530
+# 16:       Fagus sylvatica 143514
+# 17:    Fraxinus excelsior  33610
+# 18:       Ilex aquifolium   1454
+# 19:         Larix decidua  13928
+# 20:       Larix kaempferi   4838
+# 21:           Picea abies 513498
+# 22:      Picea sitchensis   2714
+# 23:        Pinus contorta  14310
+# 24:      Pinus halepensis   3640
+# 25:            Pinus mugo   2290
+# 26:           Pinus nigra  10554
+# 27:        Pinus pinaster  16078
+# 28:      Pinus sylvestris 442716
+# 29:         Populus nigra   2412
+# 30:       Populus tremula  15471
+# 31:          Prunus avium   7704
+# 32: Pseudotsuga menziesii  26704
+# 33:          Quercus ilex  17320
+# 34:       Quercus petraea  76738
+# 35:     Quercus pubescens  34216
+# 36:     Quercus pyrenaica   1504
+# 37:         Quercus robur  71500
+# 38:         Quercus rubra   3334
+# 39:  Robinia pseudoacacia   8976
+# 40:          Salix caprea   8953
+# 41:      Sorbus aucuparia   4709
+# 42:         Tilia cordata   2864
+# 43:    Tilia platyphyllos   1840
+# 44: Torminalis glaberrima   2590
+# 45:           Ulmus minor   2246
+#?          speciesName_sci    tot
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -63,7 +113,7 @@ init_fun = function(...)
 	if ("useMean" %in% names(providedArgs))
 		useMean = providedArgs[["useMean"]]
 
-	if (normalise & !all(c("mu_dbh", "sd_dbh") %in% names(providedArgs)))
+	if (normalise && !all(c("mu_dbh", "sd_dbh") %in% names(providedArgs)))
 		stop("You must provide mu_dbh and sd_dbh in order to normalise")
 
 	if (any(average_yearlyGrowth == 0))
@@ -196,7 +246,7 @@ normalisation = function(dt, colnames = names(df), folder = "./", filename = "no
 				warning("col_ind_start or col_ind_end ignored")
 		}
 
-		if (("col_ind_start" %in% providedArgs_names) & !("col_ind" %in% providedArgs_names))
+		if (("col_ind_start" %in% providedArgs_names) && !("col_ind" %in% providedArgs_names))
 		{
 			if (!("col_ind_end" %in% providedArgs_names))
 				stop("A starting index is provided but there is no stopping index")
@@ -234,14 +284,13 @@ normalisation = function(dt, colnames = names(df), folder = "./", filename = "no
 	mu_sd = data.table(variable = character(n), mu = numeric(n), sd = numeric(n))
 
 	if (!("indices" %in% providedArgs_names))
-		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1,],
-			as.matrix(dt[, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1,])]
+		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1, ],
+			as.matrix(dt[, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1, ])]
 
 	if ("indices" %in% providedArgs_names)
 	{
-
-		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[rowsToKeep, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1,],
-			as.matrix(dt[rowsToKeep, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1,])]
+		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[rowsToKeep, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1, ],
+			as.matrix(dt[rowsToKeep, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1, ])]
 	}
 
 	saveRDS(mu_sd, file = paste0(folder, filename))
@@ -276,8 +325,8 @@ subsampling = function(dt, n_indiv_target, mode = "spatial")
 		dt = dt[chosen_individuals]
 	}
 
-	diffAverage = (dt[, mean(dbh)]/mean_dbh_beforeSubsample > 1.05) | (dt[, mean(dbh)]/mean_dbh_beforeSubsample < 0.95)
-	diffSD = (dt[, sd(dbh)]/sd_dbh_beforeSubsample > 1.05) | (dt[, sd(dbh)]/sd_dbh_beforeSubsample < 0.95)
+	diffAverage = (dt[, mean(dbh)]/mean_dbh_beforeSubsample > 1.05) || (dt[, mean(dbh)]/mean_dbh_beforeSubsample < 0.95)
+	diffSD = (dt[, sd(dbh)]/sd_dbh_beforeSubsample > 1.05) || (dt[, sd(dbh)]/sd_dbh_beforeSubsample < 0.95)
 	diffQuantile_25_75 = any((quantile(dt[, dbh], probs = c(0.25, 0.5, 0.75))/quantile_beforeSubsample_25_75 > 1.05) |
 		(quantile(dt[, dbh], probs = c(0.25, 0.5, 0.75))/quantile_beforeSubsample_25_75 < 0.95))
 
@@ -314,7 +363,7 @@ treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshape
 setkey(treeData, plot_id, tree_id, year)
 ls_species = sort(treeData[, unique(speciesName_sci)])
 
-if ((species_id < 1) | (species_id > length(ls_species)))
+if ((species_id < 1) || (species_id > length(ls_species)))
 	stop(paste0("Species id = ", species_id, " has no corresponding species (i.e., either negative or larger than the number of species)"))
 
 speciesCountry = treeData[, .N, by = .(speciesName_sci, country)]
@@ -357,7 +406,7 @@ if (n_indiv > max_indiv)
 		stop("The subsample does not look representative of the whole data set, check the quantiles 0.25, 0.5, and 0.75")
 }
 
-if ((!subsamplingActivated) & (run_id != 1))
+if ((!subsamplingActivated) && (run_id != 1))
 	stop("Running the model only once (i.e., with run_id = 1) is enough: There is no subsampling")
 
 n_inventories = length(treeData[, unique(nfi_id)])
@@ -381,7 +430,7 @@ print(countryStats)
 ## Read climate
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
 setkey(climate, plot_id, year)
-climate[, row_id := 1:.N]
+climate[, row_id := seq_len(.N)]
 
 ## Read soil data (pH)
 soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
@@ -544,8 +593,7 @@ end_time = Sys.time()
 
 time_ended = format(Sys.time(), "%Y-%m-%d_%Hh%M")
 results$save_output_files(dir = savingPath, basename = paste0("growth-run=", run_id, "-", time_ended), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_de-fr-sw_", max_indiv,
-	"_main.rds"))
+results$save_object(file = paste0(savingPath, "growth-run=", run_id, "-", time_ended, "_de-fr-sw_", max_indiv, "_main.rds"))
 
 results$cmdstan_diagnose()
 
