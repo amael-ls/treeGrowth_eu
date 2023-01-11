@@ -100,7 +100,7 @@ parameters {
 	vector<lower = 0.1/sd_dbh, upper = 3000/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
 
 	// --- Growth
-	array[n_indiv, n_obs_growth_per_indiv] real latent_avg_annual_growth; // Real (and unobserved) averaged annual growth
+	array[n_indiv, n_obs_growth_per_indiv] real<lower = 0> latent_avg_annual_growth; // Real (and unobserved) averaged annual growth
 }
 
 model {
