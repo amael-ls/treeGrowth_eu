@@ -79,6 +79,46 @@ saveRDS(posterior_ls, "./posterior_ls.rds")
 
 plot_correl_error(error_dt, correl_dt, threshold_correl = 0.2, rm_correl = "lp__")
 
+
+
+
+#### Comparison estimations 8000 individuals vs 12 000 individuals
+results8000 = readRDS("Fagus sylvatica/growth-run=1-2022-12-10_18h30_de-fr-sw_8000_main.rds")
+results12000 = readRDS("Fagus sylvatica/growth-run=1-2022-12-14_03h05_de-fr-sw_12000_main.rds")
+
+lazyComparePosterior(draws_ls = list(results8000$draws("tas_slope"), results12000$draws("tas_slope")), params = "temperature",
+	filename = "temperature")
+lazyComparePosterior(draws_ls = list(results8000$draws("tas_slope2"), results12000$draws("tas_slope2")),
+	params = "temperature (quadratic term)", filename = "temperature_quadratic")
+
+lazyComparePosterior(draws_ls = list(results8000$draws("pr_slope"), results12000$draws("pr_slope")), params = "precipitation")
+lazyComparePosterior(draws_ls = list(results8000$draws("pr_slope2"), results12000$draws("pr_slope2")),
+	params = "precipitation (quadratic term)")
+
+lazyComparePosterior(draws_ls = list(results8000$draws("sigmaProc"), results12000$draws("sigmaProc")), params = "process error",
+	filename = "processError")
+lazyComparePosterior(draws_ls = list(results8000$draws("etaObs"), results12000$draws("etaObs")), params = "extreme obs error",
+	multi_nfi = TRUE, ls_nfi = c("fr", "de", "se"), "extremeErrors")
+lazyComparePosterior(draws_ls = list(results8000$draws("proba"), results12000$draws("proba")),
+	params = "proba occurrence extreme obs error", multi_nfi = TRUE, ls_nfi = c("fr", "de", "se"))
+
+#### Comparison with classic approach
+results8000_classic = readRDS("Fagus sylvatica/growth-run=1-2022-12-15_11h06_de-fr-sw_8000_main_classic.rds")
+
+lazyComparePosterior(draws_ls = list(results8000_classic$draws("tas_slope"), results12000$draws("tas_slope")), params = "temperature")
+lazyComparePosterior(draws_ls = list(results8000_classic$draws("tas_slope2"), results12000$draws("tas_slope2")),
+	params = "temperature (quadratic term)")
+
+lazyComparePosterior(draws_ls = list(results8000_classic$draws("pr_slope"), results12000$draws("pr_slope")), params = "precipitation")
+lazyComparePosterior(draws_ls = list(results8000_classic$draws("pr_slope2"), results12000$draws("pr_slope2")),
+	params = "precipitation (quadratic term)")
+
+lazyComparePosterior(draws_ls = list(results8000_classic$draws("sigmaProc"), results12000$draws("sigmaProc")), params = "process error")
+lazyComparePosterior(draws_ls = list(results8000_classic$draws("etaObs"), results12000$draws("etaObs")), params = "extreme obs error",
+	multi_nfi = TRUE, ls_nfi = c("fr", "de", "se"))
+lazyComparePosterior(draws_ls = list(results8000_classic$draws("proba"), results12000$draws("proba")),
+	params = "proba occurrence extreme obs error", multi_nfi = TRUE, ls_nfi = c("fr", "de", "se"))
+
 # selected_indiv = data.table(speciesName_sci = infoSpecies[, speciesName_sci],
 # 	plot_id = c("france_738952", "france_804256", "france_873749"), tree_id = c(1, 3, 5))
 
