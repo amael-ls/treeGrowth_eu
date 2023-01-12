@@ -6,6 +6,7 @@
 #	- lazyTrace: Bayesplot is having troubles on my mac (Arial font not always found), so I create my own traces plot
 #	- reshapeDraws: Function to reshape draws_array
 #	- lazyPosterior: Function to plot the prior and posterior of a parameter
+#	- lazyComparePosterior: Function to plot the posteriors of a parameter from a list of models
 #	- expand: Function to expand the basic names when there is more than one NFI
 #	- energyPairs: Function to do a pair plot of parameters versus energy
 #	- isProcessed: Detect if a species has been processed or not
@@ -47,7 +48,7 @@ getParams = function(model_cmdstan, params_names, type = "mean")
 		}
 	}
 	
-	return (vals)
+	return(vals)
 }
 
 ## Get name of the last run
@@ -67,7 +68,7 @@ getLastRun = function(path, begin = "^growth-", extension = ".rds$", format = "y
 	if (length(ls_files) == 0)
 	{
 		warning(paste0("No file detected in the folder '", path, "'. You were looking for '", begin, "*", extension, "'"))
-		return (list(file = NA, time_ended = NA))
+		return(list(file = NA, time_ended = NA))
 	}
 
 	if (is.null(run))
@@ -90,18 +91,18 @@ getLastRun = function(path, begin = "^growth-", extension = ".rds$", format = "y
 			regex = "h", simplify = TRUE)), by = file]
 	}
 
-	dt[stri_detect(str = day, regex = extension), day := stri_sub(str = day, to = stri_locate_first(str = day, regex = "_")[,"start"] - 1)]
+	dt[stri_detect(str = day, regex = extension), day := stri_sub(str = day, to = stri_locate_first(str = day, regex = "_")[, "start"] - 1)]
 
 	setorder(dt, year, month, day, hour, minute)
 	if (getAll)
-		return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-"), allFiles = dt))
-	return (list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-")))
+		return(list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-"), allFiles = dt))
+	return(list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-")))
 }
 
 ## Bayesplot is having troubles on my mac (Arial font not always found), so I create my own traces plot
 lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 {
-	if (!is.array(draws) & !all(class(draws) %in% c("draws_array", "draws", "array")))
+	if (!is.array(draws) && !all(class(draws) %in% c("draws_array", "draws", "array")))
 		stop("The class of draws should be either array, or compatible with cmdstanr (draws_array, draws, array)")
 	
 	n_chains = dim(draws)[2]
@@ -146,7 +147,7 @@ lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 	{
 		if (all(class(draws) %in% c("draws_array", "draws", "array")))
 			lines(1:n_iter, scaling*draws[, chain,], type = "l", col = colours_str[chain])
-		if (is.array(draws) & !all(class(draws) %in% c("draws_array", "draws", "array")))
+		if (is.array(draws) && !all(class(draws) %in% c("draws_array", "draws", "array")))
 			lines(1:n_iter, scaling*draws[, chain], type = "l", col = colours_str[chain])
 	}
 
@@ -194,7 +195,7 @@ reshapeDraws = function(draws_array, id_latent, regex = "latent_dbh")
 		end = i*length_chain
 		output[start:end] = draws_array[, i, paste0(regex, "[", id_latent, "]")]
 	}
-	return (output)
+	return(output)
 }
 
 ## Function to plot the prior and posterior of a parameter
@@ -207,9 +208,9 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	# isFALSE will not work here, hence !isTRUE
 	if (!is.null(fun))
 	{
-		if (!isTRUE(all.equal(fun, dnorm)) &
-			!isTRUE(all.equal(fun, dlnorm)) &
-			!isTRUE(all.equal(fun, dgamma)) &
+		if (!isTRUE(all.equal(fun, dnorm)) &&
+			!isTRUE(all.equal(fun, dlnorm)) &&
+			!isTRUE(all.equal(fun, dgamma)) &&
 			!isTRUE(all.equal(fun, dbeta)))
 		{
 			stop("This function only accepts dnorm, dlnorm, dgamma, or dbeta as priors")
@@ -246,7 +247,7 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	# Get parameters for prior
 	if (isTRUE(all.equal(fun, dnorm)))
 	{
-		if ((!all(c("mean", "sd") %in% names(providedArgs))) & (!all(c("arg1", "arg2") %in% names(providedArgs))))
+		if ((!all(c("mean", "sd") %in% names(providedArgs))) && (!all(c("arg1", "arg2") %in% names(providedArgs))))
 			stop("You must provide mean and sd for dnorm")
 		
 		if (all(c("mean", "sd") %in% names(providedArgs)))
@@ -261,7 +262,7 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 
 	if (isTRUE(all.equal(fun, dlnorm)))
 	{
-		if ((!all(c("mean", "sd") %in% names(providedArgs))) & (!all(c("arg1", "arg2") %in% names(providedArgs))) & 
+		if ((!all(c("mean", "sd") %in% names(providedArgs))) && (!all(c("arg1", "arg2") %in% names(providedArgs))) && 
 			(!all(c("meanlog", "sdlog") %in% names(providedArgs))))
 			stop("You must provide mean and sd or meanlog and sdlog for dlnorm")
 		
@@ -284,8 +285,8 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 
 	if (isTRUE(all.equal(fun, dgamma)))
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "rate") %in% names(providedArgs)))
-			& (!all(c("arg1", "arg2") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) && (!all(c("shape", "rate") %in% names(providedArgs)))
+			&& (!all(c("arg1", "arg2") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape and rate for dgamma")
 		
 		if (all(c("mean", "var") %in% names(providedArgs)))
@@ -313,8 +314,8 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 
 	if (isTRUE(all.equal(fun, dbeta)))
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape1", "shape2") %in% names(providedArgs)))
-			& (!all(c("arg1", "arg2") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) && (!all(c("shape1", "shape2") %in% names(providedArgs)))
+			&& (!all(c("arg1", "arg2") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape1 and shape2 for dbeta")
 
 		if (scaling != 1)
@@ -376,29 +377,29 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 		max_y = max(y)
 	}
 
-	min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-	max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+	min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+	max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
 
 	if (isTRUE(all.equal(fun, dnorm)))
 	{
 		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, mean = arg1, sd = arg2)[["objective"]]
 		if (expand_bounds)
 		{
-			check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, mean = arg1, sd = arg2,
+			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, mean = arg1, sd = arg2,
 				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_min_bound$value > 0.1)
 			{
-				min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-				check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, mean = arg1, sd = arg2,
+				min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, mean = arg1, sd = arg2,
 					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 
-			check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
 				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_max_bound$value > 0.1)
 			{
-				max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
-				check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
+				max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), mean = arg1, sd = arg2,
 					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 		}
@@ -409,21 +410,21 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, meanlog = arg1, sdlog = arg2)[["objective"]]
 		if (expand_bounds)
 		{
-			check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, meanlog = arg1,
+			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, meanlog = arg1,
 				sdlog = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_min_bound$value > 0.1)
 			{
-				min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-				check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, meanlog = arg1,
+				min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, meanlog = arg1,
 					sdlog = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 
-			check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), meanlog = arg1,
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), meanlog = arg1,
 				sdlog = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_max_bound$value > 0.1)
 			{
-				max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
-				check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), meanlog = arg1,
+				max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), meanlog = arg1,
 					sdlog = arg2, subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 		}
@@ -434,28 +435,28 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 		max_y_prior = optimise(f = fun, interval = c(min_x, max_x), maximum = TRUE, shape = arg1, rate = arg2)[["objective"]]
 		if (expand_bounds)
 		{
-			check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, shape = arg1, rate = arg2,
+			check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, shape = arg1, rate = arg2,
 				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_min_bound$value > 0.1)
 			{
-				min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-				check_min_bound = integrate(fun, lower = ifelse (min_x < 0, 10*min_x, -10*min_x), upper = min_x, shape = arg1, rate = arg2,
+				min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+				check_min_bound = integrate(fun, lower = ifelse(min_x < 0, 10*min_x, -10*min_x), upper = min_x, shape = arg1, rate = arg2,
 					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 
-			check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), shape = arg1, rate = arg2,
+			check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), shape = arg1, rate = arg2,
 				subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			while (check_max_bound$value > 0.1)
 			{
-				max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
-				check_max_bound = integrate(fun, lower = max_x, upper = ifelse (max_x < 0, -10*max_x, 10*max_x), shape = arg1, rate = arg2,
+				max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+				check_max_bound = integrate(fun, lower = max_x, upper = ifelse(max_x < 0, -10*max_x, 10*max_x), shape = arg1, rate = arg2,
 					subdivisions = 2000, rel.tol = .Machine$double.eps^0.1)
 			}
 		}
 	}
 	if (!is.null(fun))
 		max_y = max(max_y, max_y_prior)
-	max_y = ifelse (max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
+	max_y = ifelse(max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
 
 	# Plot
 	if (!is.null(filename))
@@ -491,11 +492,11 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	}
 
 	# Add legend
-	if (multi & !is.null(ls_nfi))
+	if (multi && !is.null(ls_nfi))
 		if (length(ls_nfi) != length_params)
 			warning("Dimension mismatch between ls_nfi and length_params! The legend might not be correctly printed")
 
-	if (!multi & !is.null(ls_nfi))
+	if (!multi && !is.null(ls_nfi))
 		if (length(ls_nfi) != 1)
 			warning("To many NFI provided in ls_nfi! The legend might not be correctly printed")
 
@@ -523,7 +524,7 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	return(list(arg1 = arg1, arg2 = arg2, min_x = min_x, max_x = max_x, max_y = max_y, max_y_prior = max_y_prior, filename = filename))
 }
 
-## Function to plot the prior and posterior of a parameter
+## Function to plot the posteriors of a parameter from a list of models
 lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi = FALSE, ls_nfi = NULL, ...)
 {
 	# Check-up
@@ -535,7 +536,7 @@ lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi
 	for (i in seq_along(draws_ls))
 	{
 		if (!all(class(draws_ls[[i]]) == c("draws_array", "draws", "array")))
-			stop(paste0("draws_ls[", i,"] is not an array extracted from a CmdStanMCMC object"))
+			stop(paste0("draws_ls[", i, "] is not an array extracted from a CmdStanMCMC object"))
 
 		len[i, c("nIter", "nChains", "nVariables") := as.list(dim(draws_ls[[i]]))]
 	}
@@ -567,13 +568,13 @@ lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi
 
 	# Create and fill list of posteriors
 	density_ls = vector(mode = "list", length = nDraws)
-
+	
 	min_x = +Inf
 	max_x = -Inf
 	max_y = -Inf
-	
+
 	for (i in seq_along(draws_ls))
-	{	
+	{
 		# --- get posterior
 		if (multi_nfi)
 		{
@@ -612,10 +613,10 @@ lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi
 			max_y = temporary_max_y
 	}
 
-	min_x = ifelse (min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-	max_x = ifelse (max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+	min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+	max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
 
-	max_y = ifelse (max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
+	max_y = ifelse(max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
 
 	names(density_ls) = paste("draw", 1:nDraws, sep = "_")
 
@@ -657,11 +658,11 @@ lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi
 	}
 
 	# Add legend
-	if (multi_nfi & !is.null(ls_nfi))
+	if (multi_nfi && !is.null(ls_nfi))
 		if (length(ls_nfi) != length_params)
 			warning("Dimension mismatch between ls_nfi and length_params! The legend might not be correctly printed")
 
-	if (!multi_nfi & !is.null(ls_nfi))
+	if (!multi_nfi && !is.null(ls_nfi))
 		if (length(ls_nfi) != 1)
 			warning("To many NFI provided in ls_nfi! The legend might not be correctly printed")
 
@@ -669,14 +670,14 @@ lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi
 	{
 		posterior_num = paste("Posterior", 1:nDraws)
 		posterior_country = if (!is.null(ls_nfi)) ls_nfi else 1:length_params
-		legend_text = CJ(posterior_num, posterior_country, sorted = FALSE)[, paste(posterior_num, posterior_country, sep =" ")]
+		legend_text = CJ(posterior_num, posterior_country, sorted = FALSE)[, paste(posterior_num, posterior_country, sep = " ")]
 		legend_colours = colours_str
 		
 		legend(x = "topright", legend = legend_text, col = legend_colours, lty = rep(1:nDraws, each = length_params), lwd = 2, box.lwd = 0)
 	} else {
 		posterior_num = paste("Posterior", 1:nDraws)
 		posterior_country = if (!is.null(ls_nfi)) ls_nfi else ""
-		legend_text = CJ(posterior_num, posterior_country, sorted = FALSE)[, paste(posterior_num, posterior_country, sep =" ")]
+		legend_text = CJ(posterior_num, posterior_country, sorted = FALSE)[, paste(posterior_num, posterior_country, sep = " ")]
 		legend_colours = colours_str_pol
 
 		legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
@@ -741,7 +742,7 @@ energyPairs = function(path, run, results, nb_nfi, energy, rm_names = c("latent"
 
 	print(paste("Figure saved under the name:", filename))
 
-	return (correl_energy)
+	return(correl_energy)
 }
 
 ## Detect if a species has been processed or not
@@ -754,7 +755,7 @@ isProcessed = function(path, multi, lim_time, begin = "^growth-", extension = ".
 	processed = rep(FALSE, n_runs)
 
 	if (!dir.exists(path))
-		return (FALSE)
+		return(FALSE)
 
 	if (multi)
 	{
@@ -763,16 +764,16 @@ isProcessed = function(path, multi, lim_time, begin = "^growth-", extension = ".
 			run = run_vec[i]
 			date_run = getLastRun(path, begin = begin, extension = extension, format = format, run = i)[["time_ended"]]
 			date_run = as.Date(date_run)
-			if (!is.na(date_run) & (date_run > lim_time))
+			if (!is.na(date_run) && (date_run > lim_time))
 				processed[i] = TRUE
 		}
 	} else {
 		date_run = getLastRun(path, begin = begin, extension = extension, format = format, run = 1)[["time_ended"]]
 		date_run = as.Date(date_run)
-		if (!is.na(date_run) & (date_run > lim_time))
+		if (!is.na(date_run) && (date_run > lim_time))
 			processed = TRUE
 	}
-	return (all(processed))
+	return(all(processed))
 }
 
 ## Wrapping function to call all the other plot functions and to gather informations on the runs
@@ -784,13 +785,13 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		etaObs = numeric(n_nfi + 1), proba = numeric(n_nfi + 1), correl_eta_proba = numeric(n_nfi + 1))
 	setkey(error_dt, nfi)
 	
-	if (multi & !is.null(run))
+	if (multi && !is.null(run))
 	{
 		print(paste0("Run = ", run, "; multi and n_runs parameters ignored"))
 		temporary = centralised_fct(species, FALSE, n_runs, ls_nfi, params_dt, run, isDBH_normalised, simulatePosterior) # Recursive call
 		error_dt = temporary[["error_dt"]]
 		correl_energy = temporary[["correl_energy"]]
-	} else if (multi & is.null(run)) {
+	} else if (multi && is.null(run)) {
 		error_ls = vector(mode = "list", length = n_runs)
 		correl_ls = vector(mode = "list", length = n_runs)
 		for (i in 1:n_runs)
@@ -956,7 +957,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		dbh_min = min(stanData[["dbh_init"]])
 		dbh_max = max(stanData[["dbh_init"]])
 
-		if ((dbh_min < 50) | (dbh_max > 3000))
+		if ((dbh_min < 50) || (dbh_max > 3000))
 			stop("dbh range out of bounds 50 and 3500")
 
 		x_min = v[min(which(abs(dbh_min - v) == min(abs(dbh_min - v))))]
@@ -1006,7 +1007,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 			lty = c(2, 2, 1, 1), col = c("#34568B", "#CD212A", "#34568B", "#CD212A"), lwd = 2, bty = "n")
 		dev.off()
 	}
-	return (output)
+	return(output)
 }
 
 ## Function to plot the correlations energy <--> parameters for each species, and to plot rescaled error values
@@ -1246,12 +1247,12 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 		if (!all(c("dbh", "year", "plot_id", "tree_id") %in% names(data)))
 			stop("data must contain at least dbh, year, tree_id, and plot_id")
 
-		if ((length(unique(data[, plot_id])) != 1) | (length(unique(data[, tree_id])) != 1))
+		if ((length(unique(data[, plot_id])) != 1) || (length(unique(data[, tree_id])) != 1))
 		{
 			indiv_ind = ls_names == "tree_id"
 			plot_ind = ls_names == "plot_id"
 
-			if (!any(indiv_ind) | !any(plot_ind))
+			if (!any(indiv_ind) || !any(plot_ind))
 				stop("The data provided contains more than one individual/plot, please provide a tree_id and a plot_id or a unique data")
 
 			selectedIndiv = providedArgs[["tree_id"]]
@@ -1270,7 +1271,7 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 		indiv_ind = ls_names == "tree_id"
 		plot_ind = ls_names == "plot_id"
 
-		if (!any(indiv_ind) | !any(plot_ind))
+		if (!any(indiv_ind) || !any(plot_ind))
 			stop("The data were loaded automatically, but you still need to provide a tree_id and a plot_id")
 
 		selectedIndiv = providedArgs[["tree_id"]]
@@ -1308,7 +1309,7 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 	if (!is.null(filename))
 		pdf(paste0(path, filename), height = 11.25, width = 20)
 
-	par(mar = c(8, 8, 0.5, 0.5), mgp = c(5,1,0))
+	par(mar = c(8, 8, 0.5, 0.5), mgp = c(5, 1, 0))
 	plot(0, pch = "", xlim = c(min_yr, max_yr), ylim = c(min_val, max_val), axes = TRUE, bg = "transparent",
 		xlab = "Year",
 		ylab = "Diameter at breast height",
@@ -1320,7 +1321,7 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 			lines(x = min_yr:max_yr, y = draws[iter, chain, ], col = "#3A3A3A55", lwd = 0.15)
 	}
 
-	if (!is.null(divergences) & length(divergences) != 0)
+	if (!is.null(divergences) && length(divergences) != 0)
 	{
 		iter_div = divergences %% n_iter
 		iter_div[iter_div == 0] = n_iter
@@ -1437,7 +1438,7 @@ dbh_timeSeries = function(posteriorSim, plotMean = TRUE, filename = NULL, rescal
 		dev.off()
 		print(paste0("Figure saved under the name: ", filename))
 	}
-	return (output)
+	return(output)
 }
 
 ## Function analysing probabilities of extreme errors
@@ -1467,14 +1468,14 @@ probaExtremeObs = function(posteriorSim, ...)
 		if (length(indices) == 0)
 		{
 			warning("Individual not found")
-			return (NULL)
+			return(NULL)
 		}
 		proba_extreme_obs = proba_extreme_obs_array[, , indices]
 		proba_mean = apply(proba_extreme_obs, 3, mean)
 		names(proba_mean) = paste0("tree_", indices)
 	}
 
-	return (proba_mean)
+	return(proba_mean)
 }
 
 ## Function to rescale parameters (intercept and slopes)
@@ -1530,7 +1531,7 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 
 	errors_rescaled["sigmaProc"] = sd_dbh^2*params["sigmaProc"] #! NOT SURE OF THIS!!! I THINK IT DOES NOT WORK NOW THAT I USE LOGNORMAL
 
-	return (list(intercept_rescale = intercept_rescale, slope_dbh_rescale = slope_dbh_rescale,
+	return(list(intercept_rescale = intercept_rescale, slope_dbh_rescale = slope_dbh_rescale,
 		slope_quadratic_dbh_rescale = slope_quadratic_dbh_rescale, slope_predictors_rescale = slope_predictors_rescale,
 		slope_quadratic_predictors_rescale = slope_quadratic_predictors_rescale, errors_rescale = errors_rescale))
 }
@@ -1563,7 +1564,7 @@ growth_fct = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_
 	G_average = exp(growth_fct_meanlog(dbh, pr, tas, ph, basalArea, params, sd_dbh, standardised_dbh,
 		standardised_params, standardised_variables, ...) + sigmaProc^2/2) # Formula from the average of a lognormal
 	
-	return (G_average);
+	return(G_average)
 }
 
 ## Function computing the expected growth on the log scale (i.e., corresponds to the parameter meanlog of lognormal distribution)
@@ -1574,7 +1575,7 @@ growth_fct_meanlog = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, stand
 	if (!standardised_dbh)
 		dbh = dbh/sd_dbh
 
-	if (!standardised_params & !standardised_variables) # i.e., params from rescaleParams function; explanatory variables from data
+	if (!standardised_params && !standardised_variables) # i.e., params from rescaleParams function; explanatory variables from data
 	{
 		if (class(params) != "list")
 			stop("Parameters have been rescaled, list created by rescaleParams expected")
@@ -1597,7 +1598,7 @@ growth_fct_meanlog = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, stand
 			ph_slope*ph + ph_slope2*ph^2 + competition_slope*basalArea)
 	}
 
-	if (standardised_params & !standardised_variables) # i.e., params from stan output; explanatory variables from data
+	if (standardised_params && !standardised_variables) # i.e., params from stan output; explanatory variables from data
 	{
 		providedArgs = list(...)
 		ls_names = names(providedArgs)
@@ -1635,7 +1636,7 @@ growth_fct_meanlog = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, stand
 		standardised_variables = TRUE
 	}
 
-	if (standardised_params & standardised_variables) # i.e., params from stan output; explanatory variables from above or already std.
+	if (standardised_params && standardised_variables) # i.e., params from stan output; explanatory variables from above or already std.
 	{
 		intercept = params["averageGrowth"]
 
@@ -1655,7 +1656,7 @@ growth_fct_meanlog = function(dbh, pr, tas, ph, basalArea, params, sd_dbh, stand
 			ph_slope*ph + ph_slope2*ph^2 + competition_slope*basalArea)
 	}
 
-	if (!standardised_params & standardised_variables)
+	if (!standardised_params && standardised_variables)
 		warning("This combination of scaled and non scaled is not coded")
-	return (G)	
+	return(G)	
 }
