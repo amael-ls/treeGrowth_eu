@@ -16,7 +16,7 @@ source("./toolFunctions.R")
 
 #### Load data
 ## General data (list)
-data = readRDS("./dummyData.rds")
+data = readRDS("./dummyData_moreVariance.rds")
 
 ## Saving options
 savingPath = "./"
@@ -88,14 +88,55 @@ lazyTrace(draws = results$draws("latent_dbh_parents[1]"),
 	val1 = data[["treeData"]][1, dbh1]/data[["scaling"]]["sd_dbh_orig"])
 
 results$save_output_files(dir = savingPath, basename = paste0(basename, "_diagnose"), timestamp = FALSE, random = TRUE)
-results$save_object(file = paste0(basename, "_results.rds"))
+results$save_object(file = paste0(basename, "_results_moreVariance.rds"))
 
-indiv = 1
+####! Crash test zone
+# #### Check correlation growth
+# cor(data[["treeData"]][, dbh2 - dbh1], data[["treeData"]][, dbh3 - dbh2])
+# cor(data[["treeData"]][, dbh2 - dbh1], data[["treeData"]][, dbh4 - dbh3])
+# cor(data[["treeData"]][, dbh2 - dbh1], data[["treeData"]][, dbh5 - dbh4])
+# cor(data[["treeData"]][, dbh2 - dbh1], data[["treeData"]][, dbh6 - dbh5])
 
-for (i in 1:(data[["infos"]]["delta_t"] - 1))
-{
-	current_dbh = paste0("dbh", i)
-	next_dbh = paste0("dbh", i + 1)
-	lazyPosterior(draws = data[["scaling"]]["sd_dbh_orig"]*results$draws(paste0("latent_growth[", indiv, ",", i, "]")), fun = NULL,
-		val1 = data[["treeData"]][indiv, ..next_dbh] - data[["treeData"]][indiv, ..current_dbh])
-}
+# cor(data[["treeData"]][, dbh3 - dbh2], data[["treeData"]][, dbh4 - dbh3])
+# cor(data[["treeData"]][, dbh3 - dbh2], data[["treeData"]][, dbh5 - dbh4])
+# cor(data[["treeData"]][, dbh3 - dbh2], data[["treeData"]][, dbh6 - dbh5])
+
+# cor(data[["treeData"]][, dbh4 - dbh3], data[["treeData"]][, dbh5 - dbh4])
+# cor(data[["treeData"]][, dbh4 - dbh3], data[["treeData"]][, dbh6 - dbh5])
+
+# cor(data[["treeData"]][, dbh5 - dbh4], data[["treeData"]][, dbh6 - dbh5])
+
+# #### Check if a sum of lognormal random variables can be approximated by one lognormal random variable
+# # The package lognorm is based on http://www.m-hikari.com/ams/ams-2013/ams-125-128-2013/39511.html
+# # WKB Approximation for the Sum of Two Correlated Lognormal Random Variables
+# library(lognorm)
+
+# # generate nSample values of two lognormal random variables
+# mu1 = log(110)
+# mu2 = log(100)
+# mu3 = log(77)
+# mu4 = log(29)
+# sigma1 = 0.25
+# sigma2 = 0.15
+# sigma3 = 0.54
+# sigma4 = 0.07
+
+# (coefSum = estimateSumLognormal(c(mu1, mu2, mu3, mu4), c(sigma1, sigma2, sigma3, sigma4)))
+
+# X1 = rlnorm(1e6, meanlog = mu1, sdlog = sigma1)
+# X2 = rlnorm(1e6, meanlog = mu2, sdlog = sigma2)
+# X3 = rlnorm(1e6, meanlog = mu3, sdlog = sigma3)
+# X4 = rlnorm(1e6, meanlog = mu4, sdlog = sigma4)
+
+# Y = X1 + X2 + X3 + X4
+# plot(density(Y))
+# curve(dlnorm(x, meanlog = coefSum["mu"], sdlog = coefSum["sigma"]),
+# 	to = 1200, lwd = 2, col = "#A128AF", add = TRUE)
+
+# dens = density(Y)
+# errAbs = abs(dens$y - dlnorm(x = dens$x, meanlog = coefSum["mu"], sdlog = coefSum["sigma"]))
+# errRel = abs((dens$y - dlnorm(x = dens$x, meanlog = coefSum["mu"], sdlog = coefSum["sigma"]))/dlnorm(x = dens$x, meanlog = coefSum["mu"], sdlog = coefSum["sigma"]))
+# ind = which(dens$x < 600) 
+# plot(dens$x[ind], errRel[ind])
+# plot(dens$x[ind], 100*errRel[ind])
+# plot(dens$x[ind], errAbs[ind])
