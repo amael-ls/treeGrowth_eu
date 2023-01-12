@@ -73,8 +73,11 @@ sd_dbh_orig = treeData[, sd(dbh1)]
 sigmaObs = unscaled_sigmaObs/sd_dbh_orig
 
 ## Temperature
-temperature_avg = rnorm(n = n_annual_growth_per_indiv, mean = 9.7, sd = 0.3)
-temperature_sd = rgamma(n = n_annual_growth_per_indiv, shape = 0.82^2/0.0015, rate = 0.82/0.0015)
+# temperature_avg = rnorm(n = n_annual_growth_per_indiv, mean = 9.7, sd = 0.3)
+# temperature_sd = rgamma(n = n_annual_growth_per_indiv, shape = 0.82^2/0.0015, rate = 0.82/0.0015)
+
+temperature_avg = rnorm(n = n_annual_growth_per_indiv, mean = 9.7, sd = 4)
+temperature_sd = rgamma(n = n_annual_growth_per_indiv, shape = 0.82^2/0.15, rate = 0.82/0.15)
 
 temperature = matrix(data = NA, nrow = n_plot, ncol = n_annual_growth_per_indiv)
 
@@ -159,4 +162,4 @@ saveRDS(list(
 		infos = c(n_indiv = n_indiv, n_plot = n_plot, n_measurements = n_measurements, delta_t = delta_t,
 			n_annual_growth_per_indiv = n_annual_growth_per_indiv),
 		sigmaObs = sigmaObs
-	), "dummyData.rds")
+	), "dummyData_moreVariance.rds")
