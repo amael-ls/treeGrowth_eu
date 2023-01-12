@@ -12,6 +12,7 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
+library(stringi)
 
 #### Tool function
 ## Sampling N integers from 1 to X, with the constraint that the sum should be Z
@@ -25,7 +26,7 @@ constrained_sum_sample_pos = function(n, total)
 	divTot = c(dividers, total)
 	divZero = c(0, dividers)
 
-	return (divTot - divZero)
+	return(divTot - divZero)
 }
 
 #### Define variables
@@ -35,7 +36,7 @@ set.seed(1969-08-18) # Woodstock seed
 n_indiv = 2000
 n_plot = round(n_indiv/2.5) # German data have in average 2.5 individuals per plot
 n_measurements = 2 # Number of measurements per individual
-delta_t = 10 # Number of growing years between two measurements, e.g., 2000 --> 2003, 3 growing years 2000-2001, 2001-2002, 2002-2003
+delta_t = 5 # Number of growing years between two measurements, e.g., 2000 --> 2003, 3 growing years 2000-2001, 2001-2002, 2002-2003
 
 print(paste("In average there are", round(n_indiv/n_plot, 2), "individuals per plot"))
 
@@ -90,7 +91,7 @@ temperature[, plot_id := 1:n_plot]
 ## Assign trees to plots
 nb_trees_per_plot = constrained_sum_sample_pos(n = n_plot, total = n_indiv)
 treeData[, plot_id := rep(1:n_plot, times = nb_trees_per_plot)]
-treeData[, tree_id := 1:.N, by = plot_id]
+treeData[, tree_id := seq_len(.N), by = plot_id]
 
 all.equal(treeData[, .N, by = plot_id][, N], nb_trees_per_plot)
 
@@ -135,10 +136,16 @@ for (i in seq_along(dbh_recorded[-length(dbh_recorded)]))
 	obs_next_rec_dbh = paste0("obs_", next_rec_dbh)
 
 	obs_growth = paste0("obs_growth", i)
+	avg_temperature = paste0("avg_temperature", i)
+
+	id_dbh_current = as.integer(stri_sub(str = current_dbh, from = stri_locate_first(str = current_dbh, regex = "[:digit:]")[, "end"]))
+	id_dbh_next = as.integer(stri_sub(str = next_rec_dbh, from = stri_locate_first(str = next_rec_dbh, regex = "[:digit:]")[, "end"])) - 1
+	temperature_cols = paste0("temperature", id_dbh_current:id_dbh_next)
 
 	treeData[, c(obs_growth) := (treeData[[obs_next_rec_dbh]] - treeData[[obs_current_dbh]])/delta_t]
+	treeData[, c(avg_temperature) := sum(.SD)/(delta_t*.N), .SDcols = temperature_cols, by = .(plot_id)]
+	# The *.N is to compensate that I do not compute per .(plot_id, tree_id)! I divide by the number of tree_id
 }
-
 
 setcolorder(treeData, c("plot_id", "tree_id", paste0("dbh", 1:(n_annual_growth_per_indiv + 1)),
 	paste0("obs_", dbh_recorded),
