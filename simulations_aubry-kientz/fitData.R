@@ -28,6 +28,7 @@ basename = paste0("indiv=", data[["infos"]]["n_indiv"], "_plot=", data[["infos"]
 ## Common variables
 growth_cols = colnames(data[["treeData"]])[stri_detect(colnames(data[["treeData"]]), regex = "growth[:digit:]")]
 temperature_cols = colnames(data[["treeData"]])[stri_detect(colnames(data[["treeData"]]), regex = "temperature[:digit:]")]
+temperature_cols = temperature_cols[!stri_detect(temperature_cols, regex = "avg_temperature[:digit:]")]
 
 n_chains = 3
 
