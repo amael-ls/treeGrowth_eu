@@ -65,7 +65,7 @@ data {
 	// real beta3;
 	// real beta4;
 
-	// Observation error (not yet simulated in the data actually, just used for the likelihood)
+	// Observation error
 	real <lower = 0> sigmaObs;
 }
 
