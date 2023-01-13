@@ -1,5 +1,5 @@
 
-#### Aim of prog: Comparing sigmaProc (SSM approach) vs sigmaProc (classic approach)
+#### Aim of prog: Comparing sigmaProc (SSM approach) vs sigmaProc (classic approach) for the simulation case
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -21,10 +21,10 @@ meanlog_fct = function(dbh0, temperature, beta0, beta1, beta2, beta3, beta4)
 data = readRDS("./dummyData.rds")
 
 ## Classic approach
-classic = readRDS("./indiv=2000_plot=800_measurements=2_deltaT=5_results.rds")
+classic = readRDS("./indiv=2000_plot=800_measurements=2_deltaT=5_results_moreVariance.rds")
 
 ## SSM
-ssm = readRDS("../simulations_aubry-kientz/indiv=2000_plot=800_measurements=2_deltaT=5_results.rds")
+ssm = readRDS("../simulations_aubry-kientz/indiv=2000_plot=800_measurements=2_deltaT=5_results_moreVariance.rds")
 
 #### Compute the approximation of the lognormal 
 ## Common variables
@@ -64,8 +64,10 @@ for (i in 1:nGrowth)
 	current_dbh = current_dbh + unlist(dt_sample[, lapply(.SD, mean), .SDcols = c(sampleCol)])
 }
 
+## Approximated lognormal distribution from the sum of lognormal random variables
 (coefSum = estimateSumLognormal(mu = meanlog, sigma = sdlog))
 
+## Comparison with the parameters from the classic approach
 mean(classic$draws("sigmaProc"))
 avg_temperature = (unlist(data[["treeData"]][.(selected_plot_id, selected_tree_id), avg_temperature1]) - data[["scaling"]]["mu_temp"])/
 	data[["scaling"]]["sd_temp"]
@@ -74,3 +76,25 @@ meanlog_fct(dbh0 = init_dbh, temperature = avg_temperature, beta0 = mean(classic
 	beta2 = mean(classic$draws("beta2")), beta3 = mean(classic$draws("beta3")), beta4 = mean(classic$draws("beta4"))) +
 	log(data[["infos"]]["delta_t"])
 	# The + log(delta_t) is there because it is dbh(t + delta_t) = dbh(t) + delta_t * logN(...) in the classic approach 
+
+## Comparison with the analytical values
+current_dbh = init_dbh
+meanlog_analytic = numeric(nGrowth)
+
+## Parameters value (averaged estimates)
+beta0 = data[["parameters"]]["beta0"]
+beta1 = data[["parameters"]]["beta1"]
+beta2 = data[["parameters"]]["beta2"]
+beta3 = data[["parameters"]]["beta3"]
+beta4 = data[["parameters"]]["beta4"]
+
+sdlog = rep(data[["parameters"]]["sigmaProc"], nGrowth)
+
+for (i in 1:nGrowth)
+{
+	dbhCol = paste0("dbh", i)
+	meanlog_analytic[i] = meanlog_fct(dbh0 = current_dbh, temperature = temperatures[i], beta0, beta1, beta2, beta3, beta4)
+	current_dbh = unlist(data[["treeData"]][.(selected_plot_id, selected_tree_id), ..dbhCol])/data[["scaling"]]["sd_dbh_orig"]
+}
+
+(coefSum = estimateSumLognormal(mu = meanlog_analytic, sigma = sdlog))
