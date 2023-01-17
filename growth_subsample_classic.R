@@ -24,13 +24,13 @@ library(stringi)
 
 #### Get parameters for run
 args = commandArgs(trailingOnly = TRUE)
-# args = c("16", "1", "8000")
+# args = c("16", "1", "12000")
 if (length(args) != 3)
 	stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
-species_id = as.integer(args[1]) # 17, 48
-run_id = as.integer(args[2]) # 1, 2, 3, 4
-max_indiv = as.integer(args[3]) # 8000
+species_id = as.integer(args[1])
+run_id = as.integer(args[2])
+max_indiv = as.integer(args[3])
 
 set.seed(run_id)
 
@@ -54,7 +54,7 @@ init_fun = function(...)
 	if ("useMean" %in% names(providedArgs))
 		useMean = providedArgs[["useMean"]]
 
-	if (normalise & !all(c("mu_dbh", "sd_dbh") %in% names(providedArgs)))
+	if (normalise && !all(c("mu_dbh", "sd_dbh") %in% names(providedArgs)))
 		stop("You must provide mu_dbh and sd_dbh in order to normalise")
 
 	if (any(average_yearlyGrowth == 0))
@@ -187,7 +187,7 @@ normalisation = function(dt, colnames = names(df), folder = "./", filename = "no
 				warning("col_ind_start or col_ind_end ignored")
 		}
 
-		if (("col_ind_start" %in% providedArgs_names) & !("col_ind" %in% providedArgs_names))
+		if (("col_ind_start" %in% providedArgs_names) && !("col_ind" %in% providedArgs_names))
 		{
 			if (!("col_ind_end" %in% providedArgs_names))
 				stop("A starting index is provided but there is no stopping index")
@@ -224,15 +224,13 @@ normalisation = function(dt, colnames = names(df), folder = "./", filename = "no
 	n = length(colnames)
 	mu_sd = data.table(variable = character(n), mu = numeric(n), sd = numeric(n))
 
-	if (!("indices" %in% providedArgs_names))
-		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1,],
-			as.matrix(dt[, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1,])]
-
 	if ("indices" %in% providedArgs_names)
 	{
-
-		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[rowsToKeep, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1,],
-			as.matrix(dt[rowsToKeep, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1,])]
+		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[rowsToKeep, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1, ],
+			as.matrix(dt[rowsToKeep, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1, ])]
+	} else {
+		mu_sd[, c("variable", "mu", "sd") := .(colnames, as.matrix(dt[, lapply(.SD, mean, na.rm = rm_na), .SDcols = colnames])[1, ],
+			as.matrix(dt[, lapply(.SD, sd, na.rm = rm_na), .SDcols = colnames])[1, ])]
 	}
 
 	saveRDS(mu_sd, file = paste0(folder, filename))
@@ -313,7 +311,7 @@ treeData = readRDS(paste0(mainFolder, "standardised_european_growth_data_reshape
 setkey(treeData, plot_id, tree_id, year)
 ls_species = sort(treeData[, unique(speciesName_sci)])
 
-if ((species_id < 1) | (species_id > length(ls_species)))
+if ((species_id < 1) || (species_id > length(ls_species)))
 	stop(paste0("Species id = ", species_id, " has no corresponding species (i.e., either negative or larger than the number of species)"))
 
 speciesCountry = treeData[, .N, by = .(speciesName_sci, country)]
@@ -356,7 +354,7 @@ if (n_indiv > max_indiv)
 		stop("The subsample does not look representative of the whole data set, check the quantiles 0.25, 0.5, and 0.75")
 }
 
-if ((!subsamplingActivated) & (run_id != 1))
+if ((!subsamplingActivated) && (run_id != 1))
 	stop("Running the model only once (i.e., with run_id = 1) is enough: There is no subsampling")
 
 n_inventories = length(treeData[, unique(nfi_id)])
@@ -380,7 +378,7 @@ print(countryStats)
 ## Read climate
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
 setkey(climate, plot_id, year)
-climate[, row_id := 1:.N]
+climate[, row_id := seq_len(.N)]
 
 ## Read soil data (pH)
 soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
