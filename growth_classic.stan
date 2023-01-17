@@ -11,6 +11,10 @@
 			3. etaObs (observation error) is the extreme error done when measuring dbh occurring with probability proba
 		- Note that the routine observation error, sigmaObs, is a fixed parameter taken from the literature. Indeed it was impossible to
 			estimate this parameter together with etaObs, proba, and sigmaProc.
+		- Never forget that it does not make sense to directly compare the parameters estimated with the State-Space Model vs the classic
+			approach done here! Although the parameters have the same names between those from the SSM and those from the classic approach,
+			they do not have the same meaning. Example: pr_slope is the responce of annual growth to annual precipitation in SSM, while it
+			is the response of averaged growth to averaged precipitations over delta_t years in the classic approach.
 	
 	Reminder (method of first and second moments, i.e., mean and variance or standard deviation, see Appendix C 'Rescaling'):
 		- The gamma distribution of stan uses, in this order, shape (alpha) and rate (beta). It can however be reparametrised
@@ -127,7 +131,7 @@ parameters {
 	
 	// Errors (observation and process)
 	// --- Process error, which is the sdlog parameter of a lognormal distrib /!\
-	real<lower = 0.5/sd_dbh^2> sigmaProc; // Not the same meaning than sigmaProc in growth.stan
+	real<lower = 0, upper = 10> sigmaProc;
 
 	// --- Extreme error, by default at least twice the min observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
@@ -188,20 +192,13 @@ model {
 		meanlog = log( (m/sd(dbh))^2/sqrt((s/sd(dbh))^2 + (m/sd(dbh))^2) ) = log(m^2/sqrt(s^2 + m^2)) - log(sd(dbh)) = meanlog - log(sd(dbh))
 		sdlog = sqrt(log( (s/sd(dbh))^2 / (m/sd(dbh))^2 + 1)) = sqrt(log(s^2/m^2 + 1))
 
-		However, for the lognormal, I used meanlog = log(mu_h) = log(1.28), and sd_log = sigma_h = 0.16 (Nadja Rüger, personnal
-		communication)
-
 		The values are taken from Rüger et al (2011), Growth Strategies of Tropical Tree Species: Disentangling Light and Size Effects
-		for sigmaProc (personnal communication), etaObs and proba priors.
+		for etaObs and proba priors.
 
 		The values are taken from Luoma et al (2017), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
 		for sigmaObs prior.
-
-		The average values of the priors on the standardised scale are approximately (obtained with one sample of 1e8):
-		sigmaProc: 0.008977944
-		etaObs: 0.1788352
 	*/
-	target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16); //! How to adapt it? sigmaProc is not as in growth.stan!
+	target += uniform_lpdf(sigmaProc | 0, 10); // I suppose that the process error is between 0 and 10 (quite large, mean and var involve Exp[sdlog^2]!)
 	target += gamma_lpdf(etaObs | 30^2/45.0, sd_dbh*30/45.0); // <=> extreme measurement error (sd) = 30 mm ± 6.7 mm
 	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
 
@@ -244,4 +241,3 @@ model {
 				normal_lpdf(normalised_avg_annual_growth_obs[i] | latent_avg_annual_growth[i], 2*sigmaObs/deltaYear[i]));
 	}
 }
-
