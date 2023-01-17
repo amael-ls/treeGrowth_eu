@@ -201,17 +201,42 @@ reshapeDraws = function(draws_array, id_latent, regex = "latent_dbh")
 ## Function to plot the prior and posterior of a parameter
 lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NULL, run = NULL, multi = FALSE, ls_nfi = NULL, ...)
 {
+	# Dealing with draws as a list
+	if (is.list(draws))
+	{
+		# --- Check-up
+		nDraws = length(draws)
+		len = data.table(nIter = integer(nDraws), nChains = integer(nDraws), nVariables = integer(nDraws), variableNames = character(nDraws))
+		for (i in seq_along(draws))
+		{
+			if (!all(class(draws[[i]]) == c("draws_array", "draws", "array")))
+				stop(paste0("draws[", i, "] is not an array extracted from a CmdStanMCMC object"))
+
+			len[i, c("nIter", "nChains", "nVariables", "variableNames") := append(as.list(dim(draws[[i]])), summary(draws[[i]])[["variable"]])]
+		}
+		if (unique(len)[, .N] != 1)
+			stop("Dimensions or variables' name mismatch within the provided draws")
+
+		rm(len)
+		# --- Format
+		draws_unlist = posterior::bind_draws(draws[[1]], along = "iteration")
+		for (j in 2:length(draws))
+			draws_unlist = posterior::bind_draws(draws_unlist, draws[[i]], along = "iteration")
+		draws = draws_unlist
+		rm(draws_unlist)
+	}
+	
 	# Check-up
-	if (!is.array(draws))
-		stop("Draws should be an array extracted from a CmdStanMCMC object")
-		
-	# isFALSE will not work here, hence !isTRUE
+	if (!all(class(draws) == c("draws_array", "draws", "array")))
+		stop("Draws should be an array (a list) extracted from a CmdStanMCMC object (CmdStanMCMC objects)")
+
+	
 	if (!is.null(fun))
 	{
 		if (!isTRUE(all.equal(fun, dnorm)) &&
 			!isTRUE(all.equal(fun, dlnorm)) &&
 			!isTRUE(all.equal(fun, dgamma)) &&
-			!isTRUE(all.equal(fun, dbeta)))
+			!isTRUE(all.equal(fun, dbeta))) # isFALSE will not work here, hence !isTRUE
 		{
 			stop("This function only accepts dnorm, dlnorm, dgamma, or dbeta as priors")
 		}
