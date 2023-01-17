@@ -73,7 +73,7 @@ data {
 	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 
 	// Indices
-	array [n_indiv] int<lower = 1, upper = n_climate - 1> climate_index; // Index of the climate associated to each parent
+	array [n_indiv] int<lower = 1, upper = n_climate> climate_index; // Index of the climate associated to each growth interval
 	
 	array [n_inventories] int<lower = 1, upper = n_growth - 1> start_nfi_avg_growth; // Starting point of each NFI for averaged obs growth
 	array [n_inventories] int<lower = 2, upper = n_growth> end_nfi_avg_growth; // Ending point of each NFI for averaged obs growth
@@ -131,7 +131,7 @@ parameters {
 	
 	// Errors (observation and process)
 	// --- Process error, which is the sdlog parameter of a lognormal distrib /!\
-	real<lower = 0, upper = 10> sigmaProc;
+	real<lower = 0.5/sd_dbh^2, upper = 10> sigmaProc;
 
 	// --- Extreme error, by default at least twice the min observation error. Rüger 2011 found it is around 8 times larger
 	array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
@@ -198,7 +198,7 @@ model {
 		The values are taken from Luoma et al (2017), Assessing Precision in Conventional Field Measurements of Individual Tree Attributes
 		for sigmaObs prior.
 	*/
-	target += uniform_lpdf(sigmaProc | 0, 10); // I suppose that the process error is between 0 and 10 (quite large, mean and var involve Exp[sdlog^2]!)
+	target += uniform_lpdf(sigmaProc | 0.5/sd_dbh^2, 10); // I suppose that the process error is between 0 and 10 (quite large, mean and var involve Exp[sdlog^2]!)
 	target += gamma_lpdf(etaObs | 30^2/45.0, sd_dbh*30/45.0); // <=> extreme measurement error (sd) = 30 mm ± 6.7 mm
 	target += beta_lpdf(proba | 48.67, 1714.84); // This corresponds to a 2.76 % chance extrem error, ± 0.39 % (Rüger et. al 2011)
 
