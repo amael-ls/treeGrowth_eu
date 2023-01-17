@@ -146,7 +146,7 @@ lazyTrace = function(draws, filename = NULL, run = NULL, ...)
 	for (chain in 1:n_chains)
 	{
 		if (all(class(draws) %in% c("draws_array", "draws", "array")))
-			lines(1:n_iter, scaling*draws[, chain,], type = "l", col = colours_str[chain])
+			lines(1:n_iter, scaling*draws[, chain, ], type = "l", col = colours_str[chain])
 		if (is.array(draws) && !all(class(draws) %in% c("draws_array", "draws", "array")))
 			lines(1:n_iter, scaling*draws[, chain], type = "l", col = colours_str[chain])
 	}
@@ -714,7 +714,8 @@ expand = function(base_names, nb_nfi, patterns = c("Obs", "proba"))
 ## Function to do a pair plot of parameters versus energy
 energyPairs = function(path, run, results, nb_nfi, energy, rm_names = c("latent", "Effect"), n_rows = 3, n_cols = 6, filename = "pairs.pdf")
 {
-	filename = paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "pairs.pdf")
+	if (!is.null(filename))
+		filename = paste0(path, ifelse(!is.null(run), paste0(run, "_"), run), "pairs.pdf")
 
 	params_names = results$metadata()$stan_variables
 
@@ -727,7 +728,9 @@ energyPairs = function(path, run, results, nb_nfi, energy, rm_names = c("latent"
 	if (length(params_names) > n_rows*n_cols)
 		warning("Not enough rows or cols for the number of provided parameters")
 	
-	pdf(filename, height = 10, width = 10)
+	if (!is.null(filename))
+		pdf(filename, height = 10, width = 10)
+	
 	par(mfrow = c(n_rows, n_cols))
 
 	length_params = length(params_names)
@@ -738,9 +741,12 @@ energyPairs = function(path, run, results, nb_nfi, energy, rm_names = c("latent"
 		smoothScatter(x = energy, y = as.vector(results$draws(params_names[i])), ylab = params_names[i])
 		correl_energy[i, correlation_energy := cor(energy, as.vector(results$draws(params_names[i])))]
 	}
-	dev.off()
 
-	print(paste("Figure saved under the name:", filename))
+	if (!is.null(filename))
+	{
+		dev.off()
+		print(paste("Figure saved under the name:", filename))
+	}
 
 	return(correl_energy)
 }
@@ -834,7 +840,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		# For process error (sigmaProc), it is a variance (of a gamma distrib)
 		sigmaProc_array = results$draws("sigmaProc")
 		lazyPosterior(draws = sigmaProc_array, fun = dlnorm, filename = paste0(path, "sigmaProc_posterior"), params = "process error",
-			meanlog = log(1.28) - log(sd_dbh), sdlog = 0.09, run = run, expand_bounds = TRUE)
+			meanlog = log(1.28) - log(sd_dbh), sdlog = 0.16, run = run, expand_bounds = TRUE)
 
 		lazyTrace(draws = sigmaProc_array, filename = paste0(path, "sigmaProc_traces"), run = run)
 
@@ -847,7 +853,7 @@ centralised_fct = function(species, multi, n_runs, ls_nfi, params_dt, run = NULL
 		# --- Extreme error (etaObs), it is a sd (of a normal distrib)...
 		etaObs_array = results$draws("etaObs")
 		lazyPosterior(draws = etaObs_array, fun = dgamma, filename = paste0(path, "etaObs_posterior"), run = run, xlab = "Error in mm",
-			shape = 25.6^2/6.2, rate = sd_dbh*25.6/6.2, params = "extreme obs error", multi = multi_NFI, scaling = sd_dbh,
+			shape = 30^2/45.0, rate = sd_dbh*30/45.0, params = "extreme obs error", multi = multi_NFI, scaling = sd_dbh,
 			ls_nfi = ls_nfi, expand_bounds = TRUE)
 
 		# --- ... and its associated probability of occurrence
