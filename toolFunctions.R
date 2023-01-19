@@ -86,8 +86,8 @@ getLastRun = function(path, begin = "^growth-", extension = ".rds$", format = "y
 	if (hour)
 	{
 		dt[, c("hour", "minute") := as.list(stri_split(str = stri_sub(str = file,
-				from = stri_locate_last(file, regex = "_")[, "end"] + 1,
-				to = stri_locate_last(file, regex = ".rds")[, "start"] - 1),
+				from = stri_locate_first(file, regex = "_")[, "end"] + 1,
+				to = stri_locate_first(file, regex = "_")[, "end"] + 5),
 			regex = "h", simplify = TRUE)), by = file]
 	}
 
