@@ -1,5 +1,5 @@
 
-#### Aim of prog: Plot different visualisations of growth versus climate and competition
+#### Aim of prog: Plot different visualisations of growth versus predictors (diameters, environmental factors)
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -8,7 +8,6 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
-# library(posterior)
 library(cmdstanr)
 library(stringi)
 library(viridis)
@@ -19,7 +18,7 @@ source("toolFunctions.R")
 
 #### Load data
 ## Common variables
-species = "Fagus sylvatica"
+species = "Abies alba"
 run = 1
 years = 2010:2018
 
@@ -29,17 +28,21 @@ climate_path = "/bigdata/Predictors/climateChelsa/"
 ph_path = "/bigdata/Predictors/Soil\ esdacph\ Soil\ pH\ in\ Europe/"
 shapefile_path = "/home/amael/shapefiles/Deutschland/"
 
-## Tree data
-# info_lastRun = getLastRun(path = tree_path, run = run)
-info_lastRun = getLastRun(path = tree_path, begin = "growth-", run = run)
-lastRun = info_lastRun[["file"]]
-time_ended = info_lastRun[["time_ended"]]
+## Results
+# State-Space Model approach
+info_lastRun = getLastRun(path = tree_path, begin = "growth-", extension = "_main.rds$", run = run)
+(lastRun = info_lastRun[["file"]])
 results = readRDS(paste0(tree_path, lastRun))
-nb_nfi = results$metadata()$stan_variable_sizes$sigmaObs
+nb_nfi = results$metadata()$stan_variable_sizes$etaObs
+
+# Classic approach
+info_lastRun = getLastRun(path = tree_path, begin = "growth-", extension = "_classic.rds$", run = run)
+(lastRun = info_lastRun[["file"]])
+results_classic = readRDS(paste0(tree_path, lastRun))
 
 ## Associated estimated parameters
 params_names = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-	"ph_slope", "ph_slope2", "competition_slope", "sigmaObs", "etaObs", "proba", "sigmaProc")
+	"ph_slope", "ph_slope2", "competition_slope", "etaObs", "proba", "sigmaProc")
 
 if (nb_nfi > 1)
 	params_names = expand(params_names, nb_nfi)[["new_names"]]
@@ -86,9 +89,10 @@ climate_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_")
 ph_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "ph_normalisation.rds"))
 ba_mu_sd = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), ""), "ba_normalisation.rds"))
 
-#### Compute average growth in a landscape/along a gradient
-## Define stan model to compute average growth (integral in generated quantities block)
-gq_model = cmdstan_model("generate_meanGrowth.stan")
+#### Simulate growth along an environmental gradient
+## Define stan model to simulate growth
+gq_model = cmdstan_model("generate_growth.stan")
+gq_model_classic = cmdstan_model("generate_growth_classic.stan")
 
 ## Common variables
 mean_tas = mean(values(subset(climate_mean, "temperature")), na.rm = TRUE)
@@ -114,28 +118,13 @@ treeData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run
 lower_dbh = quantile(treeData$dbh, seq(0, 1, 0.025))["2.5%"]
 upper_dbh = quantile(treeData$dbh, seq(0, 1, 0.025))["97.5%"]
 
-## Compute average growth in a landscape
-average_growth = setDT(as.data.frame(x = climate_mean, xy = TRUE))
+n_dbh_new = round(unname(round(upper_dbh - lower_dbh) + 1)/5)
 
-average_growth[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
-	pr = precipitation, tas = temperature, ph = ph, basalArea = 25,
-	params = estimated_params, standardised_dbh = FALSE, standardised_params = TRUE, standardised_variables = FALSE,
-	sd_dbh = dbh_mu_sd[1, sd], scaling = rbindlist(list(climate_mu_sd, ph_mu_sd, ba_mu_sd)))$value,
-	by = .(x, y)]
-
-average_growth[, integral := integral/(upper_dbh - lower_dbh)]
-
-## Compute average growth along a one-dimension environmental gradient
+## Simulate growth along a temperature gradient for many dbh
 # Temperature gradient
 dt_growth_tas = data.table(temperature = seq(min_tas, max_tas, length.out = n_tas), integral = numeric(n_tas))
 
-dt_growth_tas[, integral := integrate(growth_fct, lower = lower_dbh, upper = upper_dbh,
-	pr = mean_pr, tas = temperature, ph = mean_ph, basalArea = 25,
-	params = estimated_params, standardised_dbh = FALSE, standardised_params = TRUE, standardised_variables = FALSE,
-	sd_dbh = dbh_mu_sd[1, sd], scaling = rbindlist(list(climate_mu_sd, ph_mu_sd, ba_mu_sd)))$value, by = temperature]
-
-dt_growth_tas[, integral := integral/(upper_dbh - lower_dbh)]
-
+# State-Space Model approach
 stanData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData.rds"))
 stanData$x_r = c((rep(mean_pr, n_tas) - stanData$pr_mu)/stanData$pr_sd, # Precip
 	(dt_growth_tas[, temperature] - stanData$tas_mu)/stanData$tas_sd, # Temperature
@@ -143,11 +132,81 @@ stanData$x_r = c((rep(mean_pr, n_tas) - stanData$pr_mu)/stanData$pr_sd, # Precip
 	(rep(25, n_tas) - stanData$ba_mu)/stanData$ba_sd
 )
 stanData$n_climate_new = n_tas
+stanData$n_dbh_new = n_dbh_new
+stanData$n_growth = stanData$n_children # n_children is also n_growth (i.e. the number of growth intervals)!
 stanData$lower_bound = unname(lower_dbh)
 stanData$upper_bound = unname(upper_dbh)
 
 generate_quantities = gq_model$generate_quantities(results$draws(), data = stanData, parallel_chains = n_chains)
 
+simulatedGrowth = generate_quantities$draws("simulatedGrowth")
+dim(simulatedGrowth) # n_draws x n_chains x [n_tas, n_dbh_new]
+
+optimumTemperature = optimumPredictorValue(slope = estimated_params["tas_slope"], slope2 = estimated_params["tas_slope2"],
+	scaling_mu = stanData$tas_mu, scaling_sd = stanData$tas_sd)
+
+optimum_ind = which.min(abs(dt_growth_tas[, temperature] - optimumTemperature))
+
+selectedData = paste0("simulatedGrowth[", optimum_ind, ",", 1:n_dbh_new, "]")
+growth_dbh_fixed_temp = simulatedGrowth[, , selectedData]
+growth_dbh_fixed_temp = stanData$sd_dbh*growth_dbh_fixed_temp
+
+growth_q2.5 = apply(X = growth_dbh_fixed_temp, FUN = quantile, MARGIN = 3, probs = 0.025)
+growth_q97.5 = apply(X = growth_dbh_fixed_temp, FUN = quantile, MARGIN = 3, probs = 0.975)
+growth = apply(X = growth_dbh_fixed_temp, FUN = mean, MARGIN = 3)
+new_dbh = seq(lower_dbh, upper_dbh, length.out = n_dbh_new)
+
+pdf("ssm_approach.pdf", height = 10, width = 10)
+plot(new_dbh, growth, xlab = "dbh", ylab = "growth", pch = 19, col = "#F4C430", ylim = c(min(growth_q2.5), max(growth_q97.5)))
+polygon(c(rev(new_dbh), new_dbh), c(rev(growth_q2.5), growth_q97.5), col = "#44444422", border = NA)
+dev.off()
+
+
+
+
+# Classic approach
+stanData = readRDS(paste0(tree_path, ifelse(!is.null(run), paste0(run, "_"), run), "stanData_classic.rds"))
+stanData$x_r = c((rep(mean_pr, n_tas) - stanData$pr_mu)/stanData$pr_sd, # Precip
+	(dt_growth_tas[, temperature] - stanData$tas_mu)/stanData$tas_sd, # Temperature
+	(rep(mean_ph, n_tas) - stanData$ph_mu)/stanData$ph_sd, # pH
+	(rep(25, n_tas) - stanData$ba_mu)/stanData$ba_sd
+)
+stanData$n_climate_new = n_tas
+stanData$n_dbh_new = n_dbh_new
+stanData$lower_bound = unname(lower_dbh)
+stanData$upper_bound = unname(upper_dbh)
+
+generate_quantities_classic = gq_model_classic$generate_quantities(results_classic$draws(), data = stanData, parallel_chains = n_chains)
+
+simulatedGrowth = generate_quantities_classic$draws("simulatedGrowth")
+dim(simulatedGrowth) # n_draws x n_chains x [n_tas, n_dbh_new]
+selectedData = paste0("simulatedGrowth[", optimum_ind, ",", 1:n_dbh_new, "]")
+growth_dbh_fixed_temp = simulatedGrowth[, , selectedData]
+growth_dbh_fixed_temp = stanData$sd_dbh*growth_dbh_fixed_temp
+
+growth_q2.5_classic = apply(X = growth_dbh_fixed_temp, FUN = quantile, MARGIN = 3, probs = 0.025)
+growth_q97.5_classic = apply(X = growth_dbh_fixed_temp, FUN = quantile, MARGIN = 3, probs = 0.975)
+growth_classic = apply(X = growth_dbh_fixed_temp, FUN = mean, MARGIN = 3)
+
+pdf("classic_approach.pdf", height = 10, width = 10)
+plot(new_dbh, growth, xlab = "dbh", ylab = "growth", pch = 19, col = "#F4C430", ylim = c(min(growth_q2.5), max(growth_q97.5)))
+polygon(c(rev(new_dbh), new_dbh), c(rev(growth_q2.5), growth_q97.5), col = "#44444422", border = NA)
+dev.off()
+
+
+
+
+pdf("ssm-vs-classic_approach.pdf", height = 10, width = 10)
+plot(new_dbh, growth, xlab = "dbh", ylab = "growth", pch = 19, col = "#F4C430", ylim = c(min(growth_q2.5), max(growth_q97.5)))
+points(new_dbh, growth_classic, pch = 19, col = "#034C4F", add = TRUE)
+polygon(c(rev(new_dbh), new_dbh), c(rev(growth_q2.5), growth_q97.5), col = "#44444422", border = NA)
+polygon(c(rev(new_dbh), new_dbh), c(rev(growth_q2.5_classic), growth_q97.5_classic), col = "#44444422", border = NA)
+dev.off()
+
+
+
+
+####! Old stuff related to the older version of generate_meanGrowth.stan (the version before January 2023).
 average_growth_sim = generate_quantities$draws("average_growth_sim")
 quantile_tas = data.table(q5 = numeric(n_tas), q95 = numeric(n_tas))
 for (i in 1:n_tas)
