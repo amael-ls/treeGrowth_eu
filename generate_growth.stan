@@ -91,6 +91,7 @@ parameters {
 
 generated quantities {
 	array [n_climate_new, n_dbh_new] real simulatedGrowth;
+	array [n_climate_new, n_dbh_new] real simulatedGrowth_avg;
 	{
 		// Common variables, any variable defined here will not be part of the output
 		real delta_dbh = 0;
@@ -98,6 +99,7 @@ generated quantities {
 			delta_dbh = (normalised_upper_bound - normalised_lower_bound)/(n_dbh_new - 1);
 		
 		array [4] int index;
+		real meanlog = 0;
 
 		// Generate growth for different climate and dbh combinations
 		for (i in 1:n_climate_new)
@@ -106,9 +108,13 @@ generated quantities {
 			index = {i, i + n_climate_new, i + 2*n_climate_new, i + 3*n_climate_new};
 
 			for (j in 1:n_dbh_new)
-				simulatedGrowth[i, j] = lognormal_rng(
-					growth(normalised_lower_bound + (j - 1)*delta_dbh, x_r[index], averageGrowth, dbh_slope, dbh_slope2,
-						pr_slope, pr_slope2 , tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope), sigmaProc);
+			{
+				meanlog = growth(normalised_lower_bound + (j - 1)*delta_dbh, x_r[index], averageGrowth, dbh_slope, dbh_slope2,
+						pr_slope, pr_slope2 , tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
+				
+				simulatedGrowth[i, j] = lognormal_rng(meanlog, sigmaProc);
+				simulatedGrowth_avg[i, j] = exp(meanlog + sigmaProc^2/2.0);
+			}
 		}
 	}
 }
