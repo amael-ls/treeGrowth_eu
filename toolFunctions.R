@@ -18,6 +18,8 @@
 #	- computeGrowth: Function to compute growth, the data table must be sorted by year within tree id and plot id
 #	- optimumPredictorValue: Function to compute the optimum value of response variables with a quadratic term
 #	- plotGrowth: Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
+#	- plotGrowthPosterior: Function to plot growth posterior for a given time series of environmental variables and an initial dbh
+#	- getEnvSeries: Function to get the environment for a given species and run (i.e., a given index set)
 #
 ## Comments
 # This R file contains tool functions only that help me to analyse the results and do some check-up. Note that some functions are quite
@@ -593,6 +595,9 @@ lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi
 	# Get the index of the x-axis label
 	xlab_ind = (ls_names == "xlab")
 
+	# Get the index of the legend text
+	legend_ind = (ls_names == "legend")
+
 	# Create and fill list of posteriors
 	density_ls = vector(mode = "list", length = nDraws)
 	
@@ -640,10 +645,10 @@ lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi
 			max_y = temporary_max_y
 	}
 
-	min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-	max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+	min_x = ifelse(min_x < 0, 1.01*min_x, 0.99*min_x) # To extend by 1% from min_x
+	max_x = ifelse(max_x < 0, 0.99*max_x, 1.01*max_x) # To extend by 1% from max_x
 
-	max_y = ifelse(max_y < 0, 0.9*max_y, 1.1*max_y) # To extend 10% from max_y
+	max_y = ifelse(max_y < 0, 0.99*max_y, 1.01*max_y) # To extend by 1% from max_y
 
 	names(density_ls) = paste("draw", 1:nDraws, sep = "_")
 
@@ -702,9 +707,14 @@ lazyComparePosterior = function(draws_ls, filename = NULL, run = NULL, multi_nfi
 		
 		legend(x = "topright", legend = legend_text, col = legend_colours, lty = rep(1:nDraws, each = length_params), lwd = 2, box.lwd = 0)
 	} else {
-		posterior_num = paste("Posterior", 1:nDraws)
-		posterior_country = if (!is.null(ls_nfi)) ls_nfi else ""
-		legend_text = CJ(posterior_num, posterior_country, sorted = FALSE)[, paste(posterior_num, posterior_country, sep = " ")]
+		if (!any(legend_ind))
+		{
+			posterior_num = paste("Posterior", 1:nDraws)
+			posterior_country = if (!is.null(ls_nfi)) ls_nfi else ""
+			legend_text = CJ(posterior_num, posterior_country, sorted = FALSE)[, paste(posterior_num, posterior_country, sep = " ")]
+		} else {
+			legend_text = providedArgs[["legend"]]
+		}
 		legend_colours = colours_str_pol
 
 		legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
@@ -1707,7 +1717,7 @@ optimumPredictorValue = function(slope, slope2, scaling_mu = NULL, scaling_sd = 
 }
 
 ## Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
-plotGrowth = function(species, run, variable, ...)
+plotGrowth = function(species, run, variable, selected_plot_id = NULL, init_dbh = NULL, extension = "pdf", ...)
 {
 	# Local function to format data
 	formatNewData = function(tree_path, run, variable, avg_values, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
@@ -1799,12 +1809,6 @@ plotGrowth = function(species, run, variable, ...)
 	estimated_params_ssm = getParams(model_cmdstan = ssm, params_names = params_names)
 	estimated_params_classic = getParams(model_cmdstan = classic, params_names = params_names)
 
-	# Load scaling (same for ssm or classic approach. Load those from SSM)
-	dbh_mu_sd = readRDS(paste0(tree_path, run, "_dbh_normalisation.rds"))
-	climate_mu_sd = readRDS(paste0(tree_path, run, "_climate_normalisation.rds"))
-	ph_mu_sd = readRDS(paste0(tree_path, run, "_ph_normalisation.rds"))
-	ba_mu_sd = readRDS(paste0(tree_path, run, "_ba_normalisation.rds"))
-
 	# Simulate growth along an environmental gradient
 	# --- Stan models to simulate growth
 	gq_model_ssm = cmdstan_model("generate_growth.stan")
@@ -1891,7 +1895,7 @@ plotGrowth = function(species, run, variable, ...)
 	n_env = c(pr = n_pr, tas = n_tas, ph = n_ph)
 	stanData = formatNewData(tree_path, run, variable, avg_values, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
 
-	### --- Generate quantities
+	# --- Generate quantities
 	generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData[["stanData_ssm"]], parallel_chains = n_chains)
 	generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData[["stanData_classic"]],
 		parallel_chains = n_chains)
@@ -1899,6 +1903,8 @@ plotGrowth = function(species, run, variable, ...)
 	simulatedGrowth_ssm = generate_quantities_ssm$draws("simulatedGrowth_avg")
 	simulatedGrowth_classic = generate_quantities_classic$draws("simulatedGrowth_avg")
 
+	# Plot simulations
+	# --- Select the optimum dbh for growth
 	optimumDbh_ssm = optimumPredictorValue(slope = estimated_params_ssm["dbh_slope"], slope2 = estimated_params_ssm["dbh_slope2"],
 		scaling_sd = stanData[["stanData_ssm"]]$sd_dbh)
 	optimumDbh_classic = optimumPredictorValue(slope = estimated_params_classic["dbh_slope"], slope2 = estimated_params_classic["dbh_slope2"],
@@ -1908,6 +1914,7 @@ plotGrowth = function(species, run, variable, ...)
 	optimum_ind_dbh_ssm = which.min(abs(new_dbh - optimumDbh_ssm))
 	optimum_ind_dbh_classic = which.min(abs(new_dbh - optimumDbh_classic))
 
+	# --- Select data according to optimum dbh
 	selectedData_ssm = paste0("simulatedGrowth_avg[", 1:stanData[["stanData_ssm"]]$n_climate_new, ",", optimum_ind_dbh_ssm, "]")
 	selectedData_classic = paste0("simulatedGrowth_avg[", 1:stanData[["stanData_classic"]]$n_climate_new, ",", optimum_ind_dbh_classic, "]")
 	
@@ -1917,6 +1924,7 @@ plotGrowth = function(species, run, variable, ...)
 	growth_classic = simulatedGrowth_classic[, , selectedData_classic]
 	growth_classic = stanData[["stanData_classic"]]$sd_dbh*growth_classic
 
+	# --- Compute the 2.5 and 97.5 quantiles due to uncertainty on parameters (no process error!)
 	growth_q2.5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.025)
 	growth_q97.5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.975)
 	growth_ssm = apply(X = growth_ssm, FUN = mean, MARGIN = 3)
@@ -1925,24 +1933,199 @@ plotGrowth = function(species, run, variable, ...)
 	growth_q97.5_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.975)
 	growth_classic = apply(X = growth_classic, FUN = mean, MARGIN = 3)
 
+	# --- plot
 	if (variable == "pr")
-		selectedVariable = "precipitation"
+		selectedVariable = "Precipitation"
 	if (variable == "tas")
-		selectedVariable = "temperature"
+		selectedVariable = "Temperature"
 	if (variable == "ph")
 		selectedVariable = "pH"
 	
-	filename = paste0(tree_path, "ssm-vs-classic_approach_", selectedVariable, ".pdf")
+	filename = paste0(tree_path, "ssm-vs-classic_approach_", selectedVariable, ".", extension)
 
-	pdf(filename, height = 10, width = 10)
-	plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "growth", col = "#F4C430", type = "l", lwd = 2, lty = 1,
+	if (extension == "pdf")
+		pdf(filename, height = 10, width = 10)
+	if (extension == "tex")
+		tikz(filename, height = 3, width = 3)
+	plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "Growth", col = "#F4C430", type = "l", lwd = 2, lty = 1,
 		ylim = c(min(c(growth_q2.5_ssm, growth_q2.5_classic)), max(c(growth_q97.5_ssm, growth_q97.5_classic))))
 	lines(stanData[["scaled_gradient"]], growth_classic, col = "#034C4F", lwd = 2, lty = 2)
 	polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q2.5_ssm), growth_q97.5_ssm),
 		col = "#F4C43022", border = NA)
 	polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q2.5_classic), growth_q97.5_classic),
 		col = "#034C4F22", border = NA)
+	legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#F4C430", "#034C4F"), box.lwd = 0)
 	dev.off()
 
+	# plot growth posterior for a given time series of environmental variables and an initial dbh (if provided)
+	if (!is.null(selected_plot_id) && !is.null(init_dbh))
+	{
+		# --- Prepare climate
+		dataEnv_ls = getEnvSeries(species, run)
+		n_growingYears = dataEnv_ls[["dataEnv"]][selected_plot_id, .N] - 1
+		precipitations = (dataEnv_ls[["dataEnv"]][selected_plot_id, pr] - dataEnv_ls[["scaling_clim"]]["pr", mu])/
+			dataEnv_ls[["scaling_clim"]]["pr", sd]
+		temperatures = (dataEnv_ls[["dataEnv"]][selected_plot_id, tas] - dataEnv_ls[["scaling_clim"]]["tas", mu])/
+			dataEnv_ls[["scaling_clim"]]["tas", sd]
+		ph = (dataEnv_ls[["dataEnv"]][selected_plot_id, ph] - dataEnv_ls[["scaling_ph"]]["ph", mu])/
+			dataEnv_ls[["scaling_ph"]]["ph", sd]
+		basalAreas = (dataEnv_ls[["dataEnv"]][selected_plot_id, standBasalArea_interp] - dataEnv_ls[["scaling_ba"]]["standBasalArea_interp", mu])/
+			dataEnv_ls[["scaling_ba"]]["standBasalArea_interp", sd]
+
+		# --- Prepare new stan data
+		# ------ Load stan data
+		stanData_ssm = readRDS(paste0(tree_path, run, "_stanData.rds"))
+		stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
+
+		# ------ Add the new environment (x_r)
+		stanData_ssm$x_r = c(precipitations, temperatures, ph, basalAreas)
+		stanData_classic$x_r = c(precipitations, temperatures, ph, basalAreas)
+		stanData_classic$x_r_avg = c(mean(precipitations), mean(temperatures), mean(ph), mean(basalAreas))
+
+		# ------ Add the new dimensions
+		stanData_ssm$n_climate_new = length(temperatures)
+		stanData_ssm$n_years = n_growingYears
+		stanData_ssm$n_growth = stanData_ssm$n_children # n_children is also n_growth (i.e. the number of growth intervals)!
+		stanData_ssm$dbh0 = init_dbh
+
+		stanData_classic$n_climate_new = length(temperatures)
+		stanData_classic$n_years = n_growingYears
+		stanData_classic$dbh0 = init_dbh
+
+		# --- Generate quantities
+		# ------ Stan models to simulate growth
+		gq_model_ssm = cmdstan_model("generate_posterior.stan")
+		gq_model_classic = cmdstan_model("generate_posterior_classic.stan")
+
+		# ------ Run simulations
+		generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData_ssm, parallel_chains = n_chains)
+		generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData_classic, parallel_chains = n_chains)
+
+		simulatedGrowth_ssm = stanData_ssm$sd_dbh*generate_quantities_ssm$draws(paste0("current_dbh[", stanData_ssm$n_climate_new, "]"))
+		simulatedGrowth_classic = stanData_classic$sd_dbh*generate_quantities_classic$draws(paste0("current_dbh[",
+			stanData_classic$n_climate_new, "]"))
+		simulatedGrowth_classic_avg = stanData_classic$sd_dbh*generate_quantities_classic$draws("final_dbh")
+
+		simulatedGrowth_avg_ssm = generate_quantities_ssm$draws("simulatedGrowth_avg")
+		simulatedGrowth_avg_classic = generate_quantities_classic$draws("simulatedGrowth_avg")
+		simulatedGrowth_avg_clim_avg = generate_quantities_classic$draws("simulatedGrowth_avg_clim_avg")
+
+		# --- Compute the 2.5 and 97.5 quantiles due to uncertainty on parameters (no process error!)
+		simulatedGrowth_avg_ssm_q2.5 = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = quantile, MARGIN = 3, probs = 0.025)
+		simulatedGrowth_avg_ssm_q97.5 = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = quantile, MARGIN = 3, probs = 0.975)
+		simulatedGrowth_avg_ssm = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = mean, MARGIN = 3)
+
+		simulatedGrowth_avg_classic_q2.5 = stanData_ssm$sd_dbh *
+			apply(X = simulatedGrowth_avg_classic, FUN = quantile, MARGIN = 3, probs = 0.025)
+		simulatedGrowth_avg_classic_q97.5 = stanData_ssm$sd_dbh *
+			apply(X = simulatedGrowth_avg_classic, FUN = quantile, MARGIN = 3, probs = 0.975)
+		simulatedGrowth_avg_classic = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_classic, FUN = mean, MARGIN = 3)
+
+		simulatedGrowth_avg_clim_avg_q2.5 = stanData_ssm$sd_dbh/n_growingYears *
+			apply(X = simulatedGrowth_avg_clim_avg, FUN = quantile, MARGIN = 3, probs = 0.025)
+		simulatedGrowth_avg_clim_avg_q97.5 = stanData_ssm$sd_dbh/n_growingYears *
+			apply(X = simulatedGrowth_avg_clim_avg, FUN = quantile, MARGIN = 3, probs = 0.975)
+		simulatedGrowth_avg_clim_avg = stanData_ssm$sd_dbh/n_growingYears * apply(X = simulatedGrowth_avg_clim_avg, FUN = mean, MARGIN = 3)
+
+		year_start = dataEnv_ls[["dataEnv"]][selected_plot_id, min(year)]
+		year_end = dataEnv_ls[["dataEnv"]][selected_plot_id, max(year)] - 1
+
+		filename = paste0(tree_path, "ssm_approach_time_series.", extension)
+		if (extension == "pdf")
+			pdf(filename, height = 10, width = 10)
+		if (extension == "tex")
+		{
+			tikz(filename, height = 1.2, width = 3.883282)
+			op = par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.3, 0), tck = -0.015)
+		}
+		plot(year_start:year_end, simulatedGrowth_avg_ssm, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#F4C430",
+			ylim = c(min(simulatedGrowth_avg_ssm_q2.5), max(simulatedGrowth_avg_ssm_q97.5)))
+		polygon(c(rev(year_start:year_end), year_start:year_end), c(rev(simulatedGrowth_avg_ssm_q2.5), simulatedGrowth_avg_ssm_q97.5),
+			col = "#F4C43022", border = NA)
+		legend(x = "topleft", legend = "SSM", fill = "#F4C430", box.lwd = 0)
+		dev.off()
+
+		filename = paste0(tree_path, "classic_approach_time_series.", extension)
+		if (extension == "pdf")
+			pdf(filename, height = 10, width = 10)
+		if (extension == "tex")
+		{
+			tikz(filename, height = 1.2, width = 3.883282)
+			op = par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.3, 0), tck = -0.015)
+		}
+		plot(year_start:year_end, simulatedGrowth_avg_classic, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#034C4F",
+			ylim = c(min(simulatedGrowth_avg_classic_q2.5), max(simulatedGrowth_avg_classic_q97.5)))
+		polygon(c(rev(year_start:year_end), year_start:year_end), c(rev(simulatedGrowth_avg_classic_q2.5), simulatedGrowth_avg_classic_q97.5),
+			col = "#034C4F22", border = NA)
+		abline(h = simulatedGrowth_avg_clim_avg, lwd = 2, lty = 2)
+		legend(x = "topleft", legend = "Classic", fill = "#034C4F", box.lwd = 0)
+		dev.off()
+	}
+
 	return(list(optimumDbh_ssm = optimumDbh_ssm, optimumDbh_classic = optimumDbh_classic, filename = filename))
+}
+
+## Function to get the environment for a given species and run (i.e., a given index set)
+getEnvSeries = function(species, run, clim_folder = "/home/amael/project_ssm/inventories/growth/",
+	standBasalArea_folder = "/home/amael/project_ssm/inventories/growth/", soil_folder = "/home/amael/project_ssm/inventories/growth/")
+{
+	# Load data and check-up
+	# --- Indices
+	indices_path = paste0("./", species, "/")
+	if (!dir.exists(indices_path))
+		stop(paste0("Path not found for species <", species, ">."))
+	indices = readRDS(paste0(indices_path, run, "_indices.rds"))[["indices_avg"]]
+	indices[, year := NULL]
+	
+	# --- Climate
+	if (!dir.exists(clim_folder))
+		stop(paste0("Folder\n\t", clim_folder, "\ndoes not exist"))
+	env = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
+
+	# --- Basal area (interpolated data)
+	if (!dir.exists(standBasalArea_folder))
+		stop(paste0("Folder\n\t", standBasalArea_folder, "\ndoes not exist"))
+	standBasalArea = readRDS(paste0(standBasalArea_folder, "europe_reshaped_standBasalArea.rds"))
+
+	# --- Soil data
+	if (!dir.exists(soil_folder))
+		stop(paste0("Folder\n\t", soil_folder, "\ndoes not exist"))
+	soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
+	setkey(soil, plot_id)
+
+	# --- Scalings
+	scaling_dbh = readRDS(paste0(indices_path, run, "_dbh_normalisation.rds"))
+	setkey(scaling_dbh, variable)
+	scaling_ba = readRDS(paste0(indices_path, run, "_ba_normalisation.rds"))
+	setkey(scaling_ba, variable)
+	scaling_clim = readRDS(paste0(indices_path, run, "_climate_normalisation.rds"))
+	setkey(scaling_clim, variable)
+	scaling_ph = readRDS(paste0(indices_path, run, "_ph_normalisation.rds"))
+	setkey(scaling_ph, variable)
+
+	# Merge climate with stand basal area and soil data
+	env = env[standBasalArea, on = c("plot_id", "year")]
+	env = env[soil, on = "plot_id"]
+
+	# Create time series environment
+	nClim = indices[, sum(year_end - year_start + 1)]
+
+	dataEnv = setnames(data.table(matrix(data = 0, nrow = nClim, ncol = ncol(env))), names(env))
+	dataEnv[, plot_id := as.character(plot_id)]
+	cols = names(env)
+	start = 1
+
+	for (i in seq_len(indices[, .N]))
+	{
+		end = start + indices[i , year_end - year_start]
+		dataEnv[start:end, c(cols) := env[indices[i, index_clim_start]:indices[i, index_clim_end]]]
+		start = end + 1
+
+		if (i %% 100 == 0)
+			print(paste0(round(i*100/indices[, .N], 2), "% done"))
+	}
+	print("100% done")
+
+	setkey(dataEnv, plot_id, year)
+	return(list(dataEnv = dataEnv, scaling_dbh = scaling_dbh, scaling_ba = scaling_ba, scaling_clim = scaling_clim, scaling_ph = scaling_ph))
 }
