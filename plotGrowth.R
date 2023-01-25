@@ -1,5 +1,9 @@
 
 #### Aim of prog: Plot different visualisations of growth versus predictors (diameters, environmental factors)
+## Comments
+#	The first part is dedicated to the growth response to environment and to time series predictions
+#	The second part is dedicated to 'cross-validation'
+#
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -8,16 +12,19 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
+library(tikzDevice)
 library(cmdstanr)
 library(stringi)
+library(terra)
 
 #### Tool functions
 source("toolFunctions.R")
 
-#### Load data
+######## Part I: growth response to environment and to time series predictions
+#### Get data
 ## Common variables
 args = commandArgs(trailingOnly = TRUE)
-# args = c("Fagus sylvatica", "1", "pr")
+# args = c("Fagus sylvatica", "1", "tas")
 if (length(args) != 3)
 	stop("Supply the species_id, run_id, and max_indiv as command line arguments!", call. = FALSE)
 
@@ -28,10 +35,30 @@ variable = as.character(args[3])
 if (!(variable %in% c("pr", "tas", "ph")))
 	stop("The variable must be either pr, tas, or ph")
 
-info = plotGrowth(species, run, variable)
+#### Plot growth vs variable
+info = plotGrowth(species = species, run = run, variable = variable, selected_plot_id = "germany_12591_3", init_dbh = 373,
+	extension = "tex")
+info = plotGrowth(species = species, run = run, variable = variable, extension = "tex")
+
 print(info)
 
-########! START CRASH TEST ZONE -----------------------------------------------------------------------------------------------------------------
+# speciesName_sci           plot_id tree_id   year   dbh
+# Fagus sylvatica   germany_12591_3      10   2000   373
+# Fagus sylvatica   germany_12591_3      10   2012   437
+
+######## Part II: cross-validation
+
+
+
+
+########! START CRASH TEST ZONE 1 ---------------------------------------------------------------------------------------------------------------
+
+
+########! END CRASH TEST ZONE 1 -----------------------------------------------------------------------------------------------------------------
+
+
+
+########! START CRASH TEST ZONE 2 ---------------------------------------------------------------------------------------------------------------
 # #### Load data
 # ## Common variables
 # years = 2010:2018
@@ -86,4 +113,4 @@ print(info)
 # plot(germany, add = TRUE, col = NA, lwd = 2)
 # plot(cities_rs, pch = 19, add = TRUE, cex = 4)
 # dev.off()
-########! END CRASH TEST ZONE -------------------------------------------------------------------------------------------------------------------
+########! END CRASH TEST ZONE 2 -----------------------------------------------------------------------------------------------------------------
