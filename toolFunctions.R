@@ -18,7 +18,6 @@
 #	- computeGrowth: Function to compute growth, the data table must be sorted by year within tree id and plot id
 #	- optimumPredictorValue: Function to compute the optimum value of response variables with a quadratic term
 #	- plotGrowth: Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
-#	- plotGrowthPosterior: Function to plot growth posterior for a given time series of environmental variables and an initial dbh
 #	- getEnvSeries: Function to get the environment for a given species and run (i.e., a given index set)
 #
 ## Comments
@@ -100,6 +99,11 @@ getLastRun = function(path, begin = "^growth-", extension = ".rds$", format = "y
 	setorder(dt, year, month, day, hour, minute)
 	if (getAll)
 		return(list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-"), allFiles = dt))
+
+	if (hour)
+		return(list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-"),
+			hour = paste(dt[.N, hour], dt[.N, minute], sep = "h")))
+	
 	return(list(file = dt[.N, file], time_ended = paste(dt[.N, year], dt[.N, month], dt[.N, day], sep = "-")))
 }
 
@@ -1963,14 +1967,10 @@ plotGrowth = function(species, run, variable, selected_plot_id = NULL, init_dbh 
 		# --- Prepare climate
 		dataEnv_ls = getEnvSeries(species, run)
 		n_growingYears = dataEnv_ls[["dataEnv"]][selected_plot_id, .N] - 1
-		precipitations = (dataEnv_ls[["dataEnv"]][selected_plot_id, pr] - dataEnv_ls[["scaling_clim"]]["pr", mu])/
-			dataEnv_ls[["scaling_clim"]]["pr", sd]
-		temperatures = (dataEnv_ls[["dataEnv"]][selected_plot_id, tas] - dataEnv_ls[["scaling_clim"]]["tas", mu])/
-			dataEnv_ls[["scaling_clim"]]["tas", sd]
-		ph = (dataEnv_ls[["dataEnv"]][selected_plot_id, ph] - dataEnv_ls[["scaling_ph"]]["ph", mu])/
-			dataEnv_ls[["scaling_ph"]]["ph", sd]
-		basalAreas = (dataEnv_ls[["dataEnv"]][selected_plot_id, standBasalArea_interp] - dataEnv_ls[["scaling_ba"]]["standBasalArea_interp", mu])/
-			dataEnv_ls[["scaling_ba"]]["standBasalArea_interp", sd]
+		precipitations = dataEnv_ls[["dataEnv"]][selected_plot_id, pr]
+		temperatures = dataEnv_ls[["dataEnv"]][selected_plot_id, tas]
+		ph = dataEnv_ls[["dataEnv"]][selected_plot_id, ph]
+		basalAreas = dataEnv_ls[["dataEnv"]][selected_plot_id, standBasalArea_interp]
 
 		# --- Prepare new stan data
 		# ------ Load stan data
@@ -1978,7 +1978,18 @@ plotGrowth = function(species, run, variable, selected_plot_id = NULL, init_dbh 
 		stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
 
 		# ------ Add the new environment (x_r)
-		stanData_ssm$x_r = c(precipitations, temperatures, ph, basalAreas)
+		stanData_ssm$x_r = c((precipitations - dataEnv_ls[["scaling_clim_ssm"]]["pr", mu])/dataEnv_ls[["scaling_clim_ssm"]]["pr", sd],
+			(temperatures - dataEnv_ls[["scaling_clim_ssm"]]["tas", mu])/dataEnv_ls[["scaling_clim_ssm"]]["tas", sd],
+			(ph - dataEnv_ls[["scaling_ph_ssm"]]["ph", mu])/dataEnv_ls[["scaling_ph_ssm"]]["ph", sd],
+			(basalAreas - dataEnv_ls[["scaling_ba_ssm"]]["standBasalArea_interp", mu])/
+				dataEnv_ls[["scaling_ba_ssm"]]["standBasalArea_interp", sd])
+
+		precipitations = (precipitations - dataEnv_ls[["scaling_clim_classic"]]["pr_avg", mu])/dataEnv_ls[["scaling_clim_classic"]]["pr_avg", sd]
+		temperatures = (temperatures - dataEnv_ls[["scaling_clim_classic"]]["tas_avg", mu])/dataEnv_ls[["scaling_clim_classic"]]["tas_avg", sd]
+		ph = (ph - dataEnv_ls[["scaling_ph_classic"]]["ph", mu])/dataEnv_ls[["scaling_ph_classic"]]["ph", sd]
+		basalAreas = (basalAreas - dataEnv_ls[["scaling_ba_classic"]]["standBasalArea_interp_avg", mu])/
+			dataEnv_ls[["scaling_ba_classic"]]["standBasalArea_interp_avg", sd]
+
 		stanData_classic$x_r = c(precipitations, temperatures, ph, basalAreas)
 		stanData_classic$x_r_avg = c(mean(precipitations), mean(temperatures), mean(ph), mean(basalAreas))
 
@@ -2094,14 +2105,23 @@ getEnvSeries = function(species, run, clim_folder = "/home/amael/project_ssm/inv
 	setkey(soil, plot_id)
 
 	# --- Scalings
+	# ------ Approach: ssm
 	scaling_dbh = readRDS(paste0(indices_path, run, "_dbh_normalisation.rds"))
 	setkey(scaling_dbh, variable)
-	scaling_ba = readRDS(paste0(indices_path, run, "_ba_normalisation.rds"))
-	setkey(scaling_ba, variable)
-	scaling_clim = readRDS(paste0(indices_path, run, "_climate_normalisation.rds"))
-	setkey(scaling_clim, variable)
-	scaling_ph = readRDS(paste0(indices_path, run, "_ph_normalisation.rds"))
-	setkey(scaling_ph, variable)
+	scaling_ba_ssm = readRDS(paste0(indices_path, run, "_ba_normalisation.rds"))
+	setkey(scaling_ba_ssm, variable)
+	scaling_clim_ssm = readRDS(paste0(indices_path, run, "_climate_normalisation.rds"))
+	setkey(scaling_clim_ssm, variable)
+	scaling_ph_ssm = readRDS(paste0(indices_path, run, "_ph_normalisation.rds"))
+	setkey(scaling_ph_ssm, variable)
+
+	# ------ Approach: classic (dbh is the same so not loaded twice)
+	scaling_ba_classic = readRDS(paste0(indices_path, run, "_ba_normalisation_classic.rds"))
+	setkey(scaling_ba_classic, variable)
+	scaling_clim_classic = readRDS(paste0(indices_path, run, "_climate_normalisation_classic.rds"))
+	setkey(scaling_clim_classic, variable)
+	scaling_ph_classic = readRDS(paste0(indices_path, run, "_ph_normalisation_classic.rds"))
+	setkey(scaling_ph_classic, variable)
 
 	# Merge climate with stand basal area and soil data
 	env = env[standBasalArea, on = c("plot_id", "year")]
@@ -2127,5 +2147,7 @@ getEnvSeries = function(species, run, clim_folder = "/home/amael/project_ssm/inv
 	print("100% done")
 
 	setkey(dataEnv, plot_id, year)
-	return(list(dataEnv = dataEnv, scaling_dbh = scaling_dbh, scaling_ba = scaling_ba, scaling_clim = scaling_clim, scaling_ph = scaling_ph))
+	return(list(dataEnv = dataEnv, scaling_dbh = scaling_dbh,
+		scaling_ba_ssm = scaling_ba_ssm, scaling_clim_ssm = scaling_clim_ssm, scaling_ph_ssm = scaling_ph_ssm,
+		scaling_ba_classic = scaling_ba_classic, scaling_clim_classic = scaling_clim_classic, scaling_ph_classic = scaling_ph_classic))
 }
