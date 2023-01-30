@@ -301,43 +301,53 @@ if (!dir.exists(tree_path))
 gq_model_ssm = cmdstan_model("generate_posterior.stan")
 gq_model_classic = cmdstan_model("generate_posterior_classic.stan")
 
-## Load and start prepare stan data
-stanData_ssm = readRDS(paste0(tree_path, run, "_stanData.rds"))
-stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
-
-stanData_ssm$n_climate_new = 7
-stanData_ssm$n_years = 6
-stanData_ssm$n_growth = stanData_ssm$n_children
-
-stanData_classic$n_climate_new = 7
-stanData_classic$n_years = 6
-
-## List of csv files
+## Load results
 info_lastRun = getLastRun(path = tree_path, begin = "^growth-", extension = "_main.rds$", format = "ymd", run = run, hour = TRUE)
 ssm = readRDS(paste0(tree_path, info_lastRun[["file"]]))
-# csv_ssm = list.files(path = tree_path, pattern = paste0("^growth-run=", run, "-", info_lastRun[["time_ended"]], "_", info_lastRun[["hour"]],
-# 	".*.csv$"))
-# csv_ssm = paste0(tree_path, csv_ssm)
 
 info_lastRun = getLastRun(path = tree_path, begin = "^growth-", extension = "_classic.rds$", format = "ymd", run = run, hour = TRUE)
 classic = readRDS(paste0(tree_path, info_lastRun[["file"]]))
-# csv_classic = list.files(path = tree_path, pattern = paste0("^growth-run=", run, "-", info_lastRun[["time_ended"]], "_", info_lastRun[["hour"]],
-# 	".*.csv$"))
-# csv_classic = paste0(tree_path, csv_classic)
 
-n_chains = readRDS(paste0(tree_path, info_lastRun[["file"]]))$num_chains() # Same number for SSM, but classic approach is faster to load
+n_chains = classic$num_chains()
 
-## For loop on individuals
+## Prepare stan data
+# Load
+stanData_ssm = readRDS(paste0(tree_path, run, "_stanData.rds"))
+stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
+
+# Add dimensions
+stanData_ssm$n_climate_new = 7
+stanData_ssm$n_years = 6
+stanData_ssm$n_growth = stanData_ssm$n_children
+stanData_ssm$n_indiv_new = unique(frenchData[, .(plot_id, tree_id)])[, .N]
+
+stanData_classic$n_climate_new = 7
+stanData_classic$n_years = 6
+stanData_classic$n_indiv_new = stanData_ssm$n_indiv_new
+
+# Add diameters
+stanData_ssm$dbh0 = frenchData[seq(1, .N, by = 2), dbh]
+stanData_classic$dbh0 = frenchData[seq(1, .N, by = 2), dbh]
+
+# Format and organise climate data
+envStan_dt = vector(mode = "list", length = 2)
+names(envStan_dt) = c("ssm", "classic")
+
+envStan_dt[["ssm"]] = data.table()
+envStan_dt[["classic"]] = data.table()
+
+for (modelType in names(envStan_dt))
+	for (j in c("pr", "tas", "ph", "standBasalArea")) # The order matter, I assume it is later precipitations, temperatures, ph, basalAreas
+		for (i in 1:stanData_classic$n_climate_new)
+			set(envStan_dt[[modelType]], i = NULL, j = paste0(j, i), value = rep(0, stanData_ssm$n_indiv_new))
+
+count = 0
 for (i in seq(1, frenchData[, .N], 2))
 {
-	# Preparing new stan data
 	# --- Common variables
 	time_span = frenchData[i, year]:frenchData[i + 1, year]
 	currentPlot = frenchData[i, plot_id]
-	
-	# --- Initial diameter
-	stanData_ssm$dbh0 = frenchData[i, dbh]
-	stanData_classic$dbh0 = frenchData[i, dbh]
+	count = count + 1
 
 	# --- Add the new environment (x_r)
 	# ------ Approach: ssm
@@ -346,7 +356,7 @@ for (i in seq(1, frenchData[, .N], 2))
 	ph = (env[.(currentPlot, time_span), ph] - stanData_ssm$ph_mu)/stanData_ssm$ph_sd
 	basalAreas = (env[.(currentPlot, time_span), standBasalArea] - stanData_ssm$ba_mu)/stanData_ssm$ba_sd
 
-	stanData_ssm$x_r = c(precipitations, temperatures, ph, basalAreas)
+	envStan_dt[["ssm"]][count, names(envStan_dt[["ssm"]]) := as.list(c(precipitations, temperatures, ph, basalAreas))]
 
 	# ------ Approach: classic
 	precipitations = (env[.(currentPlot, time_span), pr] - stanData_classic$pr_mu)/stanData_classic$pr_sd
@@ -354,69 +364,54 @@ for (i in seq(1, frenchData[, .N], 2))
 	ph = (env[.(currentPlot, time_span), ph] - stanData_classic$ph_mu)/stanData_classic$ph_sd
 	basalAreas = (env[.(currentPlot, time_span), standBasalArea] - stanData_classic$ba_mu)/stanData_classic$ba_sd
 
-	stanData_classic$x_r = c(precipitations, temperatures, ph, basalAreas)
-	stanData_classic$x_r_avg = c(mean(precipitations), mean(temperatures), mean(ph), mean(basalAreas))
+	envStan_dt[["classic"]][count, names(envStan_dt[["classic"]]) := as.list(c(precipitations, temperatures, ph, basalAreas))]
 
-	# Run simulations
-	generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData_ssm, parallel_chains = n_chains)
-	generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData_classic, parallel_chains = n_chains)
+	if (count %% 1000 == 0)
+		print(paste0(round(i*100/frenchData[, .N], 2), "% done"))
 }
 
-simulatedGrowth_ssm = stanData_ssm$sd_dbh*generate_quantities_ssm$draws(paste0("current_dbh[", stanData_ssm$n_climate_new, "]"))
-simulatedGrowth_classic = stanData_classic$sd_dbh*generate_quantities_classic$draws(paste0("current_dbh[",
-	stanData_classic$n_climate_new, "]"))
-simulatedGrowth_classic_avg = stanData_classic$sd_dbh*generate_quantities_classic$draws("final_dbh")
+stanData_ssm$x_r = envStan_dt[["ssm"]]
+stanData_classic$x_r = envStan_dt[["classic"]]
 
-simulatedGrowth_avg_ssm = generate_quantities_ssm$draws("simulatedGrowth_avg")
-simulatedGrowth_avg_classic = generate_quantities_classic$draws("simulatedGrowth_avg")
-simulatedGrowth_avg_clim_avg = generate_quantities_classic$draws("simulatedGrowth_avg_clim_avg")
+cols = names(envStan_dt[["classic"]])[stri_detect(names(envStan_dt[["classic"]]), regex = "pr[:digit:]")]
+precipitations = apply(X = envStan_dt[["classic"]][, ..cols], FUN = mean, MARGIN = 1)
 
-# --- Compute the 2.5 and 97.5 quantiles due to uncertainty on parameters (no process error!)
-simulatedGrowth_avg_ssm_q2.5 = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = quantile, MARGIN = 3, probs = 0.025)
-simulatedGrowth_avg_ssm_q97.5 = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = quantile, MARGIN = 3, probs = 0.975)
-simulatedGrowth_avg_ssm = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = mean, MARGIN = 3)
+cols = names(envStan_dt[["classic"]])[stri_detect(names(envStan_dt[["classic"]]), regex = "tas[:digit:]")]
+temperatures = apply(X = envStan_dt[["classic"]][, ..cols], FUN = mean, MARGIN = 1)
 
-simulatedGrowth_avg_classic_q2.5 = stanData_ssm$sd_dbh *
-	apply(X = simulatedGrowth_avg_classic, FUN = quantile, MARGIN = 3, probs = 0.025)
-simulatedGrowth_avg_classic_q97.5 = stanData_ssm$sd_dbh *
-	apply(X = simulatedGrowth_avg_classic, FUN = quantile, MARGIN = 3, probs = 0.975)
-simulatedGrowth_avg_classic = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_classic, FUN = mean, MARGIN = 3)
+cols = names(envStan_dt[["classic"]])[stri_detect(names(envStan_dt[["classic"]]), regex = "ph[:digit:]")]
+ph = apply(X = envStan_dt[["classic"]][, ..cols], FUN = mean, MARGIN = 1)
 
-n_growingYears = stanData_classic$n_years
-simulatedGrowth_avg_clim_avg_q2.5 = stanData_ssm$sd_dbh/n_growingYears *
-	apply(X = simulatedGrowth_avg_clim_avg, FUN = quantile, MARGIN = 3, probs = 0.025)
-simulatedGrowth_avg_clim_avg_q97.5 = stanData_ssm$sd_dbh/n_growingYears *
-	apply(X = simulatedGrowth_avg_clim_avg, FUN = quantile, MARGIN = 3, probs = 0.975)
-simulatedGrowth_avg_clim_avg = stanData_ssm$sd_dbh/n_growingYears * apply(X = simulatedGrowth_avg_clim_avg, FUN = mean, MARGIN = 3)
+cols = names(envStan_dt[["classic"]])[stri_detect(names(envStan_dt[["classic"]]), regex = "standBasalArea[:digit:]")]
+basalAreas = apply(X = envStan_dt[["classic"]][, ..cols], FUN = mean, MARGIN = 1)
 
-year_start = time_span[1]
-year_end = time_span[n_growingYears]
+stanData_classic$x_r_avg = data.table(pr = precipitations, tas = temperatures, ph = ph, standBasalArea = basalAreas)
 
-plot(year_start:year_end, simulatedGrowth_avg_ssm, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#F4C430",
-	ylim = c(min(simulatedGrowth_avg_ssm_q2.5), max(simulatedGrowth_avg_ssm_q97.5)))
-polygon(c(rev(year_start:year_end), year_start:year_end), c(rev(simulatedGrowth_avg_ssm_q2.5), simulatedGrowth_avg_ssm_q97.5),
-	col = "#F4C43022", border = NA)
-legend(x = "topleft", legend = "SSM", fill = "#F4C430", box.lwd = 0)
+## Run simulations
+# SSM aproach
+generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData_ssm, parallel_chains = n_chains)
+simulatedGrowth_ssm = stanData_ssm$sd_dbh*generate_quantities_ssm$draws("current_dbh")
+increment_5yrs_ssm = simulatedGrowth_ssm[, , paste0("current_dbh[", 1:(stanData_ssm$n_indiv_new), ",", stanData_ssm$n_years, "]")] - 
+	simulatedGrowth_ssm[, , paste0("current_dbh[", 1:(stanData_ssm$n_indiv_new), ",1]")]
 
-lines(year_start:year_end, simulatedGrowth_avg_classic, lwd = 2, col = "#034C4F")
-polygon(c(rev(year_start:year_end), year_start:year_end), c(rev(simulatedGrowth_avg_classic_q2.5), simulatedGrowth_avg_classic_q97.5),
-	col = "#034C4F22", border = NA)
-abline(h = simulatedGrowth_avg_clim_avg, lwd = 2, lty = 2)
-legend(x = "topleft", legend = "Classic", fill = "#034C4F", box.lwd = 0)
+# Classic approach
+generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData_classic, parallel_chains = n_chains)
+simulatedGrowth_classic = stanData_classic$sd_dbh*generate_quantities_classic$draws("current_dbh")
+increment_5yrs_classic = simulatedGrowth_classic[, , paste0("current_dbh[", 1:(stanData_classic$n_indiv_new), ",", stanData_ssm$n_years, "]")] - 
+	simulatedGrowth_classic[, , paste0("current_dbh[", 1:(stanData_classic$n_indiv_new), ",1]")]
 
+## Compute residuals
+measuredIncrements = unique(frenchData[, .(plot_id, tree_id, radial_increment_5_yrs_mm)])
+if (measuredIncrements[, .N] != dim(increment_5yrs_classic)[3])
+	stop("Dimensions mismatch between measured vs simulated increments")
 
-incr_ssm = stanData_ssm$sd_dbh*(generate_quantities_ssm$draws("current_dbh[6]") - generate_quantities_ssm$draws("current_dbh[1]"))
-incr_classic = stanData_classic$sd_dbh*(generate_quantities_classic$draws("current_dbh[6]") - generate_quantities_classic$draws("current_dbh[1]"))
+residuals_ssm = increment_5yrs_ssm - measuredIncrements[, radial_increment_5_yrs_mm]
+residuals_classic = increment_5yrs_classic - measuredIncrements[, radial_increment_5_yrs_mm]
 
-residuals_ssm = incr_ssm - frenchData[i, radial_increment_5_yrs_mm]
-residuals_classic = incr_classic - frenchData[i, radial_increment_5_yrs_mm]
-
-lazyComparePosterior(list(residuals_ssm,residuals_classic), legend = c("ssm", "classic"))
+lazyComparePosterior(list(residuals_ssm, residuals_classic), legend = c("ssm", "classic"))
 
 
 ########! END CRASH TEST ZONE 1 -----------------------------------------------------------------------------------------------------------------
-22
-
 
 ########! START CRASH TEST ZONE 2 ---------------------------------------------------------------------------------------------------------------
 # #### Load data
