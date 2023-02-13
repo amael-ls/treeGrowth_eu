@@ -1805,12 +1805,6 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 
 	if (!all(variables %in% c("pr", "tas", "ph")))
 		stop("Variables are limited to 'pr', 'tas', and 'ph'")
-	
-	if (length(variables) > 1)
-	{
-		for (i in seq_len(length(variables)))
-			plotGrowth(species, run, variables[i], selected_plot_id, init_dbh, extension, ...) # Recursive call
-	}
 
 	# Results
 	# --- State-Space Model approach
@@ -1919,69 +1913,74 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 	minGradient = c(pr = pr_min, tas = tas_min, ph = ph_min)
 	maxGradient = c(pr = pr_max, tas = tas_max, ph = ph_max)
 	n_env = c(pr = n_pr, tas = n_tas, ph = n_ph)
-	stanData = formatNewData(tree_path, run, variables, avg_values, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
-
-	# --- Generate quantities
-	generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData[["stanData_ssm"]], parallel_chains = n_chains)
-	generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData[["stanData_classic"]],
-		parallel_chains = n_chains)
-
-	simulatedGrowth_ssm = generate_quantities_ssm$draws("simulatedGrowth_avg")
-	simulatedGrowth_classic = generate_quantities_classic$draws("simulatedGrowth_avg")
-
-	# Plot simulations
-	# --- Select the optimum dbh for growth
-	optimumDbh_ssm = optimumPredictorValue(slope = estimated_params_ssm["dbh_slope"], slope2 = estimated_params_ssm["dbh_slope2"],
-		scaling_sd = stanData[["stanData_ssm"]]$sd_dbh)
-	optimumDbh_classic = optimumPredictorValue(slope = estimated_params_classic["dbh_slope"], slope2 = estimated_params_classic["dbh_slope2"],
-		scaling_sd = stanData[["stanData_classic"]]$sd_dbh)
-
-	new_dbh = seq(lower_dbh, upper_dbh, length.out = n_dbh_new)
-	optimum_ind_dbh_ssm = which.min(abs(new_dbh - optimumDbh_ssm))
-	optimum_ind_dbh_classic = which.min(abs(new_dbh - optimumDbh_classic))
-
-	# --- Select data according to optimum dbh
-	selectedData_ssm = paste0("simulatedGrowth_avg[", 1:stanData[["stanData_ssm"]]$n_climate_new, ",", optimum_ind_dbh_ssm, "]")
-	selectedData_classic = paste0("simulatedGrowth_avg[", 1:stanData[["stanData_classic"]]$n_climate_new, ",", optimum_ind_dbh_classic, "]")
 	
-	growth_ssm = simulatedGrowth_ssm[, , selectedData_ssm]
-	growth_ssm = stanData[["stanData_ssm"]]$sd_dbh*growth_ssm
+	for (currentVar in variables)
+	{
+		stanData = formatNewData(tree_path, run, currentVar, avg_values, n_env, n_dbh_new, lower_dbh, upper_dbh,
+			minGradient, maxGradient)
 
-	growth_classic = simulatedGrowth_classic[, , selectedData_classic]
-	growth_classic = stanData[["stanData_classic"]]$sd_dbh*growth_classic
+		# --- Generate quantities
+		generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData[["stanData_ssm"]], parallel_chains = n_chains)
+		generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData[["stanData_classic"]],
+			parallel_chains = n_chains)
 
-	# --- Compute the 2.5 and 97.5 quantiles due to uncertainty on parameters (no process error!)
-	growth_q2.5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.025)
-	growth_q97.5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.975)
-	growth_ssm = apply(X = growth_ssm, FUN = mean, MARGIN = 3)
+		simulatedGrowth_ssm = generate_quantities_ssm$draws("simulatedGrowth_avg")
+		simulatedGrowth_classic = generate_quantities_classic$draws("simulatedGrowth_avg")
 
-	growth_q2.5_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.025)
-	growth_q97.5_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.975)
-	growth_classic = apply(X = growth_classic, FUN = mean, MARGIN = 3)
+		# Plot simulations
+		# --- Select the optimum dbh for growth
+		optimumDbh_ssm = optimumPredictorValue(slope = estimated_params_ssm["dbh_slope"], slope2 = estimated_params_ssm["dbh_slope2"],
+			scaling_sd = stanData[["stanData_ssm"]]$sd_dbh)
+		optimumDbh_classic = optimumPredictorValue(slope = estimated_params_classic["dbh_slope"], slope2 = estimated_params_classic["dbh_slope2"],
+			scaling_sd = stanData[["stanData_classic"]]$sd_dbh)
 
-	# --- plot
-	if (variables == "pr")
-		selectedVariable = "Precipitation"
-	if (variables == "tas")
-		selectedVariable = "Temperature"
-	if (variables == "ph")
-		selectedVariable = "pH"
-	
-	filename = paste0(tree_path, "ssm-vs-classic_approach_", selectedVariable, ".", extension)
+		new_dbh = seq(lower_dbh, upper_dbh, length.out = n_dbh_new)
+		optimum_ind_dbh_ssm = which.min(abs(new_dbh - optimumDbh_ssm))
+		optimum_ind_dbh_classic = which.min(abs(new_dbh - optimumDbh_classic))
 
-	if (extension == "pdf")
-		pdf(filename, height = 10, width = 10)
-	if (extension == "tex")
-		tikz(filename, height = 3, width = 3)
-	plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "Growth", col = "#F4C430", type = "l", lwd = 2, lty = 1,
-		ylim = c(min(c(growth_q2.5_ssm, growth_q2.5_classic)), max(c(growth_q97.5_ssm, growth_q97.5_classic))))
-	lines(stanData[["scaled_gradient"]], growth_classic, col = "#034C4F", lwd = 2, lty = 2)
-	polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q2.5_ssm), growth_q97.5_ssm),
-		col = "#F4C43022", border = NA)
-	polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q2.5_classic), growth_q97.5_classic),
-		col = "#034C4F22", border = NA)
-	legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#F4C430", "#034C4F"), box.lwd = 0)
-	dev.off()
+		# --- Select data according to optimum dbh
+		selectedData_ssm = paste0("simulatedGrowth_avg[", 1:stanData[["stanData_ssm"]]$n_climate_new, ",", optimum_ind_dbh_ssm, "]")
+		selectedData_classic = paste0("simulatedGrowth_avg[", 1:stanData[["stanData_classic"]]$n_climate_new, ",", optimum_ind_dbh_classic, "]")
+		
+		growth_ssm = simulatedGrowth_ssm[, , selectedData_ssm]
+		growth_ssm = stanData[["stanData_ssm"]]$sd_dbh*growth_ssm
+
+		growth_classic = simulatedGrowth_classic[, , selectedData_classic]
+		growth_classic = stanData[["stanData_classic"]]$sd_dbh*growth_classic
+
+		# --- Compute the 2.5 and 97.5 quantiles due to uncertainty on parameters (no process error!)
+		growth_q2.5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.025)
+		growth_q97.5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.975)
+		growth_ssm = apply(X = growth_ssm, FUN = mean, MARGIN = 3)
+
+		growth_q2.5_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.025)
+		growth_q97.5_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.975)
+		growth_classic = apply(X = growth_classic, FUN = mean, MARGIN = 3)
+
+		# --- plot
+		if (variables == "pr")
+			selectedVariable = "Precipitation"
+		if (variables == "tas")
+			selectedVariable = "Temperature"
+		if (variables == "ph")
+			selectedVariable = "pH"
+		
+		filename = paste0(tree_path, "ssm-vs-classic_approach_", selectedVariable, ".", extension)
+
+		if (extension == "pdf")
+			pdf(filename, height = 10, width = 10)
+		if (extension == "tex")
+			tikz(filename, height = 3, width = 3)
+		plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "Growth", col = "#F4C430", type = "l", lwd = 2, lty = 1,
+			ylim = c(min(c(growth_q2.5_ssm, growth_q2.5_classic)), max(c(growth_q97.5_ssm, growth_q97.5_classic))))
+		lines(stanData[["scaled_gradient"]], growth_classic, col = "#034C4F", lwd = 2, lty = 2)
+		polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q2.5_ssm), growth_q97.5_ssm),
+			col = "#F4C43022", border = NA)
+		polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q2.5_classic), growth_q97.5_classic),
+			col = "#034C4F22", border = NA)
+		legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#F4C430", "#034C4F"), box.lwd = 0)
+		dev.off()
+	}
 
 	# plot growth posterior for a given time series of environmental variables and an initial dbh (if provided)
 	if (!is.null(selected_plot_id) && !is.null(init_dbh))
