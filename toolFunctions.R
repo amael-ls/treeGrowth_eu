@@ -22,6 +22,8 @@
 #	- plotGrowth: Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
 #	- getEnvSeries: Function to get the environment for a given species and run (i.e., a given index set)
 #	- validationTreeRing: Function to compare tree ring time-series with simulated time series from the fitted models
+#	- infoSpecies: Function to give species-specific range and dataset range of predictors and dbh
+
 #
 ## Comments
 # This R file contains tool functions only that help me to analyse the results and do some check-up. Note that some functions are quite
@@ -2357,4 +2359,159 @@ validationTreeRing = function(species, run)
 	saveRDS(dt_correl_avg, paste0(tree_path, "dt_correl_avg_fr-de-se.rds"))
 	saveRDS(dt_correl_spearman, paste0(tree_path, "dt_correl_spearman_fr-de-se.rds"))
 	saveRDS(dt_correl_spearman_avg, paste0(tree_path, "dt_correl_spearman_avg_fr-de-se.rds"))
+}
+
+## Function to give species-specific range and dataset range of predictors and dbh
+infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/growth/", clim_folder = treeData_folder,
+	soil_folder = treeData_folder, standBasalArea_folder = treeData_folder)
+{
+	# Load data
+	if (!dir.exists(treeData_folder))
+		stop(paste0("Folder\n\t", treeData_folder, "\ndoes not exist"))
+
+	if (!dir.exists(clim_folder))
+		stop(paste0("Folder\n\t", clim_folder, "\ndoes not exist"))
+
+	if (!dir.exists(soil_folder))
+		stop(paste0("Folder\n\t", soil_folder, "\ndoes not exist"))
+	
+	if (!dir.exists(standBasalArea_folder))
+		stop(paste0("Folder\n\t", standBasalArea_folder, "\ndoes not exist"))
+	
+	treeData = readRDS(paste0(treeData_folder, "standardised_european_growth_data_reshaped.rds"))
+	setindex(treeData, speciesName_sci)
+
+	# Create info data table
+	# --- Species names and number of individuals
+	info = unique(treeData[, .(speciesName_sci, plot_id, tree_id)])[, .(n_indiv = .N), by = speciesName_sci]
+
+	# --- Order and set id which corresponds to the id used in the bash program
+	setkey(info, speciesName_sci)
+	info[, species_id := seq_len(.N)]
+
+	# --- Number of plots per species
+	info[, n_plots := treeData[speciesName_sci, length(unique(plot_id)), on = "speciesName_sci"], by = speciesName_sci]
+
+	# --- Number and list of NFIs per species
+	info[, n_nfi := treeData[speciesName_sci, length(unique(nfi_id)), on = "speciesName_sci"], by = speciesName_sci]
+
+	info[, ls_nfi := paste(treeData[speciesName_sci, unique(nfi_id), on = "speciesName_sci"], collapse = ", "), by = speciesName_sci]
+	info[, ls_countries := paste(treeData[speciesName_sci, unique(country), on = "speciesName_sci"], collapse = ", "), by = speciesName_sci]
+
+	# --- dbh range per species
+	info[, min_dbh := treeData[speciesName_sci, min(dbh), on = "speciesName_sci"], by = speciesName_sci]
+	info[, max_dbh := treeData[speciesName_sci, max(dbh), on = "speciesName_sci"], by = speciesName_sci]
+
+	# Run for each species the function indices_subsample with run = "full" (i.e., no subsampling), and extract min-max of explanatory variables
+	setkey(treeData, plot_id, tree_id, year)
+	source("./indices_subsample.R")
+
+	# --- Load climate	
+	climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
+	setkey(climate, plot_id, year)
+	climate[, row_id := seq_len(.N)]
+
+	# --- Read soil data (pH)
+	soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
+	setkey(soil, plot_id)
+
+	# --- Read interpolated basal area data
+	standBasalArea = readRDS(paste0(standBasalArea_folder, "europe_reshaped_standBasalArea.rds"))
+	setkey(standBasalArea, plot_id)
+
+	# --- Add range columns for environment variables
+	info[, c("pr_min", "pr_max", "tas_min", "tas_max", "ph_min", "ph_max", "ba_min", "ba_max") := NaN]
+	range_subset = data.table(speciesName_sci = info[, speciesName_sci])
+	
+	var_runs = paste0(rep(c("pr_", "tas_", "ph_"), each = 2), c("min_", "max_"))
+	var_runs = paste0(rep(var_runs, each = 4), 1:4)
+	for (currentVar in var_runs)
+		set(range_subset, i = NULL, j = currentVar, value = rep(NaN, info[, .N]))
+
+	setkey(range_subset, speciesName_sci)
+
+	# --- Compute indices
+	for (species in info[, speciesName_sci])
+	{
+		species_folder = paste0("./", species, "/")
+		if (!file.exists(paste0(species_folder, "full_indices.rds")))
+		{
+			indices = indices_subsample("full", treeData[speciesName_sci == species], climate, species_folder, treeData_folder, clim_folder)
+		} else {
+			indices = readRDS(paste0(species_folder, "full_indices.rds"))
+		}
+
+		col_start = unique(indices[["indices"]][["index_clim_start"]])
+		col_end = unique(indices[["indices"]][["index_clim_end"]])
+
+		if (length(col_start) != length(col_end))
+			stop("Starting and ending indices length mismatches")
+
+		rowsToKeep = integer(length = sum(col_end - col_start + 1))
+		count = 1
+		for (i in seq_along(col_start))
+		{
+			rowsToKeep[count:(count + col_end[i] - col_start[i])] = col_start[i]:col_end[i]
+			count = count + col_end[i] - col_start[i] + 1
+		}
+
+		info[species, c("pr_min", "pr_max") := .(unlist(climate[rowsToKeep, lapply(.SD, min, na.rm = TRUE), .SDcols = "pr"]),
+			unlist(climate[rowsToKeep, lapply(.SD, max, na.rm = TRUE), .SDcols = "pr"]))]
+
+		info[species, c("tas_min", "tas_max") := .(unlist(climate[rowsToKeep, lapply(.SD, min, na.rm = TRUE), .SDcols = "tas"]),
+			unlist(climate[rowsToKeep, lapply(.SD, max, na.rm = TRUE), .SDcols = "tas"]))]
+
+		soil_sp = soil[treeData[, unique(plot_id)], ph]
+		info[species, c("ph_min", "ph_max") := .(min(soil_sp), max(soil_sp))]
+		
+		standBasalArea_sp = standBasalArea[treeData[, unique(plot_id)], standBasalArea_interp]
+		info[species, c("ba_min", "ba_max") := .(min(standBasalArea_sp), max(standBasalArea_sp))]
+
+		for (run in 1:4)
+		{
+			ind_file = paste0(species_folder, run, "_indices.rds")
+			if (file.exists(ind_file))
+			{
+				ind_run = readRDS(ind_file)[["indices"]]
+				speciesData = readRDS(paste0(species_folder, run, "_treeData.rds"))
+			} else {
+				next
+			}
+			col_start = unique(ind_run[["index_clim_start"]])
+			col_end = unique(ind_run[["index_clim_end"]])
+
+			if (length(col_start) != length(col_end))
+				stop("Starting and ending indices length mismatches")
+
+			rowsToKeep = integer(length = sum(col_end - col_start + 1))
+			count = 1
+			for (i in seq_along(col_start))
+			{
+				rowsToKeep[count:(count + col_end[i] - col_start[i])] = col_start[i]:col_end[i]
+				count = count + col_end[i] - col_start[i] + 1
+			}
+
+			current_cols = paste0(c("pr_min_", "pr_max_"), run)
+			range_subset[species, c(current_cols) := .(unlist(climate[rowsToKeep, lapply(.SD, min, na.rm = TRUE), .SDcols = "pr"]),
+				unlist(climate[rowsToKeep, lapply(.SD, max, na.rm = TRUE), .SDcols = "pr"]))]
+
+			current_cols = paste0(c("tas_min_", "tas_max_"), run)
+			range_subset[species, c(current_cols) := .(unlist(climate[rowsToKeep, lapply(.SD, min, na.rm = TRUE), .SDcols = "tas"]),
+				unlist(climate[rowsToKeep, lapply(.SD, max, na.rm = TRUE), .SDcols = "tas"]))]
+
+			soil_sp = soil[speciesData[, unique(plot_id)], ph]
+			current_cols = paste0(c("ph_min_", "ph_max_"), run)
+			range_subset[species, c(current_cols) := .(min(soil_sp), max(soil_sp))]
+			
+			standBasalArea_sp = standBasalArea[speciesData[, unique(plot_id)], standBasalArea_interp]
+			current_cols = paste0(c("ba_min_", "ba_max_"), run)
+			range_subset[species, c(current_cols) := .(min(standBasalArea_sp), max(standBasalArea_sp))]
+		}
+		print(paste("Species", species, "done"))
+	}
+
+	# Save informations
+	saveRDS(info, "./speciesInformations.rds")
+	saveRDS(range_subset, "./speciesInformations_runs.rds")
+	return (info)
 }
