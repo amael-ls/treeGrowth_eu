@@ -1750,14 +1750,6 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 		stanData_ssm = readRDS(paste0(tree_path, run, "_stanData.rds"))
 		stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
 
-		if (stanData_ssm$pr_mu == stanData_classic$pr_mu &&
-			stanData_ssm$tas_mu == stanData_classic$tas_mu &&
-			stanData_ssm$ph_mu == stanData_classic$ph_mu &&
-			stanData_ssm$pr_sd == stanData_classic$pr_sd &&
-			stanData_ssm$tas_sd == stanData_classic$tas_sd &&
-			stanData_ssm$ph_sd == stanData_classic$ph_sd)
-			stop("The SSM and classic data do not share the same scalings")
-
 		n_climate_new = n_env[variable]
 
 		pr_rep = (rep(avg_values["pr_mean"], n_climate_new) - stanData_classic$pr_mu)/stanData_classic$pr_sd
@@ -1765,28 +1757,30 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 		ph_rep = (rep(avg_values["ph_mean"], n_climate_new) - stanData_classic$ph_mu)/stanData_classic$ph_sd
 		ba_rep = (rep(25, n_climate_new) - stanData_classic$ba_mu)/stanData_classic$ba_sd
 
-		gradient = seq(minGradient[variable], maxGradient[variable], length.out = n_climate_new)
-		scaled_gradient = gradient
+		scaled_gradient = seq(minGradient[variable], maxGradient[variable], length.out = n_climate_new)
 
 		if (variable == "pr")
 		{
-			gradient = (gradient - stanData_ssm$pr_mu)/stanData_ssm$pr_sd
-			stanData_ssm$x_r = c(gradient, tas_rep, ph_rep, ba_rep)
-			stanData_classic$x_r = c(gradient, tas_rep, ph_rep, ba_rep)
+			gradient_ssm = (scaled_gradient - stanData_ssm$pr_mu)/stanData_ssm$pr_sd
+			gradient_classic = (scaled_gradient - stanData_classic$pr_mu)/stanData_classic$pr_sd
+			stanData_ssm$x_r = c(gradient_ssm, tas_rep, ph_rep, ba_rep)
+			stanData_classic$x_r = c(gradient_classic, tas_rep, ph_rep, ba_rep)
 		}
 
 		if (variable == "tas")
 		{
-			gradient = (gradient - stanData_ssm$tas_mu)/stanData_ssm$tas_sd
-			stanData_ssm$x_r = c(pr_rep, gradient, ph_rep, ba_rep)
-			stanData_classic$x_r = c(pr_rep, gradient, ph_rep, ba_rep)
+			gradient_ssm = (scaled_gradient - stanData_ssm$tas_mu)/stanData_ssm$tas_sd
+			gradient_classic = (scaled_gradient - stanData_classic$tas_mu)/stanData_classic$tas_sd
+			stanData_ssm$x_r = c(pr_rep, gradient_ssm, ph_rep, ba_rep)
+			stanData_classic$x_r = c(pr_rep, gradient_classic, ph_rep, ba_rep)
 		}
 
 		if (variable == "ph")
 		{
-			gradient = (gradient - stanData_ssm$ph_mu)/stanData_ssm$ph_sd
-			stanData_ssm$x_r = c(pr_rep, tas_rep, gradient, ba_rep)
-			stanData_classic$x_r = c(pr_rep, tas_rep, gradient, ba_rep)
+			gradient_ssm = (scaled_gradient - stanData_ssm$ph_mu)/stanData_ssm$ph_sd
+			gradient_classic = (scaled_gradient - stanData_classic$ph_mu)/stanData_classic$ph_sd
+			stanData_ssm$x_r = c(pr_rep, tas_rep, gradient_ssm, ba_rep)
+			stanData_classic$x_r = c(pr_rep, tas_rep, gradient_classic, ba_rep)
 		}
 
 		stanData_ssm$n_climate_new = n_climate_new
@@ -1800,7 +1794,8 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 		stanData_classic$lower_bound = unname(lower_dbh)
 		stanData_classic$upper_bound = unname(upper_dbh)
 
-		return(list(stanData_ssm = stanData_ssm, stanData_classic = stanData_classic, gradient = gradient, scaled_gradient = scaled_gradient))
+		return(list(stanData_ssm = stanData_ssm, stanData_classic = stanData_classic, gradient_ssm = gradient_ssm,
+			gradient_classic = gradient_classic, scaled_gradient = scaled_gradient))
 	}
 
 	# Paths and check-up
