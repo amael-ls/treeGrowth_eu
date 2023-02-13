@@ -1742,7 +1742,7 @@ optimumPredictorValue = function(slope, slope2, scaling_mu = NULL, scaling_sd = 
 }
 
 ## Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
-plotGrowth = function(species, run, variable, selected_plot_id = NULL, init_dbh = NULL, extension = "pdf", ...)
+plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh = NULL, extension = "pdf", ...)
 {
 	# Local function to format data
 	formatNewData = function(tree_path, run, variable, avg_values, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
@@ -1808,8 +1808,14 @@ plotGrowth = function(species, run, variable, selected_plot_id = NULL, init_dbh 
 	if (!dir.exists(tree_path))
 		stop(paste0("Path not found for species <", species, ">."))
 
-	if (!(variable %in% c("pr", "tas", "ph")))
-		stop("The variable must be one of the three: pr, tas, or ph")
+	if (!all(variables %in% c("pr", "tas", "ph")))
+		stop("Variables are limited to 'pr', 'tas', and 'ph'")
+	
+	if (length(variables) > 1)
+	{
+		for (i in seq_len(length(variables)))
+			plotGrowth(species, run, variables[i], selected_plot_id, init_dbh, extension, ...) # Recursive call
+	}
 
 	# Results
 	# --- State-Space Model approach
@@ -1918,7 +1924,7 @@ plotGrowth = function(species, run, variable, selected_plot_id = NULL, init_dbh 
 	minGradient = c(pr = pr_min, tas = tas_min, ph = ph_min)
 	maxGradient = c(pr = pr_max, tas = tas_max, ph = ph_max)
 	n_env = c(pr = n_pr, tas = n_tas, ph = n_ph)
-	stanData = formatNewData(tree_path, run, variable, avg_values, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
+	stanData = formatNewData(tree_path, run, variables, avg_values, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
 
 	# --- Generate quantities
 	generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData[["stanData_ssm"]], parallel_chains = n_chains)
@@ -1959,11 +1965,11 @@ plotGrowth = function(species, run, variable, selected_plot_id = NULL, init_dbh 
 	growth_classic = apply(X = growth_classic, FUN = mean, MARGIN = 3)
 
 	# --- plot
-	if (variable == "pr")
+	if (variables == "pr")
 		selectedVariable = "Precipitation"
-	if (variable == "tas")
+	if (variables == "tas")
 		selectedVariable = "Temperature"
-	if (variable == "ph")
+	if (variables == "ph")
 		selectedVariable = "pH"
 	
 	filename = paste0(tree_path, "ssm-vs-classic_approach_", selectedVariable, ".", extension)
@@ -2128,21 +2134,21 @@ getEnvSeries = function(species, run, clim_folder = "/home/amael/project_ssm/inv
 	# --- Scalings
 	# ------ Approach: ssm
 	scaling_dbh = readRDS(paste0(indices_path, run, "_dbh_normalisation.rds"))
-	setkey(scaling_dbh, variable)
+	setkey(scaling_dbh, variables)
 	scaling_ba_ssm = readRDS(paste0(indices_path, run, "_ba_normalisation.rds"))
-	setkey(scaling_ba_ssm, variable)
+	setkey(scaling_ba_ssm, variables)
 	scaling_clim_ssm = readRDS(paste0(indices_path, run, "_climate_normalisation.rds"))
-	setkey(scaling_clim_ssm, variable)
+	setkey(scaling_clim_ssm, variables)
 	scaling_ph_ssm = readRDS(paste0(indices_path, run, "_ph_normalisation.rds"))
-	setkey(scaling_ph_ssm, variable)
+	setkey(scaling_ph_ssm, variables)
 
 	# ------ Approach: classic (dbh is the same so not loaded twice)
 	scaling_ba_classic = readRDS(paste0(indices_path, run, "_ba_normalisation_classic.rds"))
-	setkey(scaling_ba_classic, variable)
+	setkey(scaling_ba_classic, variables)
 	scaling_clim_classic = readRDS(paste0(indices_path, run, "_climate_normalisation_classic.rds"))
-	setkey(scaling_clim_classic, variable)
+	setkey(scaling_clim_classic, variables)
 	scaling_ph_classic = readRDS(paste0(indices_path, run, "_ph_normalisation_classic.rds"))
-	setkey(scaling_ph_classic, variable)
+	setkey(scaling_ph_classic, variables)
 
 	# Merge climate with stand basal area and soil data
 	env = env[standBasalArea, on = c("plot_id", "year")]
