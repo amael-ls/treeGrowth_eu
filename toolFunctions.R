@@ -1861,8 +1861,8 @@ plotGrowth = function(species, run, variables, ls_info, selected_plot_id = NULL,
 	} else {
 		varMin = paste0("tas_025_", run)
 		varMax = paste0("tas_975_", run)
-		tas_min = unlist(speciesInfo_runs[species, ..varMin])
-		tas_max = unlist(speciesInfo_runs[species, ..varMax])
+		tas_min = unname(unlist(speciesInfo_runs[species, ..varMin]))
+		tas_max = unname(unlist(speciesInfo_runs[species, ..varMax]))
 	}
 	n_tas = round(unname(round(tas_max - tas_min) + 1)/0.25) # To force a delta_tas of around 0.25 Celsius
 
@@ -1876,8 +1876,8 @@ plotGrowth = function(species, run, variables, ls_info, selected_plot_id = NULL,
 	} else {
 		varMin = paste0("pr_025_", run)
 		varMax = paste0("pr_975_", run)
-		pr_min = unlist(speciesInfo_runs[species, ..varMin])
-		pr_max = unlist(speciesInfo_runs[species, ..varMax])
+		pr_min = unname(unlist(speciesInfo_runs[species, ..varMin]))
+		pr_max = unname(unlist(speciesInfo_runs[species, ..varMax]))
 	}
 	n_pr = round(unname(round(pr_max - pr_min) + 1)/3) # To force a delta_pr of around 3 mm/year
 
@@ -1891,8 +1891,8 @@ plotGrowth = function(species, run, variables, ls_info, selected_plot_id = NULL,
 	} else {
 		varMin = paste0("ph_025_", run)
 		varMax = paste0("ph_975_", run)
-		ph_min = unlist(speciesInfo_runs[species, ..varMin])
-		ph_max = unlist(speciesInfo_runs[species, ..varMax])
+		ph_min = unname(unlist(speciesInfo_runs[species, ..varMin]))
+		ph_max = unname(unlist(speciesInfo_runs[species, ..varMax]))
 	}
 	n_ph = round(unname(round(ph_max - ph_min) + 1)/0.2) # To force a delta_ph of around 0.2
 
@@ -1907,8 +1907,8 @@ plotGrowth = function(species, run, variables, ls_info, selected_plot_id = NULL,
 	} else {
 		varMin = paste0("dbh_025_", run)
 		varMax = paste0("dbh_975_", run)
-		lower_dbh = unlist(speciesInfo_runs[species, ..varMin])
-		upper_dbh = unlist(speciesInfo_runs[species, ..varMax])
+		lower_dbh = unname(unlist(speciesInfo_runs[species, ..varMin]))
+		upper_dbh = unname(unlist(speciesInfo_runs[species, ..varMax]))
 	}
 	n_dbh_new = round(unname(round(upper_dbh - lower_dbh) + 1)/5) # To force a delta_dbh of around 5 mm
 
