@@ -22,8 +22,6 @@
 #	- plotGrowth: Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
 #	- getEnvSeries: Function to get the environment for a given species and run (i.e., a given index set)
 #	- validationTreeRing: Function to compare tree ring time-series with simulated time series from the fitted models
-#	- infoSpecies: Function to give species-specific range and dataset range of predictors and dbh
-
 #
 ## Comments
 # This R file contains tool functions only that help me to analyse the results and do some check-up. Note that some functions are quite
@@ -1744,20 +1742,21 @@ optimumPredictorValue = function(slope, slope2, scaling_mu = NULL, scaling_sd = 
 }
 
 ## Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
-plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh = NULL, extension = "pdf", ...)
+plotGrowth = function(species, run, variables, ls_info, selected_plot_id = NULL, init_dbh = NULL, extension = "pdf", ...)
 {
 	# Local function to format data
-	formatNewData = function(tree_path, run, variable, avg_values, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
+	formatNewData = function(tree_path, run, variable, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
 	{
 		stanData_ssm = readRDS(paste0(tree_path, run, "_stanData.rds"))
 		stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
 
 		n_climate_new = n_env[variable]
 
-		pr_rep = (rep(avg_values["pr_mean"], n_climate_new) - stanData_classic$pr_mu)/stanData_classic$pr_sd
-		tas_rep = (rep(avg_values["tas_mean"], n_climate_new) - stanData_classic$tas_mu)/stanData_classic$tas_sd
-		ph_rep = (rep(avg_values["ph_mean"], n_climate_new) - stanData_classic$ph_mu)/stanData_classic$ph_sd
-		ba_rep = (rep(25, n_climate_new) - stanData_classic$ba_mu)/stanData_classic$ba_sd
+		# --- Species-specific averages (scaled)
+		pr_rep = rep(0, n_climate_new)
+		tas_rep = rep(0, n_climate_new)
+		ph_rep = rep(0, n_climate_new)
+		ba_rep = rep(0, n_climate_new)
 
 		scaled_gradient = seq(minGradient[variable], maxGradient[variable], length.out = n_climate_new)
 
@@ -1808,6 +1807,10 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 	if (!all(variables %in% c("pr", "tas", "ph")))
 		stop("Variables are limited to 'pr', 'tas', and 'ph'")
 
+	# Info species to get parametrisation range 
+	speciesInfo = ls_info[["info"]]
+	speciesInfo_runs = ls_info[["range_subset"]]
+
 	# Results
 	# --- State-Space Model approach
 	info_lastRun = getLastRun(path = tree_path, begin = "growth-", extension = "_main.rds$", run = run)
@@ -1851,47 +1854,47 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 	# ------ Temperature
 	if (any(tas_ind))
 	{
-		if (!all(c("tas_min", "tas_max", "tas_mean") %in% ls_names[tas_ind]))
-			stop("If you want to provide informations on temperature, please provide tas_min, tas_max, and tas_mean")
+		if (!all(c("tas_min", "tas_max") %in% ls_names[tas_ind]))
+			stop("If you want to provide informations on temperature, please provide tas_min, tas_max")
 		tas_min = providedArgs[["tas_min"]]
 		tas_max = providedArgs[["tas_max"]]
-		tas_mean = providedArgs[["tas_mean"]]
 	} else {
-		tas_min = -5
-		tas_max = 35
-		tas_mean = 12.5
+		varMin = paste0("tas_025_", run)
+		varMax = paste0("tas_975_", run)
+		tas_min = unlist(speciesInfo_runs[species, ..varMin])
+		tas_max = unlist(speciesInfo_runs[species, ..varMax])
 	}
-	n_tas = 200
+	n_tas = round(unname(round(tas_max - tas_min) + 1)/0.25) # To force a delta_tas of around 0.25 Celsius
 
 	# ------ Precipitation
 	if (any(pr_ind))
 	{
-		if (!all(c("pr_min", "pr_max", "pr_mean") %in% ls_names[pr_ind]))
-			stop("If you want to provide informations on temperature, please provide pr_min, pr_max, and pr_mean")
+		if (!all(c("pr_min", "pr_max") %in% ls_names[pr_ind]))
+			stop("If you want to provide informations on temperature, please provide pr_min, pr_max")
 		pr_min = providedArgs[["pr_min"]]
 		pr_max = providedArgs[["pr_max"]]
-		pr_mean = providedArgs[["pr_mean"]]
 	} else {
-		pr_min = 350
-		pr_max = 1350
-		pr_mean = 650
+		varMin = paste0("pr_025_", run)
+		varMax = paste0("pr_975_", run)
+		pr_min = unlist(speciesInfo_runs[species, ..varMin])
+		pr_max = unlist(speciesInfo_runs[species, ..varMax])
 	}
-	n_pr = 500
+	n_pr = round(unname(round(pr_max - pr_min) + 1)/3) # To force a delta_pr of around 3 mm/year
 
 	# ------ Ph
 	if (any(ph_ind))
 	{
-		if (!all(c("ph_min", "ph_max", "ph_mean") %in% ls_names[ph_ind]))
-			stop("If you want to provide informations on temperature, please provide ph_min, ph_max, and ph_mean")
+		if (!all(c("ph_min", "ph_max") %in% ls_names[ph_ind]))
+			stop("If you want to provide informations on temperature, please provide ph_min, ph_max")
 		ph_min = providedArgs[["ph_min"]]
 		ph_max = providedArgs[["ph_max"]]
-		ph_mean = providedArgs[["ph_mean"]]
 	} else {
-		ph_min = 4.8
-		ph_max = 6.2
-		ph_mean = 5.5
+		varMin = paste0("ph_025_", run)
+		varMax = paste0("ph_975_", run)
+		ph_min = unlist(speciesInfo_runs[species, ..varMin])
+		ph_max = unlist(speciesInfo_runs[species, ..varMax])
 	}
-	n_ph = 10
+	n_ph = round(unname(round(ph_max - ph_min) + 1)/0.2) # To force a delta_ph of around 0.2
 
 	# Diameter space
 	dbh_ind = stri_detect(str = ls_names, regex = ".*_dbh$")
@@ -1902,24 +1905,23 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 		lower_dbh = providedArgs[["lower_dbh"]]
 		upper_dbh = providedArgs[["upper_dbh"]]
 	} else {
-		treeData = readRDS(paste0(tree_path, run, "_treeData.rds"))
-		lower_dbh = quantile(treeData$dbh, seq(0, 1, 0.025))["2.5%"]
-		upper_dbh = quantile(treeData$dbh, seq(0, 1, 0.025))["97.5%"]
+		varMin = paste0("dbh_025_", run)
+		varMax = paste0("dbh_975_", run)
+		lower_dbh = unlist(speciesInfo_runs[species, ..varMin])
+		upper_dbh = unlist(speciesInfo_runs[species, ..varMax])
 	}
-	n_dbh_new = round(unname(round(upper_dbh - lower_dbh) + 1)/5)
+	n_dbh_new = round(unname(round(upper_dbh - lower_dbh) + 1)/5) # To force a delta_dbh of around 5 mm
 
 	# Simulate growth along the environmental gradient for many dbh
 	# --- Common variables
 	n_chains = ssm$num_chains() # Same for classic approach
-	avg_values = c(pr_mean = pr_mean, tas_mean = tas_mean, ph_mean = ph_mean)
 	minGradient = c(pr = pr_min, tas = tas_min, ph = ph_min)
 	maxGradient = c(pr = pr_max, tas = tas_max, ph = ph_max)
 	n_env = c(pr = n_pr, tas = n_tas, ph = n_ph)
 	
 	for (currentVar in variables)
 	{
-		stanData = formatNewData(tree_path, run, currentVar, avg_values, n_env, n_dbh_new, lower_dbh, upper_dbh,
-			minGradient, maxGradient)
+		stanData = formatNewData(tree_path, run, currentVar, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
 
 		# --- Generate quantities
 		generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData[["stanData_ssm"]], parallel_chains = n_chains)
@@ -1950,22 +1952,31 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 		growth_classic = simulatedGrowth_classic[, , selectedData_classic]
 		growth_classic = stanData[["stanData_classic"]]$sd_dbh*growth_classic
 
-		# --- Compute the 2.5 and 97.5 quantiles due to uncertainty on parameters (no process error!)
-		growth_q2.5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.025)
-		growth_q97.5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.975)
+		# --- Compute the 5 and 95 quantiles due to uncertainty on parameters (no process error!)
+		growth_q5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.05)
+		growth_q95_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.95)
 		growth_ssm = apply(X = growth_ssm, FUN = mean, MARGIN = 3)
 
-		growth_q2.5_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.025)
-		growth_q97.5_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.975)
+		growth_q5_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.05)
+		growth_q95_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.95)
 		growth_classic = apply(X = growth_classic, FUN = mean, MARGIN = 3)
 
 		# --- plot
-		if (variables == "pr")
+		if (currentVar == "pr")
+		{
 			selectedVariable = "Precipitation"
-		if (variables == "tas")
+			xlim = c(speciesInfo[, min(pr_min)], speciesInfo[, max(pr_max)])
+		}
+		if (currentVar == "tas")
+		{
 			selectedVariable = "Temperature"
-		if (variables == "ph")
+			xlim = c(speciesInfo[, min(tas_min)], speciesInfo[, max(tas_max)])
+		}
+		if (currentVar == "ph")
+		{
 			selectedVariable = "pH"
+			xlim = c(speciesInfo[, min(ph_min)], speciesInfo[, max(ph_max)])
+		}
 		
 		filename = paste0(tree_path, "ssm-vs-classic_approach_", selectedVariable, ".", extension)
 
@@ -1974,11 +1985,11 @@ plotGrowth = function(species, run, variables, selected_plot_id = NULL, init_dbh
 		if (extension == "tex")
 			tikz(filename, height = 3, width = 3)
 		plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "Growth", col = "#F4C430", type = "l", lwd = 2, lty = 1,
-			ylim = c(min(c(growth_q2.5_ssm, growth_q2.5_classic)), max(c(growth_q97.5_ssm, growth_q97.5_classic))))
+			xlim = xlim, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
 		lines(stanData[["scaled_gradient"]], growth_classic, col = "#034C4F", lwd = 2, lty = 2)
-		polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q2.5_ssm), growth_q97.5_ssm),
+		polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_ssm), growth_q95_ssm),
 			col = "#F4C43022", border = NA)
-		polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q2.5_classic), growth_q97.5_classic),
+		polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_classic), growth_q95_classic),
 			col = "#034C4F22", border = NA)
 		legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#F4C430", "#034C4F"), box.lwd = 0)
 		dev.off()
@@ -2423,7 +2434,7 @@ infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/gr
 	info[, c("pr_min", "pr_max", "tas_min", "tas_max", "ph_min", "ph_max", "ba_min", "ba_max") := NaN]
 	range_subset = data.table(speciesName_sci = info[, speciesName_sci])
 	
-	var_runs = paste0(rep(c("pr_", "tas_", "ph_"), each = 2), c("025_", "975_"))
+	var_runs = paste0(rep(c("dbh_", "pr_", "tas_", "ph_"), each = 2), c("025_", "975_"))
 	var_runs = paste0(rep(var_runs, each = 4), 1:4)
 	for (currentVar in var_runs)
 		set(range_subset, i = NULL, j = currentVar, value = rep(NaN, info[, .N]))
@@ -2491,6 +2502,11 @@ infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/gr
 				count = count + col_end[i] - col_start[i] + 1
 			}
 
+			current_cols = paste0(c("dbh_025_", "dbh_975_"), run)
+			range_subset[species, c(current_cols) :=
+				.(unlist(speciesData[rowsToKeep, lapply(.SD, quantile, na.rm = TRUE, probs = 0.025), .SDcols = "dbh"]),
+				unlist(speciesData[rowsToKeep, lapply(.SD, quantile, na.rm = TRUE, probs = 0.975), .SDcols = "dbh"]))]
+			
 			current_cols = paste0(c("pr_025_", "pr_975_"), run)
 			range_subset[species, c(current_cols) :=
 				.(unlist(climate[rowsToKeep, lapply(.SD, quantile, na.rm = TRUE, probs = 0.025), .SDcols = "pr"]),
