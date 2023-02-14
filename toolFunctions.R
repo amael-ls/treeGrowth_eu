@@ -2423,7 +2423,7 @@ infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/gr
 	info[, c("pr_min", "pr_max", "tas_min", "tas_max", "ph_min", "ph_max", "ba_min", "ba_max") := NaN]
 	range_subset = data.table(speciesName_sci = info[, speciesName_sci])
 	
-	var_runs = paste0(rep(c("pr_", "tas_", "ph_"), each = 2), c("min_", "max_"))
+	var_runs = paste0(rep(c("pr_", "tas_", "ph_"), each = 2), c("025_", "975_"))
 	var_runs = paste0(rep(var_runs, each = 4), 1:4)
 	for (currentVar in var_runs)
 		set(range_subset, i = NULL, j = currentVar, value = rep(NaN, info[, .N]))
@@ -2491,21 +2491,23 @@ infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/gr
 				count = count + col_end[i] - col_start[i] + 1
 			}
 
-			current_cols = paste0(c("pr_min_", "pr_max_"), run)
-			range_subset[species, c(current_cols) := .(unlist(climate[rowsToKeep, lapply(.SD, min, na.rm = TRUE), .SDcols = "pr"]),
-				unlist(climate[rowsToKeep, lapply(.SD, max, na.rm = TRUE), .SDcols = "pr"]))]
+			current_cols = paste0(c("pr_025_", "pr_975_"), run)
+			range_subset[species, c(current_cols) :=
+				.(unlist(climate[rowsToKeep, lapply(.SD, quantile, na.rm = TRUE, probs = 0.025), .SDcols = "pr"]),
+				unlist(climate[rowsToKeep, lapply(.SD, quantile, na.rm = TRUE, probs = 0.975), .SDcols = "pr"]))]
 
-			current_cols = paste0(c("tas_min_", "tas_max_"), run)
-			range_subset[species, c(current_cols) := .(unlist(climate[rowsToKeep, lapply(.SD, min, na.rm = TRUE), .SDcols = "tas"]),
-				unlist(climate[rowsToKeep, lapply(.SD, max, na.rm = TRUE), .SDcols = "tas"]))]
+			current_cols = paste0(c("tas_025_", "tas_975_"), run)
+			range_subset[species, c(current_cols) :=
+				.(unlist(climate[rowsToKeep, lapply(.SD, quantile, na.rm = TRUE, probs = 0.025), .SDcols = "tas"]),
+				unlist(climate[rowsToKeep, lapply(.SD, quantile, na.rm = TRUE, probs = 0.975), .SDcols = "tas"]))]
 
 			soil_sp = soil[speciesData[, unique(plot_id)], ph]
-			current_cols = paste0(c("ph_min_", "ph_max_"), run)
-			range_subset[species, c(current_cols) := .(min(soil_sp), max(soil_sp))]
+			current_cols = paste0(c("ph_025_", "ph_975_"), run)
+			range_subset[species, c(current_cols) := .(quantile(soil_sp, probs = 0.025), quantile(soil_sp, probs = 0.975))]
 			
 			standBasalArea_sp = standBasalArea[speciesData[, unique(plot_id)], standBasalArea_interp]
-			current_cols = paste0(c("ba_min_", "ba_max_"), run)
-			range_subset[species, c(current_cols) := .(min(standBasalArea_sp), max(standBasalArea_sp))]
+			current_cols = paste0(c("ba_025_", "ba_975_"), run)
+			range_subset[species, c(current_cols) := .(quantile(standBasalArea_sp, probs = 0.025), quantile(standBasalArea_sp, probs = 0.975))]
 		}
 		print(paste("Species", species, "done"))
 	}
@@ -2513,5 +2515,5 @@ infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/gr
 	# Save informations
 	saveRDS(info, "./speciesInformations.rds")
 	saveRDS(range_subset, "./speciesInformations_runs.rds")
-	return (info)
+	return (list(info = info, range_subset = range_subset))
 }
