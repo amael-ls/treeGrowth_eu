@@ -1742,7 +1742,7 @@ optimumPredictorValue = function(slope, slope2, scaling_mu = NULL, scaling_sd = 
 }
 
 ## Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
-plotGrowth = function(species, run, variables, ls_info, selected_plot_id = NULL, init_dbh = NULL, extension = "pdf", ...)
+plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected_plot_id = NULL, init_dbh = NULL, extension = NULL, ...)
 {
 	# Local function to format data
 	formatNewData = function(tree_path, run, variable, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
@@ -1806,6 +1806,12 @@ plotGrowth = function(species, run, variables, ls_info, selected_plot_id = NULL,
 
 	if (!all(variables %in% c("pr", "tas", "ph")))
 		stop("Variables are limited to 'pr', 'tas', and 'ph'")
+
+	if (!is.null(extension))
+	{
+		if (!all(extension %in% c("pdf", "tex")))
+			stop("Extension can only be pdf or tex")
+	}
 
 	# Info species to get parametrisation range 
 	speciesInfo = ls_info[["info"]]
@@ -1978,21 +1984,38 @@ plotGrowth = function(species, run, variables, ls_info, selected_plot_id = NULL,
 			xlim = c(speciesInfo[, min(ph_025)], speciesInfo[, max(ph_975)])
 		}
 		
-		filename = paste0(tree_path, "ssm-vs-classic_approach_", selectedVariable, ".", extension)
-
-		if (extension == "pdf")
-			pdf(filename, height = 10, width = 10)
-		if (extension == "tex")
-			tikz(filename, height = 3, width = 3)
-		plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "Growth", col = "#F4C430", type = "l", lwd = 2, lty = 1,
-			xlim = xlim, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
-		lines(stanData[["scaled_gradient"]], growth_classic, col = "#034C4F", lwd = 2, lty = 2)
-		polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_ssm), growth_q95_ssm),
-			col = "#F4C43022", border = NA)
-		polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_classic), growth_q95_classic),
-			col = "#034C4F22", border = NA)
-		legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#F4C430", "#034C4F"), box.lwd = 0)
-		dev.off()
+		if (!is.null(extension))
+		{
+			for (currentExt in extension)
+			{
+				filename = paste0(tree_path, "ssm-vs-classic_approach_", selectedVariable, ".", currentExt)
+				if (currentExt == "pdf")
+					pdf(filename, height = 10, width = 10)
+				if (currentExt == "tex")
+					tikz(filename, height = 3, width = 3)
+				plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "Growth", col = "#F4C430", type = "l",
+					lwd = 2, lty = 1, xlim = xlim, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
+				lines(stanData[["scaled_gradient"]], growth_classic, col = "#034C4F", lwd = 2, lty = 2)
+				polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_ssm), growth_q95_ssm),
+					col = "#F4C43022", border = NA)
+				polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_classic), growth_q95_classic),
+					col = "#034C4F22", border = NA)
+				if (caption)
+					legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#F4C430", "#034C4F"), box.lwd = 0)
+				dev.off()
+			}
+		} else {
+			plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "Growth", col = "#F4C430", type = "l", lwd = 2, lty = 1,
+					xlim = xlim, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
+			lines(stanData[["scaled_gradient"]], growth_classic, col = "#034C4F", lwd = 2, lty = 2)
+			polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_ssm), growth_q95_ssm),
+				col = "#F4C43022", border = NA)
+			polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_classic), growth_q95_classic),
+				col = "#034C4F22", border = NA)
+			if (caption)
+				legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#F4C430", "#034C4F"), box.lwd = 0)
+			dev.off()
+		}
 	}
 
 	# plot growth posterior for a given time series of environmental variables and an initial dbh (if provided)
@@ -2507,8 +2530,8 @@ infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/gr
 
 			current_cols = paste0(c("dbh_025_", "dbh_975_"), run)
 			range_subset[species, c(current_cols) :=
-				.(unlist(speciesData[rowsToKeep, lapply(.SD, quantile, na.rm = TRUE, probs = 0.025), .SDcols = "dbh"]),
-				unlist(speciesData[rowsToKeep, lapply(.SD, quantile, na.rm = TRUE, probs = 0.975), .SDcols = "dbh"]))]
+				.(unlist(speciesData[, lapply(.SD, quantile, na.rm = TRUE, probs = 0.025), .SDcols = "dbh"]),
+				unlist(speciesData[, lapply(.SD, quantile, na.rm = TRUE, probs = 0.975), .SDcols = "dbh"]))]
 			
 			current_cols = paste0(c("pr_025_", "pr_975_"), run)
 			range_subset[species, c(current_cols) :=
