@@ -22,6 +22,7 @@
 #	- plotGrowth: Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
 #	- getEnvSeries: Function to get the environment for a given species and run (i.e., a given index set)
 #	- validationTreeRing: Function to compare tree ring time-series with simulated time series from the fitted models
+#	- infoSpecies: Function to give species-specific range and dataset range of predictors and dbh
 #
 ## Comments
 # This R file contains tool functions only that help me to analyse the results and do some check-up. Note that some functions are quite
@@ -29,31 +30,60 @@
 #	found), so I created my own traces and posterior plots.
 
 #### Tool functions
-## Get fixed values parameters
-getParams = function(model_cmdstan, params_names, type = "mean")
+## Get fixed values parameters (will not work for draws with third dimension > 1)
+getParams = function(model_cmdstan, params_names, type = "mean", ...)
 {
-	if (!(type %in% c("mean", "median", "quantile")))
-		stop("Unknown type. Please choose median, quantile, or mean")
+	if (!(type %in% c("all", "chain-iter", "mean", "median", "quantile")))
+		stop("Unknown type. Please choose iter-chain, mean, median, or quantile")
 	
-	if (type != "quantile")
+	if (type %in% c("chain-iter", "mean", "median"))
 	{
 		vals = numeric(length(params_names))
 		names(vals) = params_names
-		for (i in seq_along(params_names))
+
+		if (type == "chain-iter")
 		{
-			vals[i] = ifelse(type == "mean",
-				mean(model_cmdstan$draws(params_names[i])),
-				median(model_cmdstan$draws(params_names[i])))
+			args = list(...)
+			if (!all(c("iter", "chain") %in% names(args)))
+				stop("You must provide iter and chain when using the option iter-chain")
+			iter = args[["iter"]]
+			chain = args[["chain"]]
+
+			if (iter > model_cmdstan$metadata()$iter_sampling)
+				stop("iter cannot be larger than iter_sampling")
+			
+			if (chain > model_cmdstan$num_chains())
+				stop("chain cannot be larger than num_chains")
+
+			for (i in seq_along(params_names))
+			{
+				draws = model_cmdstan$draws(params_names[i])
+				if (dim(draws)[3] != 1)
+					stop("This function is not yet designed to handle a multi-params")
+				vals[i] = draws[iter, chain, 1]
+			}
+			return(vals)
+		} else {
+			for (i in seq_along(params_names))
+			{
+				vals[i] = ifelse(type == "mean",
+					mean(model_cmdstan$draws(params_names[i])),
+					median(model_cmdstan$draws(params_names[i])))
+			}
+			return(vals)
 		}
-	} else {
+	} else if (type == "quantile") {
 		vals = data.table(parameter = params_names, q5 = 0, med = 0, avg = 0, q95 = 0)
 		for (i in seq_along(params_names))
 		{
 			vals[i, c("q5", "med", "q95") := as.list(quantile(model_cmdstan$draws(params_names[i]), c(0.05, 0.5, 0.95)))]
 			vals[i, avg := mean(model_cmdstan$draws(params_names[i]))]
 		}
+		return(vals)
 	}
 	
+	vals = model_cmdstan$draws(params_names)
+
 	return(vals)
 }
 
@@ -1786,7 +1816,6 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 
 		stanData_ssm$n_climate_new = n_climate_new
 		stanData_ssm$n_dbh_new = n_dbh_new
-		stanData_ssm$n_growth = stanData_ssm$n_children # n_children is also n_growth (i.e. the number of growth intervals)!
 		stanData_ssm$lower_bound = unname(lower_dbh)
 		stanData_ssm$upper_bound = unname(upper_dbh)
 
@@ -2053,7 +2082,6 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 		# ------ Add the new dimensions
 		stanData_ssm$n_climate_new = length(temperatures)
 		stanData_ssm$n_years = n_growingYears
-		stanData_ssm$n_growth = stanData_ssm$n_children # n_children is also n_growth (i.e. the number of growth intervals)!
 		stanData_ssm$dbh0 = init_dbh
 
 		stanData_classic$n_climate_new = length(temperatures)
@@ -2164,21 +2192,21 @@ getEnvSeries = function(species, run, clim_folder = "/home/amael/project_ssm/inv
 	# --- Scalings
 	# ------ Approach: ssm
 	scaling_dbh = readRDS(paste0(indices_path, run, "_dbh_normalisation.rds"))
-	setkey(scaling_dbh, variables)
+	setkey(scaling_dbh, variable)
 	scaling_ba_ssm = readRDS(paste0(indices_path, run, "_ba_normalisation.rds"))
-	setkey(scaling_ba_ssm, variables)
+	setkey(scaling_ba_ssm, variable)
 	scaling_clim_ssm = readRDS(paste0(indices_path, run, "_climate_normalisation.rds"))
-	setkey(scaling_clim_ssm, variables)
+	setkey(scaling_clim_ssm, variable)
 	scaling_ph_ssm = readRDS(paste0(indices_path, run, "_ph_normalisation.rds"))
-	setkey(scaling_ph_ssm, variables)
+	setkey(scaling_ph_ssm, variable)
 
 	# ------ Approach: classic (dbh is the same so not loaded twice)
 	scaling_ba_classic = readRDS(paste0(indices_path, run, "_ba_normalisation_classic.rds"))
-	setkey(scaling_ba_classic, variables)
+	setkey(scaling_ba_classic, variable)
 	scaling_clim_classic = readRDS(paste0(indices_path, run, "_climate_normalisation_classic.rds"))
-	setkey(scaling_clim_classic, variables)
+	setkey(scaling_clim_classic, variable)
 	scaling_ph_classic = readRDS(paste0(indices_path, run, "_ph_normalisation_classic.rds"))
-	setkey(scaling_ph_classic, variables)
+	setkey(scaling_ph_classic, variable)
 
 	# Merge climate with stand basal area and soil data
 	env = env[standBasalArea, on = c("plot_id", "year")]
@@ -2202,6 +2230,8 @@ getEnvSeries = function(species, run, clim_folder = "/home/amael/project_ssm/inv
 			print(paste0(round(i*100/indices[, .N], 2), "% done"))
 	}
 	print("100% done")
+
+	dataEnv = unique(dataEnv) # As soon as trees have been measured 3 times or more, there are duplicates
 
 	setkey(dataEnv, plot_id, year)
 	return(list(dataEnv = dataEnv, scaling_dbh = scaling_dbh,
@@ -2255,25 +2285,10 @@ validationTreeRing = function(species, run)
 	parents_index = tree_data[, .I[which.min(year)], by = .(tree_id)][, V1] # tree_id is enough here
 	last_child_index = tree_data[, .I[which.max(year)], by = .(tree_id)][, V1]
 
-	nbGrowingYears = tree_data[last_child_index, year] - tree_data[parents_index, year]
+	nbGrowingYears = tree_data[last_child_index, year] - tree_data[parents_index, year] + 1 # +1 comes from the last dbh, see plotGrowth comments
 	n_indiv = length(tree_data[, unique(tree_id)])
 	if (n_indiv != length(parents_index))
 		stop("Dimensions mismatch between n_indiv and parents_index")
-
-	start_ind = integer(length = n_indiv)
-	end_ind = integer(length = n_indiv)
-
-	start_ind[1] = 1
-
-	for (i in seq_len(n_indiv - 1))
-	{
-		end_ind[i] = start_ind[i] + nbGrowingYears[i]
-		start_ind[i + 1] = end_ind[i] + 1
-	}
-
-	end_ind[n_indiv] = start_ind[n_indiv] + nbGrowingYears[n_indiv]
-	if (end_ind[n_indiv] != tree_data[, .N])
-		stop("dimensions mismatch between end_ind and tree_data")
 
 	# --- Load fitted models
 	# ------ Common variables
@@ -2302,12 +2317,13 @@ validationTreeRing = function(species, run)
 	# ------ Add dimensions
 	# --------- SSM
 	stanData_ssm$time_series_length = tree_data[, .N]
-	stanData_ssm$n_growth = stanData_ssm$n_children
 	stanData_ssm$n_indiv_new = n_indiv
+	stanData_ssm$n_climate_new = tree_data[, .N]
 
 	# --------- Classic
 	stanData_classic$time_series_length = tree_data[, .N]
 	stanData_classic$n_indiv_new = n_indiv
+	stanData_classic$n_climate_new = tree_data[, .N]
 
 	# ------ Add diameters
 	stanData_ssm$dbh0 = tree_data[parents_index, starting_dbh]
@@ -2328,16 +2344,16 @@ validationTreeRing = function(species, run)
 
 	# ------ Add indices
 	# --------- SSM
-	stanData_ssm$start_ind = start_ind
-	stanData_ssm$end_ind = end_ind
+	stanData_ssm$start_ind = parents_index
+	stanData_ssm$nbGrowingYears = nbGrowingYears
 
 	# --------- Classic
-	stanData_classic$start_ind = start_ind
-	stanData_classic$end_ind = end_ind
+	stanData_classic$start_ind = parents_index
+	stanData_classic$nbGrowingYears = nbGrowingYears
 
 	# Run predictions
 	# --- SSM
-	savingGQ_file = paste0(tree_path, "GQ-run=", run, "_main_fr-de-se.rds")
+	savingGQ_file = paste0(tree_path, "GQ-run=", run, "_main_fr-de-se_treeRing.rds")
 	if (!file.exists(savingGQ_file))
 	{
 		generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData_ssm, parallel_chains = n_chains)
@@ -2349,17 +2365,17 @@ validationTreeRing = function(species, run)
 	predicted_growth_ssm = stanData_ssm$sd_dbh * generate_quantities_ssm$draws("simulatedGrowth")
 	predicted_growth_avg_ssm = stanData_ssm$sd_dbh * generate_quantities_ssm$draws("simulatedGrowth_avg")
 
-	predicted_growth_avg_ssm_avg = apply(X = predicted_growth_avg_ssm, MARGIN = 3, FUN = mean)
 	predicted_growth_ssm_avg = apply(X = predicted_growth_ssm, MARGIN = 3, FUN = mean)
+	predicted_growth_avg_ssm_avg = apply(X = predicted_growth_avg_ssm, MARGIN = 3, FUN = mean)
 
 	if (!file.exists(savingGQ_file))
 	{
 		generate_quantities_ssm$save_output_files(dir = tree_path, basename = paste0("GQ-run=", run), timestamp = FALSE, random = TRUE)
-		generate_quantities_ssm$save_object(file = paste0(tree_path, "GQ-run=", run, "_main_fr-de-se.rds"))
+		generate_quantities_ssm$save_object(file = savingGQ_file)
 	}
 
 	# --- Classic
-	savingGQ_file = paste0(tree_path, "GQ-run=", run, "_main_classic_fr-de-se.rds")
+	savingGQ_file = paste0(tree_path, "GQ-run=", run, "_main_classic_fr-de-se_treeRing.rds")
 	if (!file.exists(savingGQ_file))
 	{
 		generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData_classic, parallel_chains = n_chains)
@@ -2558,4 +2574,200 @@ infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/gr
 	saveRDS(info, "./speciesInformations.rds")
 	saveRDS(range_subset, "./speciesInformations_runs.rds")
 	return (list(info = info, range_subset = range_subset))
+}
+
+predict = function(species, run, env, dbh0, suspicious, indices, time_series_length)
+{
+	# --- Load fitted models
+	# ------ Common variables
+	tree_path = paste0("./", species, "/")
+	if (!dir.exists(tree_path))
+		stop(paste0("Path not found for species <", species, ">."))
+
+	# ------ Load stand-alone generate_quantities() stan models
+	gq_model_ssm = cmdstan_model("generate_posterior_treeRing_ssm.stan")
+	gq_model_classic = cmdstan_model("generate_posterior_treeRing_classic.stan")
+
+	# ------ Load results
+	info_lastRun = getLastRun(path = tree_path, begin = "^growth-", extension = "_main.rds$", format = "ymd", run = run, hour = TRUE)
+	ssm = readRDS(paste0(tree_path, info_lastRun[["file"]]))
+
+	info_lastRun = getLastRun(path = tree_path, begin = "^growth-", extension = "_classic.rds$", format = "ymd", run = run, hour = TRUE)
+	classic = readRDS(paste0(tree_path, info_lastRun[["file"]]))
+
+	n_chains = ssm$num_chains()
+
+	# --- Prepare stan data
+	# ------ Load
+	stanData_ssm = readRDS(paste0(tree_path, run, "_stanData.rds"))
+	stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
+
+	# ------ Add dimensions
+	n_indiv = length(dbh0)
+
+	# --------- SSM
+	stanData_ssm$time_series_length = time_series_length # Number of new latent growth = sum of the length of each time series for tree rings
+	stanData_ssm$n_indiv_new = n_indiv
+	stanData_ssm$n_climate_new = env[, .N]
+
+	# --------- Classic
+	stanData_classic$time_series_length = time_series_length # Number of new latent growth = sum of the length of each time series for tree rings
+	stanData_classic$n_indiv_new = n_indiv
+	stanData_classic$n_climate_new = env[, .N]
+
+	# ------ Add diameters
+	stanData_ssm$dbh0 = dbh0
+	stanData_classic$dbh0 = dbh0
+
+	# ------ Add environment
+	# --------- SSM
+	stanData_ssm$pr_new = (env[, pr] - stanData_ssm$pr_mu)/stanData_ssm$pr_sd
+	stanData_ssm$tas_new = (env[, tas] - stanData_ssm$tas_mu)/stanData_ssm$tas_sd
+	stanData_ssm$ph_new = (env[, ph] - stanData_ssm$ph_mu)/stanData_ssm$ph_sd
+	stanData_ssm$basal_new = (env[, standBasalArea_interp] - stanData_classic$ba_mu)/stanData_classic$ba_sd
+
+	# --------- Classic
+	stanData_classic$pr_new = (env[, pr] - stanData_classic$pr_mu)/stanData_classic$pr_sd
+	stanData_classic$tas_new = (env[, tas] - stanData_classic$tas_mu)/stanData_classic$tas_sd
+	stanData_classic$ph_new = (env[, ph] - stanData_classic$ph_mu)/stanData_classic$ph_sd
+	stanData_classic$basal_new = (env[, standBasalArea_interp] - stanData_classic$ba_mu)/stanData_classic$ba_sd
+
+	# ------ Add indices
+	#	For normal tree data, I need to to do end_ind - 1, while I need to keep the index as is for tree rings data.
+	#	This is due to the way I compute the indices: end - start = nbYears, but nbGrowingYears = nbYears - 1
+	#	Just read the comments in plotGrowth.R for more details
+
+	nbYearsGrowth = unique(indices[, .(tree_id, plot_id, nbYearsGrowth)])[, nbYearsGrowth]
+	if (length(nbYearsGrowth) != n_indiv)
+		stop("Dimension mismatch between nbYearsGrowth and n_indiv")
+
+	if (sum(nbYearsGrowth) != time_series_length)
+		stop("Time series length and nb years growth mismatch!")
+	
+	# --------- SSM
+	stanData_ssm$start_ind = indices[type == "parent", index_clim_start]
+	stanData_ssm$nbGrowingYears = nbYearsGrowth
+
+	# --------- Classic
+	stanData_classic$start_ind = indices[type == "parent", index_clim_start]
+	stanData_classic$nbGrowingYears = nbYearsGrowth
+
+	# Run predictions
+	# --- SSM
+	savingGQ_file = paste0(tree_path, "GQ-run=", run, "_main_fr-de-se_obsData.rds")
+	if (!file.exists(savingGQ_file))
+	{
+		generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData_ssm, parallel_chains = n_chains)
+	} else {
+		print("Quantities already generated, just reading file ssm")
+		generate_quantities_ssm = readRDS(savingGQ_file)
+	}
+
+	if (!file.exists(savingGQ_file))
+	{
+		generate_quantities_ssm$save_output_files(dir = tree_path, basename = paste0("GQ-run=", run), timestamp = FALSE, random = TRUE)
+		generate_quantities_ssm$save_object(file = savingGQ_file)
+	}
+
+	# --- Classic
+	savingGQ_file = paste0(tree_path, "GQ-run=", run, "_main_classic_fr-de-se_obsData.rds")
+	if (!file.exists(savingGQ_file))
+	{
+		generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData_classic, parallel_chains = n_chains)
+	} else {
+		print("Quantities already generated, just reading file classic")
+		generate_quantities_classic = readRDS(savingGQ_file)
+	}
+
+	if (!file.exists(savingGQ_file))
+	{
+		generate_quantities_classic$save_output_files(dir = tree_path, basename = paste0("GQ-run=", run), timestamp = FALSE, random = TRUE)
+		generate_quantities_classic$save_object(file = savingGQ_file)
+	}
+
+	return (list(generate_quantities_ssm = generate_quantities_ssm, generate_quantities_classic = generate_quantities_classic,
+		stanData_ssm = stanData_ssm, stanData_classic = stanData_classic))
+}
+
+## Function to compute and plot residuals from fit
+residuals_fit = function(species, run, filenamePattern = NULL)
+{
+	tree_path = paste0("./", species, "/")
+
+	filenameResiduals = paste0(tree_path, run, "_avg_residuals_ssmFit.rds")
+	if (file.exists(filenameResiduals))
+	{
+		residuals_load = readRDS(filenameResiduals)
+		warning("Plot was bypass")
+		return (residuals_load)
+	}
+
+	info_lastRun = getLastRun(path = tree_path, begin = "^growth-", extension = "_main.rds$", format = "ymd", run = run, hour = TRUE)
+	ssm = readRDS(paste0(tree_path, info_lastRun[["file"]]))
+
+	info_lastRun = getLastRun(path = tree_path, begin = "^growth-", extension = "_classic.rds$", format = "ymd", run = run, hour = TRUE)
+	classic = readRDS(paste0(tree_path, info_lastRun[["file"]]))
+
+	n_chains = ssm$num_chains()
+
+	latent_G_ssm = ssm$draws("latent_growth")
+	n_iter = dim(latent_G_ssm)[1]
+
+	latent_G_classic = classic$draws("latent_avg_annual_growth")
+
+	indices = readRDS(paste0(tree_path, run, "_indices.rds"))[["indices"]]
+	tree_data = readRDS(paste0(tree_path, run, "_treeData.rds"))
+	n_indiv = unique(indices[, .(tree_id, plot_id)])[, .N]
+	indices[.N, index_gen] - n_indiv == dim(latent_G_ssm)[3]
+
+	growth_dt = na.omit(tree_data)
+
+	sd_dbh = readRDS(paste0(tree_path, run, "_dbh_normalisation.rds"))[variable == "dbh", sd]
+
+	start = 1
+
+	residuals_ssm = posterior::as_draws_array(array(data = NA, dim = c(n_iter, n_chains, growth_dt[, .N])))
+	reconstructedGrowth_ssm = posterior::as_draws_array(array(data = NA, dim = c(n_iter, n_chains, growth_dt[, .N])))
+	residuals_classic = posterior::as_draws_array(array(data = NA, dim = c(n_iter, n_chains, growth_dt[, .N])))
+
+	for (g in seq_len(growth_dt[, .N]))
+	{
+		nbYears = growth_dt[g, deltaYear]
+		end = start + nbYears - 1
+
+		reconstructedGrowth_ssm[, , g] = sd_dbh *
+			posterior::as_draws_array(array(rowSums(latent_G_ssm[, , start:end], dim = 2), dim = c(n_iter, n_chains, 1)))/nbYears
+
+		residuals_ssm[, , g] = sd_dbh *
+			posterior::as_draws_array(array(rowSums(latent_G_ssm[, , start:end], dim = 2), dim = c(n_iter, n_chains, 1)))/nbYears -
+			growth_dt[g, growth]
+
+		residuals_classic[, , g] = sd_dbh * latent_G_classic[, , g] - growth_dt[g, growth]
+
+		start = end + 1
+		if (g %% 200 == 0)
+			print(paste0(round(g*100/growth_dt[, .N], 2), "% done"))
+	}
+
+	avg_residuals_ssmFit = apply(X = residuals_ssm, MARGIN = 3, FUN = mean)
+	avg_residuals_classicFit = apply(X = residuals_classic, MARGIN = 3, FUN = mean)
+
+	ind = which(growth_dt[, growth] >= -0.5 & growth_dt[, growth] < 12)
+
+	if (!is.null(filenamePattern))
+		pdf(paste0(tree_path, run, filenamePattern))
+	
+	plot(growth_dt[ind, growth], avg_residuals_ssmFit[ind], pch = 19, col = "#AABBCCBB")
+	points(growth_dt[ind, growth], avg_residuals_classicFit[ind], pch = 19, col = "#11BBCC11")
+	abline(h = 0, lwd = 3, col = "#CD2A1A")
+	abline(v = 0, lwd = 3, col = "#CD2A1A")
+
+	if (!is.null(filenamePattern))
+		dev.off()
+
+	saveRDS(list(residuals_ssm = avg_residuals_ssmFit, residuals_classic = avg_residuals_classicFit,
+		reconstructedGrowth_ssm = reconstructedGrowth_ssm), filenameResiduals)
+
+	return (list(residuals_ssm = avg_residuals_ssmFit, residuals_classic = avg_residuals_classicFit,
+		reconstructedGrowth_ssm = reconstructedGrowth_ssm))
 }
