@@ -2,7 +2,7 @@
 #### Aim of script: Prepare the data for growth (indices for multiple countries)
 ## Comments
 # There are five parts in this program:
-#	1. Standardisation of the growth data among country
+#	1. Standardisation of the growth data among countries
 #	2. Filter unknown species, check names are standardised, keep only most abundant species (threshold to 2000 measurements)
 #	3. Extract climate data and check that all the rasters have the same grid:
 #		- It is important that all the rasters share the same grid because I am using indices in stan and I need to make sure that indices
@@ -30,12 +30,14 @@ library(terra)
 ## Table for standardising column names and names per NFI
 std_colnames = data.table(standardised = c("plot_id", "tree_id", "speciesName_sci", "year", "dbh", "x", "y", "standBasalArea"),
 	france = c("pointInventory_id", "tree_id", "speciesName_sci", "year", "dbh", "xLambert93", "yLambert93", "standBasalArea"),
-	germany = c("plot_id", "tree_id", "speciesName_sci", "date", "dbh", "x_epsg31467", "y_epsg31467", "standBasalArea"))
+	germany = c("plot_id", "tree_id", "speciesName_sci", "date", "dbh", "x_epsg31467", "y_epsg31467", "standBasalArea"),
+	sweden = c("plot_id", "tree_id", "speciesName_sci", "year", "dbh", "x_epsg3006", "y_epsg3006", "standBasalArea"))
 
 ## Table for standardising projection systems
 std_epsg = data.table(standardised = "EPSG:4326",
 	france = "EPSG:2154",
-	germany = "EPSG:31467")
+	germany = "EPSG:31467",
+	sweden = "EPSG:3006")
 
 #### Load and reshape data
 ## List processed data
@@ -203,7 +205,7 @@ checkRasters = function(selectedVariables, years)
 			extent = ext(clim_rs)
 			check_extent = isTRUE(all.equal(ref_extent, extent))
 
-			if (!check_proj | !check_origin | !check_extent)
+			if (!check_proj || !check_origin || !check_extent)
 			{
 				count_within_mismatch = count_within_mismatch + 1
 				mismatch_within[count_within_mismatch, c("variable", "file") := .(clim_var, year)]
@@ -319,7 +321,7 @@ if (any(!(selectedVariables %in% availableVariables)))
 
 timespan = timeCover_climate(clim_folder, selected_climate = selectedVariables)
 if (!timespan[["sameTimeCover"]])
-	warning("The climate data from\n\t", clim_folder, "\ndo not all cover the same years for the tested variable. This might involve some NAs and bugs")
+	warning("The climate data from\n\t", clim_folder, "\ndo not all cover the same years. This might involve some NAs and bugs")
 
 #### Subset tree data to cover the same timespan as climate
 ## Remove data from inventories that do not have associated climate data
