@@ -23,6 +23,7 @@
 #	- getEnvSeries: Function to get the environment for a given species and run (i.e., a given index set)
 #	- validationTreeRing: Function to compare tree ring time-series with simulated time series from the fitted models
 #	- infoSpecies: Function to give species-specific range and dataset range of predictors and dbh
+#	- climQuantiles: Function to compute, extract, and save climatic quantiles on rasters
 #
 ## Comments
 # This R file contains tool functions only that help me to analyse the results and do some check-up. Note that some functions are quite
@@ -106,9 +107,6 @@ getLastRun = function(path, begin = "^growth-", extension = ".rds$", format = "y
 		warning(paste0("No file detected in the folder '", path, "'. You were looking for '", begin, "*", extension, "'"))
 		return(list(file = NA, time_ended = NA))
 	}
-
-	if (is.null(run))
-		ls_files = ls_files[!stri_detect(str = ls_files, regex = paste0(begin, "run="))]
 
 	ls_files_split = stri_split(
 		str = stri_sub(str = ls_files,
@@ -2576,6 +2574,7 @@ infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/gr
 	return (list(info = info, range_subset = range_subset))
 }
 
+## Function to predict #! NOT SURE THIS IS CORRECT...
 predict = function(species, run, env, dbh0, suspicious, indices, time_series_length)
 {
 	# --- Load fitted models
@@ -2770,4 +2769,45 @@ residuals_fit = function(species, run, filenamePattern = NULL)
 
 	return (list(residuals_ssm = avg_residuals_ssmFit, residuals_classic = avg_residuals_classicFit,
 		reconstructedGrowth_ssm = reconstructedGrowth_ssm))
+}
+
+## Function to compute, extract, and save climatic quantiles on rasters
+climQuantiles = function(clim_var, years, coords, clim_folder = "/bigdata/Predictors/climateChelsa/", probs = c(0.05, 0.25, 0.75, 0.95))
+{
+	# Check-up
+	if (!dir.exists(clim_folder))
+		stop(paste0("Folder <", clim_folder, "> does not exist"))
+
+	ls_vars = list.dirs(path = clim_folder, full.names = FALSE, recursive = FALSE)
+
+	if (!(clim_var %in% ls_vars))
+		stop(paste0("Climatic variable <", clim_var, "> not found in folder<", clim_folder, ">"))
+
+	folder = paste0(clim_folder, clim_var, "/")
+
+	ls_years = dir(path = folder, pattern = ".tif$")
+	ls_years = stri_sub(str = ls_years, to = stri_locate(str = ls_years, regex = ".tif")[, "start"] - 1)
+
+	if (!all(years %in% ls_years))
+	{
+		years = years[years %in% ls_years]
+		warning("Some years were missing, they have been removed")
+	}
+
+	# Loading rasters
+	ls_files = paste0(folder, years, ".tif")
+
+	clim = rast(ls_files)
+
+	clim_qt = quantile(clim, probs = probs)
+	coords_rs = vect(coords, geom = c("x", "y"), crs = "EPSG:4326")
+
+	if (crs(clim_qt, describe = TRUE)$code != crs(coords_rs, describe = TRUE)$code)
+		stop("Projections vect differ")
+
+	values_qt = setDT(extract(x = clim_qt, y = coords_rs))
+	values_qt[, ID := NULL]
+	setnames(values_qt, new = stri_replace_all(str = names(values_qt), replacement = "", regex = "0\\."))
+
+	return(values_qt)
 }
