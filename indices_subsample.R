@@ -44,13 +44,18 @@ indices_subsample = function(run_id, treeData, climate, savingPath, mainFolder, 
 
 		indices = data.table(year = integer(trees_NFI[, .N]), tree_id = character(trees_NFI[, .N]),
 			plot_id = character(trees_NFI[, .N]), index_gen = integer(trees_NFI[, .N]),
-			index_clim_start = integer(trees_NFI[, .N]), index_clim_end = integer(trees_NFI[, .N]))
+			index_clim_start = integer(trees_NFI[, .N]), index_clim_end = integer(trees_NFI[, .N]),
+			index_latent_growth = integer(trees_NFI[, .N]))
+
+		ind_latent_growth_start = 1
+		ind_latent_growth_end = 0
 
 		for (plot in trees_NFI[, unique(plot_id)])
 		{
 			for (indiv in trees_NFI[plot, unique(tree_id)])
 			{
 				years_indices = fillYears(trees_NFI[.(plot, indiv), year])
+				ind_latent_growth_end = ind_latent_growth_start + years_indices$indices[2:length(years_indices$indices)] - 2
 				
 				start = end + 1
 				end = start + length(years_indices[["indices"]]) - 1
@@ -59,7 +64,9 @@ indices_subsample = function(run_id, treeData, climate, savingPath, mainFolder, 
 				indices[start:end, tree_id := indiv]
 				indices[start:end, plot_id := plot]
 				indices[start:end, index_gen := years_indices[["indices"]] + count]
+				indices[start:end, index_latent_growth := c(ind_latent_growth_start, ind_latent_growth_end)]
 
+				ind_latent_growth_start = ind_latent_growth_end[length(ind_latent_growth_end)] + 1
 				count = count + years_indices[["indices"]][length(years_indices[["indices"]])]
 				iter = iter + 1
 				if (iter %% 1000 == 0)
@@ -81,8 +88,8 @@ indices_subsample = function(run_id, treeData, climate, savingPath, mainFolder, 
 			tree = indices_dt[plot, unique(tree_id)][1]
 			for (tree in indices_dt[plot, unique(tree_id)])
 			{
-				clim_start = climate[.(plot, min_year), row_id]
-				clim_end = climate[.(plot, max_year), row_id]
+				clim_start = climate[.(plot, min_year), which = TRUE] # Returns the rows numbers instead of the rows themseleves
+				clim_end = climate[.(plot, max_year), which = TRUE]
 
 				indices_dt[.(plot, tree),
 					c("index_clim_start", "index_clim_end") := .(clim_start, clim_end)]
@@ -101,8 +108,8 @@ indices_subsample = function(run_id, treeData, climate, savingPath, mainFolder, 
 
 			for (i in 1:(length(all_years) - 1))
 			{
-				clim_start = climate[.(plot, all_years[i]), row_id]
-				clim_end = climate[.(plot, all_years[i + 1]), row_id]
+				clim_start = climate[.(plot, all_years[i]), which = TRUE]
+				clim_end = climate[.(plot, all_years[i + 1]), which = TRUE]
 
 				indices_dt[.(plot, all_years[i]),
 					c("index_clim_start", "index_clim_end") := .(clim_start, clim_end)]
