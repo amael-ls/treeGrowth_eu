@@ -12,6 +12,55 @@
 #	The opencl_ids is supplied as a vector of length 2, where the first element is the platform ID and the second argument is the device ID.
 #	In this case it is (0, 0) or (0, 1) if the second device is desired
 
+# Species: to do (deep violet), running (light violet and bold), done (green), failed (red).
+#?          speciesName_sci    tot
+#*  1:            Abies alba  45166
+#*  2:        Acer campestre   8454
+#!  3:           Acer opalus   1466
+#*  4:      Acer platanoides   1900
+#*  5:   Acer pseudoplatanus  14383
+#*  6:       Alnus glutinosa  26480
+#*  7:          Alnus incana   6144
+#!  8:         Arbutus unedo   1970
+#!  9:           Aria edulis   2996
+#* 10:        Betula pendula  28987
+#* 11:      Betula pubescens  17676
+#! 12:      Carpinus betulus  55507
+#! 13:       Castanea sativa  33626 [etaObs failure]
+#* 14:      Corylus avellana   8498
+#* 15:    Crataegus monogyna   3530
+#* 16:       Fagus sylvatica 143514
+#! 17:    Fraxinus excelsior  33610 [etaObs failure]
+#* 18:       Ilex aquifolium   1454
+#* 19:         Larix decidua  13928
+#* 20:       Larix kaempferi   4838
+#* 21:           Picea abies 513498 [Run 4 could not start due to sampling, so I used set.seed(5) instead. I renamed the file with 4 after]
+#* 22:      Picea sitchensis   2714
+#* 23:        Pinus contorta  14310
+#* 24:      Pinus halepensis   3640
+#* 25:            Pinus mugo   2290
+#* 26:           Pinus nigra  10554
+#* 27:        Pinus pinaster  16078
+#* 28:      Pinus sylvestris 442716
+#* 29:         Populus nigra   2412
+#* 30:       Populus tremula  15471
+#* 31:          Prunus avium   7704
+#* 32: Pseudotsuga menziesii  26704
+#! 33:          Quercus ilex  17320
+#* 34:       Quercus petraea  76738
+#! 35:     Quercus pubescens  34216
+#* 36:     Quercus pyrenaica   1504
+#* 37:         Quercus robur  71500
+#* 38:         Quercus rubra   3334
+#* 39:  Robinia pseudoacacia   8976
+#* 40:          Salix caprea   8953
+#* 41:      Sorbus aucuparia   4709
+#* 42:         Tilia cordata   2864
+#* 43:    Tilia platyphyllos   1840
+#! 44: Torminalis glaberrima   2590
+#* 45:           Ulmus minor   2246
+#?          speciesName_sci    tot
+
 #### Clear memory and load packages
 rm(list = ls())
 graphics.off()
@@ -141,10 +190,11 @@ computeDiametralGrowth = function(dt, col = "growth", byCols = c("plot_id", "tre
 		warning(paste0("The name `", col, "` is already used in the data table. The result was stored in col `", newcol, "` instead"))
 		col = newcol
 	}
-	dt[, (col) := (shift(dbh, n = 1, type = "lead", fill = NA) - dbh)/(shift(year, n = 1, type = "lead", fill = NA) - year), by = byCols]
+	dt[, (col) := (data.table::shift(dbh, n = 1, type = "lead", fill = NA) - dbh)/
+		(data.table::shift(year, n = 1, type = "lead", fill = NA) - year), by = byCols]
 
 	if (!("deltaYear" %in% names(dt)))
-		dt[, deltaYear := shift(year, n = 1, type = "lead", fill = NA) - year, by = byCols]
+		dt[, deltaYear := data.table::shift(year, n = 1, type = "lead", fill = NA) - year, by = byCols]
 }
 
 ## Function to compute the mean and sd of given variables in a data table
@@ -378,7 +428,6 @@ print(countryStats)
 ## Read climate
 climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
 setkey(climate, plot_id, year)
-climate[, row_id := seq_len(.N)]
 
 ## Read soil data (pH)
 soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
