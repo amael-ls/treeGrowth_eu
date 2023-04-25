@@ -1,5 +1,5 @@
 
-#### This stand-alone script generates annual growth with the classic approach for a given time-series of environmental conditions and an initial diameter
+// This stand-alone script generates annual growth with the classic approach for a given time-series of environmental conditions and an initial diameter
 
 functions {
 	// Function for growth. This returns the expected log(growth) in mm, for 1 year, i.e. the parameter meanlog of lognormal distribution
@@ -42,17 +42,21 @@ data {
 	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 	real<lower = 0> sd_dbh; // To standardise the lower and upper bounds of dbh
 
+	// New data
 	int<lower = 1> n_climate_new; // Dimension of the new climate vector
 	int<lower = n_climate_new - 1, upper = n_climate_new - 1> n_years; // Number of growing years, it can only be n_climate_new - 1
+	int<lower = 1> n_indiv_new; // Number of new individuals (which corresponds to the number of initial diameters provided)
 
-	real dbh0; // Initial dbh (which is not dbh_init from growth.stan)
+	array [n_indiv_new] real dbh0; // Initial dbh (which is not dbh_init from growth.stan)
 
-	array [4*n_climate_new] real x_r; // Contains in this order: pr, ts, ph, basal area, each of size n_climate_new, and already standardised
-	array [4] real x_r_avg; // Contains in this order: pr, ts, ph, basal area averaged over n_climate_new years
+	array [n_indiv_new, 4*n_climate_new] real x_r; // Contains in this order: pr, tas, ph, basal area, each of size n_climate_new, and already standardised
+	array [n_indiv_new, 4] real x_r_avg; // Contains in this order: pr, tas, ph, basal area averaged over n_climate_new years
 }
 
 transformed data {
-	real normalised_dbh0 = dbh0/sd_dbh;
+	array [n_indiv_new] real normalised_dbh0;
+	for (i in 1:n_indiv_new)
+		normalised_dbh0[i] = dbh0[i]/sd_dbh;
 }
 
 parameters {
@@ -90,30 +94,36 @@ parameters {
 }
 
 generated quantities {
-	real simulatedGrowth_avg_clim_avg;
-	real final_dbh;
-	array [n_years] real simulatedGrowth_avg;
-	array [n_climate_new] real current_dbh;
-	current_dbh[1] = normalised_dbh0;
+	array [n_indiv_new, n_years] real simulatedGrowth_avg;
+	array [n_indiv_new, n_climate_new] real current_dbh;
+	array [n_indiv_new] real simulatedGrowth_avg_clim_avg;
+	array [n_indiv_new] real final_dbh;
+	
 	{
 		// Common variables, any variable defined here will not be part of the output
 		array [4] int index;
 		real meanlog = 0;
 
 		// Generate growth for different climate and dbh combinations
-		for (i in 1:n_years)
+		for (i in 1:n_indiv_new)
 		{
-			// Extract the i^th value of precipitation, temperature, pH, and basal area, respectively
-			index = {i, i + n_climate_new, i + 2*n_climate_new, i + 3*n_climate_new};
-			meanlog = growth(current_dbh[i], x_r[index], averageGrowth, dbh_slope, dbh_slope2,
-				pr_slope, pr_slope2 , tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
+			current_dbh[i, 1] = normalised_dbh0[i];
+			for (j in 1:n_years)
+			{
+				// Extract the i^th value of precipitation, temperature, pH, and basal area, respectively
+				index = {j, j + n_climate_new, j + 2*n_climate_new, j + 3*n_climate_new};
+
+				// Compute growth
+				meanlog = growth(current_dbh[i, j], x_r[i, index], averageGrowth, dbh_slope, dbh_slope2,
+					pr_slope, pr_slope2 , tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 			
-			simulatedGrowth_avg[i] = exp(meanlog + sigmaProc^2/2.0);
-			current_dbh[i + 1] = current_dbh[i] + simulatedGrowth_avg[i];
-		}
-		meanlog = growth(normalised_dbh0, x_r_avg, averageGrowth, dbh_slope, dbh_slope2,
+				simulatedGrowth_avg[i, j] = exp(meanlog + sigmaProc^2/2.0);
+				current_dbh[i, j + 1] = current_dbh[i, j] + simulatedGrowth_avg[i, j];
+			}
+			meanlog = growth(normalised_dbh0[i], x_r_avg[i,], averageGrowth, dbh_slope, dbh_slope2,
 				pr_slope, pr_slope2 , tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
-		simulatedGrowth_avg_clim_avg = n_years*exp(meanlog + sigmaProc^2/2.0);
-		final_dbh = normalised_dbh0 + simulatedGrowth_avg_clim_avg;
+			simulatedGrowth_avg_clim_avg[i] = n_years*exp(meanlog + sigmaProc^2/2.0);
+			final_dbh[i] = normalised_dbh0[i] + simulatedGrowth_avg_clim_avg[i];
+		}
 	}
 }
