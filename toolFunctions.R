@@ -2100,6 +2100,12 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 		generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData_ssm, parallel_chains = n_chains)
 		generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData_classic, parallel_chains = n_chains)
 
+		#! No idea why what follow was coded, it is not used. Moreover, it is badly named... It is about dbh, not growth!
+		# simulatedGrowth_ssm = stanData_ssm$sd_dbh*generate_quantities_ssm$draws(paste0("current_dbh[1,", stanData_ssm$n_climate_new, "]"))
+		# simulatedGrowth_classic = stanData_classic$sd_dbh*generate_quantities_classic$draws(paste0("current_dbh[1,",
+		# 	stanData_classic$n_climate_new, "]"))
+		# simulatedGrowth_classic_avg = stanData_classic$sd_dbh*generate_quantities_classic$draws("final_dbh")
+
 		simulatedGrowth_avg_ssm = generate_quantities_ssm$draws("simulatedGrowth_avg")
 		simulatedGrowth_avg_classic = generate_quantities_classic$draws("simulatedGrowth_avg")
 		simulatedGrowth_avg_clim_avg = generate_quantities_classic$draws("simulatedGrowth_avg_clim_avg")
@@ -2457,7 +2463,6 @@ infoSpecies = function(treeData_folder = "/home/amael/project_ssm/inventories/gr
 	# --- Load climate	
 	climate = readRDS(paste0(clim_folder, "europe_reshaped_climate.rds"))
 	setkey(climate, plot_id, year)
-	climate[, row_id := seq_len(.N)]
 
 	# --- Read soil data (pH)
 	soil = readRDS(paste0(soil_folder, "europe_reshaped_soil.rds"))
@@ -2814,7 +2819,7 @@ climQuantiles = function(clim_var, years, coords, clim_folder = "/bigdata/Predic
 }
 
 ## Function to compute growth time series
-growth_timeSeries = function(species, run, selected_plot_id, init_dbh, caption = TRUE, extension = NULL)
+growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGrowth_new, year_start_indiv, caption = TRUE, extension = NULL)
 {
 	tree_path = paste0("./", species, "/")
 
@@ -2833,11 +2838,23 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, caption =
 
 	# Prepare climate
 	dataEnv_ls = getEnvSeries(species, run)
-	n_growingYears = dataEnv_ls[["dataEnv"]][selected_plot_id, .N] - 1
+	# n_growingYears = dataEnv_ls[["dataEnv"]][selected_plot_id, .N] - 1
 	precipitations = dataEnv_ls[["dataEnv"]][selected_plot_id, pr]
 	temperatures = dataEnv_ls[["dataEnv"]][selected_plot_id, tas]
 	ph = dataEnv_ls[["dataEnv"]][selected_plot_id, ph]
 	basalAreas = dataEnv_ls[["dataEnv"]][selected_plot_id, standBasalArea_interp]
+
+	if (length(temperatures) != sum(nbYearsGrowth_new) + length(init_dbh))
+		stop("Dimensions mismatch between climate and number of latent growth, individuals")
+
+	# Extract common time-span for all the trees
+	time_span = dataEnv_ls[["dataEnv"]][selected_plot_id, min(year), by = plot_id]
+	setnames(x = time_span, old = "V1", new = "minYear")
+	time_span[ , maxYear := dataEnv_ls[["dataEnv"]][selected_plot_id, max(year), by = plot_id][, V1]]
+
+	year_start = max(time_span[, minYear]) # Maximum starting year (for both dbh and growth)
+	year_end = min(time_span[, maxYear]) # Minimum ending year (for dbh only)
+	year_end_growth = year_end - 1 # Minimum ending year (for growth only)
 
 	# Prepare new stan data
 	# --- Load stan data
@@ -2845,12 +2862,11 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, caption =
 	stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
 
 	# --- Add the new environment (x_r)
-	stanData_ssm$x_r = matrix(c((precipitations - dataEnv_ls[["scaling_clim_ssm"]]["pr", mu])/dataEnv_ls[["scaling_clim_ssm"]]["pr", sd],
+	stanData_ssm$x_r = c((precipitations - dataEnv_ls[["scaling_clim_ssm"]]["pr", mu])/dataEnv_ls[["scaling_clim_ssm"]]["pr", sd],
 		(temperatures - dataEnv_ls[["scaling_clim_ssm"]]["tas", mu])/dataEnv_ls[["scaling_clim_ssm"]]["tas", sd],
 		(ph - dataEnv_ls[["scaling_ph_ssm"]]["ph", mu])/dataEnv_ls[["scaling_ph_ssm"]]["ph", sd],
 		(basalAreas - dataEnv_ls[["scaling_ba_ssm"]]["standBasalArea_interp", mu])/
-			dataEnv_ls[["scaling_ba_ssm"]]["standBasalArea_interp", sd]), nrow = 1, ncol = 4*(n_growingYears + 1))
-			# Matrix necessary to respect stan dimensions
+			dataEnv_ls[["scaling_ba_ssm"]]["standBasalArea_interp", sd])
 
 	precipitations = (precipitations - dataEnv_ls[["scaling_clim_classic"]]["pr_avg", mu])/dataEnv_ls[["scaling_clim_classic"]]["pr_avg", sd]
 	temperatures = (temperatures - dataEnv_ls[["scaling_clim_classic"]]["tas_avg", mu])/dataEnv_ls[["scaling_clim_classic"]]["tas_avg", sd]
@@ -2862,11 +2878,12 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, caption =
 	stanData_classic$x_r_avg = matrix(c(mean(precipitations), mean(temperatures), mean(ph), mean(basalAreas)), nrow = 1, ncol = 4)
 
 	# --- Add the new dimensions
-	stanData_ssm$n_climate_new = length(temperatures)
-	stanData_ssm$n_years = n_growingYears
-	stanData_ssm$dbh0 = init_dbh
-	stanData_ssm$n_growth = stanData_ssm$n_children
+	stanData_ssm$n_latent_dbh_new = length(temperatures) # Climate 'aligned' with latent dbh
 	stanData_ssm$n_indiv_new = length(init_dbh)
+	stanData_ssm$dbh0 = init_dbh
+	stanData_ssm$n_growing_years_new = stanData_ssm$n_latent_dbh_new - stanData_ssm$n_indiv_new
+	stanData_ssm$nbYearsGrowth_new = nbYearsGrowth_new
+	stanData_ssm$n_growth = stanData_ssm$n_children
 
 	stanData_classic$n_climate_new = length(temperatures)
 	stanData_classic$n_years = n_growingYears
@@ -2891,6 +2908,31 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, caption =
 	simulatedGrowth_avg_classic = generate_quantities_classic$draws("simulatedGrowth_avg")
 	simulatedGrowth_avg_clim_avg = generate_quantities_classic$draws("simulatedGrowth_avg_clim_avg")
 
+	# Reconstruct
+	growth_dt_ssm = data.table(growth = simulatedGrowth_avg_ssm, fake_id = numeric(stanData_ssm$n_growing_years_new),
+		year = numeric(stanData_ssm$n_growing_years_new))
+	count_start = 1
+	for (i in 1:stanData_ssm$n_indiv_new)
+	{
+		count_end = count_start + nbYearsGrowth_new[i] - 1
+		growth_dt_ssm[count_start:count_end, fake_id := i]
+		growth_dt_ssm[count_start:count_end, year := year_start_indiv[i]:(year_start_indiv[i] + nbYearsGrowth_new[i] - 1)]
+		count_start = count_end + 1
+	}
+
+	growth_dt_ssm = copy(zz)
+
+	growth_dt_ssm = growth_dt_ssm[(year_start <= year) & (year <= year_end_growth)]
+	simulatedGrowth_avg_ssm_qt = growth_dt_ssm[ , quantile(growth, probs = c(0.025, 0.5, 0.975)), by = year]
+
+	simulatedGrowth_avg_ssm_qt[, type := "q50"]
+	simulatedGrowth_avg_ssm_qt[simulatedGrowth_avg_ssm_qt[, .I[which.min(V1)], by = .(year)][, V1], type := "q025"]
+	simulatedGrowth_avg_ssm_qt[simulatedGrowth_avg_ssm_qt[, .I[which.max(V1)], by = .(year)][, V1], type := "q975"]
+
+	setkey(simulatedGrowth_avg_ssm_qt, type, year) # Ordered by type and year
+	
+	growth_dt_ssm_avg = growth_dt_ssm[ , mean(growth), by = year][, V1]
+
 	# Compute the 2.5 and 97.5 quantiles due to uncertainty on parameters (no process error!)
 	simulatedGrowth_avg_ssm_qt = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = quantile, MARGIN = 3,
 		probs = c(0.025, 0.5, 0.975))
@@ -2906,9 +2948,6 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, caption =
 	simulatedGrowth_avg_clim_avg = stanData_ssm$sd_dbh/n_growingYears * apply(X = simulatedGrowth_avg_clim_avg, FUN = mean, MARGIN = 3)
 
 	# Plot
-	year_start = dataEnv_ls[["dataEnv"]][selected_plot_id, min(year)]
-	year_end = dataEnv_ls[["dataEnv"]][selected_plot_id, max(year)] - 1
-
 	if (!is.null(extension))
 	{
 		for (currentExt in extension)
@@ -2921,10 +2960,10 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, caption =
 				tikz(filename, height = 1.2, width = 3.883282)
 				op = par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.3, 0), tck = -0.015)
 			}
-			plot(year_start:year_end, simulatedGrowth_avg_ssm, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#F4C430",
-				ylim = range(simulatedGrowth_avg_ssm_qt))
-			polygon(c(rev(year_start:year_end), year_start:year_end),
-				c(rev(simulatedGrowth_avg_ssm_qt["2.5%", ]), simulatedGrowth_avg_ssm_qt["97.5%", ]), col = "#F4C43022", border = NA)
+			plot(year_start:year_end_growth, growth_dt_ssm_avg, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#F4C430",
+				ylim = range(simulatedGrowth_avg_ssm_qt[, V1]))
+			polygon(c(rev(year_start:year_end_growth), year_start:year_end_growth),
+				c(rev(simulatedGrowth_avg_ssm_qt["q025", V1]), simulatedGrowth_avg_ssm_qt["q975", V1]), col = "#F4C43022", border = NA)
 			if (caption)
 				legend(x = "topleft", legend = "SSM", fill = "#F4C430", box.lwd = 0)
 			dev.off()
