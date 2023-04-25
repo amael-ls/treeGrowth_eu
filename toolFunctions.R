@@ -2838,7 +2838,6 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 
 	# Prepare climate
 	dataEnv_ls = getEnvSeries(species, run)
-	# n_growingYears = dataEnv_ls[["dataEnv"]][selected_plot_id, .N] - 1
 	precipitations = dataEnv_ls[["dataEnv"]][selected_plot_id, pr]
 	temperatures = dataEnv_ls[["dataEnv"]][selected_plot_id, tas]
 	ph = dataEnv_ls[["dataEnv"]][selected_plot_id, ph]
@@ -2874,8 +2873,18 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 	basalAreas = (basalAreas - dataEnv_ls[["scaling_ba_classic"]]["standBasalArea_interp_avg", mu])/
 		dataEnv_ls[["scaling_ba_classic"]]["standBasalArea_interp_avg", sd]
 
-	stanData_classic$x_r = matrix(c(precipitations, temperatures, ph, basalAreas), nrow = 1, ncol = 4*(n_growingYears + 1))
-	stanData_classic$x_r_avg = matrix(c(mean(precipitations), mean(temperatures), mean(ph), mean(basalAreas)), nrow = 1, ncol = 4)
+	stanData_classic$x_r = c(precipitations, temperatures, ph, basalAreas)
+
+	x_r_avg = dataEnv_ls[["dataEnv"]][selected_plot_id, lapply(.SD, mean), .SDcols = c("pr", "tas", "ph", "standBasalArea_interp"), by = plot_id]
+	x_r_avg = x_r_avg[rep(x = x_r_avg[, .I], times = as.numeric(table(selected_plot_id)))] # selected_plot_id is in the good order
+	
+	x_r_avg[, pr := (pr - dataEnv_ls[["scaling_clim_classic"]]["pr_avg", mu])/dataEnv_ls[["scaling_clim_classic"]]["pr_avg", sd]]
+	x_r_avg[, tas := (tas - dataEnv_ls[["scaling_clim_classic"]]["tas_avg", mu])/dataEnv_ls[["scaling_clim_classic"]]["tas_avg", sd]]
+	x_r_avg[, ph := (ph - dataEnv_ls[["scaling_ph_classic"]]["ph", mu])/dataEnv_ls[["scaling_ph_classic"]]["ph", sd]]
+	x_r_avg[, standBasalArea_interp := (standBasalArea_interp - dataEnv_ls[["scaling_ba_classic"]]["standBasalArea_interp_avg", mu])/
+		dataEnv_ls[["scaling_ba_classic"]]["standBasalArea_interp_avg", sd]]
+	
+	stanData_classic$x_r_avg = x_r_avg[, .(pr, tas, ph, standBasalArea_interp)]
 
 	# --- Add the new dimensions
 	stanData_ssm$n_latent_dbh_new = length(temperatures) # Climate 'aligned' with latent dbh
@@ -2885,10 +2894,11 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 	stanData_ssm$nbYearsGrowth_new = nbYearsGrowth_new
 	stanData_ssm$n_growth = stanData_ssm$n_children
 
-	stanData_classic$n_climate_new = length(temperatures)
-	stanData_classic$n_years = n_growingYears
-	stanData_classic$dbh0 = init_dbh
+	stanData_classic$n_latent_dbh_new = length(temperatures)
 	stanData_classic$n_indiv_new = length(init_dbh)
+	stanData_classic$dbh0 = init_dbh
+	stanData_classic$n_growing_years_new = stanData_classic$n_latent_dbh_new - stanData_classic$n_indiv_new
+	stanData_classic$nbYearsGrowth_new = nbYearsGrowth_new
 
 	# Generate quantities
 	# --- Stan models to simulate growth
@@ -2899,7 +2909,6 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 	generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData_ssm, parallel_chains = n_chains)
 	generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData_classic, parallel_chains = n_chains)
 
-	# simulated_dbh_ssm = stanData_ssm$sd_dbh*generate_quantities_ssm$draws(paste0("current_dbh[1,", 1:stanData_classic$n_climate_new, "]"))
 	simulated_dbh_ssm = stanData_ssm$sd_dbh*generate_quantities_ssm$draws("current_dbh")
 	simulated_dbh_classic = stanData_classic$sd_dbh*generate_quantities_classic$draws("current_dbh")
 	simulated_dbh_classic_avg = stanData_classic$sd_dbh*generate_quantities_classic$draws("final_dbh")
@@ -2908,44 +2917,52 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 	simulatedGrowth_avg_classic = generate_quantities_classic$draws("simulatedGrowth_avg")
 	simulatedGrowth_avg_clim_avg = generate_quantities_classic$draws("simulatedGrowth_avg_clim_avg")
 
-	# Reconstruct
-	growth_dt_ssm = data.table(growth = simulatedGrowth_avg_ssm, fake_id = numeric(stanData_ssm$n_growing_years_new),
-		year = numeric(stanData_ssm$n_growing_years_new))
-	count_start = 1
-	for (i in 1:stanData_ssm$n_indiv_new)
-	{
-		count_end = count_start + nbYearsGrowth_new[i] - 1
-		growth_dt_ssm[count_start:count_end, fake_id := i]
-		growth_dt_ssm[count_start:count_end, year := year_start_indiv[i]:(year_start_indiv[i] + nbYearsGrowth_new[i] - 1)]
-		count_start = count_end + 1
-	}
-
-	growth_dt_ssm = copy(zz)
-
-	growth_dt_ssm = growth_dt_ssm[(year_start <= year) & (year <= year_end_growth)]
-	simulatedGrowth_avg_ssm_qt = growth_dt_ssm[ , quantile(growth, probs = c(0.025, 0.5, 0.975)), by = year]
-
-	simulatedGrowth_avg_ssm_qt[, type := "q50"]
-	simulatedGrowth_avg_ssm_qt[simulatedGrowth_avg_ssm_qt[, .I[which.min(V1)], by = .(year)][, V1], type := "q025"]
-	simulatedGrowth_avg_ssm_qt[simulatedGrowth_avg_ssm_qt[, .I[which.max(V1)], by = .(year)][, V1], type := "q975"]
-
-	setkey(simulatedGrowth_avg_ssm_qt, type, year) # Ordered by type and year
-	
-	growth_dt_ssm_avg = growth_dt_ssm[ , mean(growth), by = year][, V1]
-
-	# Compute the 2.5 and 97.5 quantiles due to uncertainty on parameters (no process error!)
+	# --- Compute the 2.5 and 97.5 quantiles due to uncertainty on parameters (no process error!)
 	simulatedGrowth_avg_ssm_qt = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = quantile, MARGIN = 3,
 		probs = c(0.025, 0.5, 0.975))
-	simulatedGrowth_avg_ssm = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = mean, MARGIN = 3)
 
 	simulatedGrowth_avg_classic_qt = stanData_ssm$sd_dbh *
 		apply(X = simulatedGrowth_avg_classic, FUN = quantile, MARGIN = 3, probs = c(0.025, 0.5, 0.975))
 	
-	simulatedGrowth_avg_classic = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_classic, FUN = mean, MARGIN = 3)
+	simulatedGrowth_avg_clim_avg_qt = stanData_ssm$sd_dbh/nbYearsGrowth_new *
+		t(apply(X = simulatedGrowth_avg_clim_avg, FUN = quantile, MARGIN = 3, probs = c(0.025, 0.5, 0.975))) # transpose is important!
 
-	simulatedGrowth_avg_clim_avg_qt = stanData_ssm$sd_dbh/n_growingYears *
-		apply(X = simulatedGrowth_avg_clim_avg, FUN = quantile, MARGIN = 3, probs = c(0.025, 0.5, 0.975))
-	simulatedGrowth_avg_clim_avg = stanData_ssm$sd_dbh/n_growingYears * apply(X = simulatedGrowth_avg_clim_avg, FUN = mean, MARGIN = 3)
+	simulatedGrowth_avg_clim_avg = stanData_ssm$sd_dbh/nbYearsGrowth_new * apply(X = simulatedGrowth_avg_clim_avg, FUN = mean, MARGIN = 3)
+
+	# --- Reconstruct
+	simulatedGrowth_avg_ssm = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_ssm, FUN = mean, MARGIN = 3)
+	simulatedGrowth_avg_classic = stanData_ssm$sd_dbh * apply(X = simulatedGrowth_avg_classic, FUN = mean, MARGIN = 3)
+	
+	growth_dt_ssm = data.table(growth = simulatedGrowth_avg_ssm, year = numeric(stanData_ssm$n_growing_years_new))
+	growth_dt_classic = data.table(growth = simulatedGrowth_avg_classic, year = numeric(stanData_classic$n_growing_years_new))
+	count_start = 1
+	for (i in 1:stanData_ssm$n_indiv_new) # stanData_classic$n_indiv_new is the same
+	{
+		count_end = count_start + nbYearsGrowth_new[i] - 1
+		growth_dt_ssm[count_start:count_end, year := year_start_indiv[i]:(year_start_indiv[i] + nbYearsGrowth_new[i] - 1)]
+		growth_dt_classic[count_start:count_end, year := year_start_indiv[i]:(year_start_indiv[i] + nbYearsGrowth_new[i] - 1)]
+		count_start = count_end + 1
+	}
+
+	growth_dt_ssm = growth_dt_ssm[(year_start <= year) & (year <= year_end_growth)]
+	growth_dt_classic = growth_dt_classic[(year_start <= year) & (year <= year_end_growth)]
+
+	simulatedGrowth_avg_ssm_qt = growth_dt_ssm[, quantile(growth, probs = c(0.025, 0.5, 0.975)), by = year]
+	simulatedGrowth_avg_classic_qt = growth_dt_classic[, quantile(growth, probs = c(0.025, 0.5, 0.975)), by = year]
+
+	simulatedGrowth_avg_ssm_qt[, type := "q50"]
+	simulatedGrowth_avg_ssm_qt[simulatedGrowth_avg_ssm_qt[, .I[which.min(V1)], by = .(year)][, V1], type := "q025"]
+	simulatedGrowth_avg_ssm_qt[simulatedGrowth_avg_ssm_qt[, .I[which.max(V1)], by = .(year)][, V1], type := "q975"]
+	
+	simulatedGrowth_avg_classic_qt[, type := "q50"]
+	simulatedGrowth_avg_classic_qt[simulatedGrowth_avg_classic_qt[, .I[which.min(V1)], by = .(year)][, V1], type := "q025"]
+	simulatedGrowth_avg_classic_qt[simulatedGrowth_avg_classic_qt[, .I[which.max(V1)], by = .(year)][, V1], type := "q975"]
+
+	setkey(simulatedGrowth_avg_ssm_qt, type, year) # Ordered by type and year
+	setkey(simulatedGrowth_avg_classic_qt, type, year) # Ordered by type and year
+	
+	growth_dt_ssm_avg = growth_dt_ssm[, mean(growth), by = year][, V1]
+	growth_dt_classic_avg = growth_dt_classic[, mean(growth), by = year][, V1]
 
 	# Plot
 	if (!is.null(extension))
@@ -2976,32 +2993,32 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 				tikz(filename, height = 1.2, width = 3.883282)
 				op = par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.3, 0), tck = -0.015)
 			}
-			plot(year_start:year_end, simulatedGrowth_avg_classic, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#034C4F",
-				ylim = range(simulatedGrowth_avg_classic_qt))
-			polygon(c(rev(year_start:year_end), year_start:year_end),
-				c(rev(simulatedGrowth_avg_classic_qt["2.5%", ]), simulatedGrowth_avg_classic_q["97.5", ]),
+			plot(year_start:year_end_growth, growth_dt_classic_avg, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#034C4F",
+				ylim = range(simulatedGrowth_avg_classic_qt[, V1]))
+			polygon(c(rev(year_start:year_end_growth), year_start:year_end_growth),
+				c(rev(simulatedGrowth_avg_classic_qt["q025", V1]), simulatedGrowth_avg_classic_qt["q975", V1]),
 				col = "#034C4F22", border = NA)
-			abline(h = simulatedGrowth_avg_clim_avg, lwd = 2, lty = 2)
+			abline(h = mean(simulatedGrowth_avg_clim_avg), lwd = 2, lty = 2)
 			if (caption)
 				legend(x = "topleft", legend = "Classic", fill = "#034C4F", box.lwd = 0)
 			dev.off()
 		}
 	} else {
 		# --- SSM
-		plot(year_start:year_end, simulatedGrowth_avg_ssm, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#F4C430",
-			ylim = range(simulatedGrowth_avg_ssm_qt))
-		polygon(c(rev(year_start:year_end), year_start:year_end),
-			c(rev(simulatedGrowth_avg_ssm_qt["2.5%", ]), simulatedGrowth_avg_ssm_qt["97.5%", ]), col = "#F4C43022", border = NA)
+		plot(year_start:year_end_growth, growth_dt_ssm_avg, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#F4C430",
+			ylim = range(simulatedGrowth_avg_ssm_qt[, V1]))
+		polygon(c(rev(year_start:year_end_growth), year_start:year_end_growth),
+			c(rev(simulatedGrowth_avg_ssm_qt["q025", V1]), simulatedGrowth_avg_ssm_qt["q975", V1]), col = "#F4C43022", border = NA)
 		if (caption)
 			legend(x = "topleft", legend = "SSM", fill = "#F4C430", box.lwd = 0)
 
 		# --- Classic
-		plot(year_start:year_end, simulatedGrowth_avg_classic, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#034C4F",
-			ylim = range(simulatedGrowth_avg_classic_qt))
-		polygon(c(rev(year_start:year_end), year_start:year_end),
-			c(rev(simulatedGrowth_avg_classic_qt["2.5%", ]), simulatedGrowth_avg_classic_qt["97.5%", ]),
+		plot(year_start:year_end_growth, growth_dt_classic_avg, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#034C4F",
+			ylim = range(simulatedGrowth_avg_classic_qt[, V1]))
+		polygon(c(rev(year_start:year_end_growth), year_start:year_end_growth),
+			c(rev(simulatedGrowth_avg_classic_qt["q025", V1]), simulatedGrowth_avg_classic_qt["q975", V1]),
 			col = "#034C4F22", border = NA)
-		abline(h = simulatedGrowth_avg_clim_avg, lwd = 2, lty = 2)
+		abline(h = mean(simulatedGrowth_avg_clim_avg), lwd = 2, lty = 2)
 		if (caption)
 			legend(x = "topleft", legend = "Classic", fill = "#034C4F", box.lwd = 0)
 	}
