@@ -72,6 +72,8 @@ if (length(args) != 1)
 species = as.character(args[1])
 path = paste0("./", species, "/")
 
+print(paste("Running for species", species))
+
 n_runs = 4 # Number of runs used in growth_subsample.R
 
 ## Species informations
@@ -84,6 +86,12 @@ infoSpecies[, multiRun := if (n_indiv > threshold_indiv) TRUE else FALSE, by = s
 infoSpecies[, processed := isProcessed(path = speciesName_sci, multi = multiRun, lim_time =  threshold_time,
 	extension = "_de-fr-sw_12000_main.rds$", lower = 1, upper = n_runs), by = speciesName_sci]
 infoSpecies = infoSpecies[(processed)]
+
+if (!(species %in% infoSpecies[, speciesName_sci]))
+	stop(paste0("Species <", species, "> not processed"))
+
+if (infoSpecies[species, n_indiv] < threshold_indiv)
+	stop("No need to compute overlap, there is only one run")
 
 nb_nfi = infoSpecies[species, n_nfi]
 
@@ -108,6 +116,7 @@ for (currentParam in params)
 
 #### Compute overlap posteriors
 ## Load results and extract posteriors
+print("Starting loading results")
 for (i in 1:n_runs)
 {
 	info_lastRun = getLastRun(path = path, extension = "_main.rds$", run = i)
@@ -139,3 +148,5 @@ for (currentParam in params)
 overlap_dt = rbindlist(overlap_ls, idcol = "parameter")
 
 saveRDS(overlap_dt, paste0(path, "overlap_dt.rds"))
+
+print(paste(species, "done"))
