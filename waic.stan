@@ -42,47 +42,24 @@ functions {
 data {
 	// Dimensions
 	int<lower = 1> n_data_rw; // Number of ring width data
-	int<lower = 1> n_indiv_rw; // Number of individuals
-	
-	// Indices
-	array[n_indiv_rw] int start_ind;
-	array[n_indiv_rw] int end_ind;
 
 	// Explanatory variables
 	// --- Diameters
-	vector[n_indiv_rw] dbh;
+	vector[n_data_rw] dbh_rw; //! Already standardised
 	real<lower = 0> sd_dbh;
 	
 	// --- Climate
-	vector[n_indiv_rw] precip;
-	real<lower = 0> pr_mu;
-	real<lower = 0> pr_sd;
-	
-	vector[n_indiv_rw] tas;
-	real tas_mu;
-	real<lower = 0> tas_sd;
+	vector[n_data_rw] precip_rw; //! Already standardised
+	vector[n_data_rw] tas_rw; //! Already standardised
 	
 	// --- Soil
-	vector[n_indiv_rw] ph;
-	real<lower = 0, upper = 14> ph_mu;
-	real<lower = 0> ph_sd;
+	vector[n_data_rw] ph_rw; //! Already standardised
 	
 	// --- Basal area
-	vector[n_indiv_rw] standBasalArea;
-	real<lower = 0> ba_mu;
-	real<lower = 0> ba_sd;
+	vector[n_data_rw] standBasalArea_rw; //! Already standardised
 	
 	// Observed data
-	vector[n_indiv_rw] ring_width; // Correspond to annual growth
-}
-
-transformed data {
-	vector[n_indiv_rw] normalised_ring_width = ring_width/sd_dbh; // Normalised but NOT centred annual growth
-	vector[n_indiv_rw] normalised_precip = (precip - pr_mu)/pr_sd; // Normalised and centred precipitations
-	vector[n_indiv_rw] normalised_tas = (tas - tas_mu)/tas_sd; // Normalised and centred temperatures
-	vector[n_indiv_rw] normalised_ph = (ph - ph_mu)/ph_sd; // Normalised and centred pH
-	vector[n_indiv_rw] normalised_standBasalArea = (standBasalArea - ba_mu)/ba_sd; // Normalised and centred BA
-	vector[n_indiv_rw] normalised_dbh = dbh/sd_dbh; // Normalised but NOT centred dbh
+	vector[n_data_rw] ring_width; // Correspond to annual growth,  //! Already standardised
 }
 
 parameters {
@@ -129,10 +106,10 @@ generated quantities {
 		real meanlog;
 
 		// Compute log-likelihood
-		for (i in 1:n_indiv_rw)
+		for (i in 1:n_data_rw)
 		{
-			meanlog = growth(normalised_dbh[i], normalised_precip[i],
-				normalised_tas[i], normalised_ph[i], normalised_standBasalArea[i],
+			meanlog = growth(dbh_rw[i], precip_rw[i],
+				tas_rw[i], ph_rw[i], standBasalArea_rw[i],
 				averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
 			
 			log_lik[i] = lognormal_lpdf(ring_width[i] | meanlog, sigmaProc); // note that _lpdf already gives the log proba density function
