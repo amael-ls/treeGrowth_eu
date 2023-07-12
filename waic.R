@@ -14,14 +14,10 @@ graphics.off()
 
 options(max.print = 500)
 
-# library(microbenchmark)
 library(data.table)
-library(tikzDevice)
 library(cmdstanr)
 library(stringi)
-library(Rmpfr)
-library(terra)
-library(qgam)
+library(loo)
 
 #### Tool functions
 ## Source functions
@@ -192,3 +188,11 @@ loglik_ssm = model$generate_quantities(ssm$draws(), data = stanData_ssm, paralle
 loglik_classic = model$generate_quantities(classic$draws(), data = stanData_classic, parallel_chains = n_chains)
 
 waic_hat = waic(loglik_ssm = loglik_ssm, loglik_classic = loglik_classic, n_chains = n_chains, n_iter = n_iter)
+
+r_eff_ssm = loo::relative_eff(loglik_ssm$draws("log_lik"), cores = 8)
+loo_ssm = loo::loo(x = loglik_ssm$draws("log_lik"), r_eff = r_eff_ssm, cores = 8)
+waic_ssm = loo::waic(x = loglik_ssm$draws("log_lik"), cores = 8)
+
+r_eff_classic = loo::relative_eff(loglik_classic$draws("log_lik"), cores = 8)
+loo_classic = loo::loo(x = loglik_classic$draws("log_lik"), r_eff = r_eff_classic, cores = 8)
+waic_classic = loo::waic(x = loglik_classic$draws("log_lik"), cores = 8)
