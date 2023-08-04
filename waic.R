@@ -79,64 +79,27 @@ check_normality = function(model, params)
 	return (mean_sd_dt)
 }
 
-## Function to check that a given density has an integral of 1 and is always non-negative (for probability density functions)
-check_density = function(ds, prec = 1e-2)
+## Function to check correlations between parameters draws
+correl_draws = function(model, params, threshold = 0.75)
 {
-	l = length(ds$x)
-	delta_x = mean(ds$x[2:l] - ds$x[1:(l - 1)])
+	n_iter = model$metadata()$iter_sampling
+	n_chains = model$num_chains()
 
-	integral = delta_x*sum(ds$y)
-	if (!isTRUE(all.equal(integral, 1, prec)))
-	{
-		ds$y = ds$y/integral
-		warning("The density was corrected to integrate to one")
-	}
+	mat = matrix(data = NA, nrow = n_iter*n_chains, ncol = length(params))
 
-	if (any(ds$y < 0))
-		stop("Negative values, it cannot be a probability density!")
+	for (i in seq_along(params))
+		mat[, i] = as.numeric(model$draws(params[i]))
 
-	return (ds)
-}
-
-## Probability density function of the Folded normal distribution
-pdf_foldedNormal = function(x, a, b)
-	return (dnorm(x, a, b) + dnorm(x, -a, b))
-
-## Probability density function of the Folded normal distribution
-cdf_foldedNormal = function(x, a, b)
-	return (0.5*(pracma::erf((x + a)/(b*sqrt(2))) + pracma::erf((x - a)/(b*sqrt(2)))))
-
-## Quantiles (inverse of cdf) of the Folded normal distribution
-quantile_foldedNormal = function(q, a, b)
-{
-	if (any(q < 0) || any(q >= 1))
-		stop("q must be between 0 and 1, with one excluded")
-
-	f = function(x, a, b, q)
-		return(cdf_foldedNormal(x, a, b) - q)
-
-	root = numeric(length(q))
-	# for (i in seq_along(q))
-	# 	root[i] = uniroot(f = f, lower = 0, upper = 1e10, f.lower = -max(q), f.upper = 1 - min(q), a = a, b = b, q = q[i], tol = 1e-8)$root
-	# print("100% done")
-
-	n.cores = 60
-	if (parallel::detectCores() < 60)
-		n.cores = 30
-
-	if (parallel::detectCores() < 30)
-		n.cores = 8
+	# pairs(mat)
+	N = length(params)
 	
-	#create the cluster
-	cl = parallel::makeCluster(n.cores, type = "FORK")
-	doParallel::registerDoParallel(cl)
-
-	root = foreach(i = seq_along(q), .combine = "c") %dopar%
-    	uniroot(f = f, lower = 0, upper = 1e10, f.lower = -q[i], f.upper = 1 - q[i], a = a, b = b, q = q[i], tol = 1e-8)$root
-
-	parallel::stopCluster(cl)
-
-	return(root)
+	for (i in 1:(N - 1))
+		for (j in (i + 1):N)
+		{
+			correl = cor(mat[, i], mat[, j])
+			if (abs(correl) > threshold)
+				print(paste("Correlation", params[i], "--", params[j], round(correl, 2)))
+		}
 }
 
 #? ----------------------------------------------------------------------------------------
@@ -189,20 +152,23 @@ dendro = dendro[dbh_increment_in_mm > 0]
 
 ## Load scalings
 # Load scalings
-dbh_scaling_ssm = readRDS(paste0(tree_path, run, "_dbh_normalisation.rds"))
-ba_scaling_ssm = readRDS(paste0(tree_path, run, "_ba_normalisation.rds"))
+# ba_scaling_ssm = readRDS(paste0(tree_path, run, "_ba_normalisation.rds")) #! To remove?
 climate_scaling_ssm = readRDS(paste0(tree_path, run, "_climate_normalisation.rds"))
 ph_scaling_ssm = readRDS(paste0(tree_path, run, "_ph_normalisation.rds"))
 
-dbh_scaling_classic = readRDS(paste0(tree_path, run, "_dbh_normalisation_classic.rds"))
-ba_scaling_classic = readRDS(paste0(tree_path, run, "_ba_normalisation_classic.rds"))
+# ba_scaling_classic = readRDS(paste0(tree_path, run, "_ba_normalisation_classic.rds")) #! To remove?
 climate_scaling_classic = readRDS(paste0(tree_path, run, "_climate_normalisation_classic.rds"))
 ph_scaling_classic = readRDS(paste0(tree_path, run, "_ph_normalisation_classic.rds"))
 
-scaling_ssm = rbindlist(list(dbh_scaling_ssm, ba_scaling_ssm, climate_scaling_ssm, ph_scaling_ssm))
-scaling_classic = rbindlist(list(dbh_scaling_classic, ba_scaling_classic, climate_scaling_classic, ph_scaling_classic))
+# scaling_ssm = rbindlist(list(ba_scaling_ssm, climate_scaling_ssm, ph_scaling_ssm)) #! To remove?
+scaling_ssm = rbindlist(list(climate_scaling_ssm, ph_scaling_ssm))
+# scaling_classic = rbindlist(list(ba_scaling_classic, climate_scaling_classic, ph_scaling_classic)) #! To remove?
+scaling_classic = rbindlist(list(climate_scaling_classic, ph_scaling_classic))
 
 scaling_dt = rbindlist(list(ssm = scaling_ssm, classic = scaling_classic), idcol = "type")
+scaling_dt[, variable := stri_replace_all(str = variable, replacement = "", regex = "_avg$")] # Change the names for ease of usage
+scaling_dt[variable == "pr", variable := "precip"] # Change the names for ease of usage
+
 setkey(scaling_dt, type, variable)
 
 ## Create stan data to compute waic
@@ -210,7 +176,7 @@ setkey(scaling_dt, type, variable)
 stanData_ssm = readRDS(paste0(tree_path, run, "_stanData.rds"))
 stanData_ssm$n_data_rw = dendro[, .N]
 
-stanData_ssm$precip_rw = dendro[, (pr - scaling_dt[.("ssm", "pr"), mu])/scaling_dt[.("ssm", "pr"), sd]]
+stanData_ssm$precip_rw = dendro[, (pr - scaling_dt[.("ssm", "precip"), mu])/scaling_dt[.("ssm", "precip"), sd]]
 stanData_ssm$tas_rw = dendro[, (tas - scaling_dt[.("ssm", "tas"), mu])/scaling_dt[.("ssm", "tas"), sd]]
 stanData_ssm$ph_rw = dendro[, (ph - scaling_dt[.("ssm", "ph"), mu])/scaling_dt[.("ssm", "ph"), sd]]
 stanData_ssm$standBasalArea_rw = dendro[, standBasalArea]
@@ -222,8 +188,8 @@ stanData_ssm$ring_width = dendro[, dbh_increment_in_mm/stanData_ssm$sd_dbh]
 stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
 stanData_classic$n_data_rw = dendro[, .N]
 
-stanData_classic$precip_rw = dendro[, (pr - scaling_dt[.("classic", "pr_avg"), mu])/scaling_dt[.("classic", "pr_avg"), sd]]
-stanData_classic$tas_rw = dendro[, (tas - scaling_dt[.("classic", "tas_avg"), mu])/scaling_dt[.("classic", "tas_avg"), sd]]
+stanData_classic$precip_rw = dendro[, (pr - scaling_dt[.("classic", "precip"), mu])/scaling_dt[.("classic", "precip"), sd]]
+stanData_classic$tas_rw = dendro[, (tas - scaling_dt[.("classic", "tas"), mu])/scaling_dt[.("classic", "tas"), sd]]
 stanData_classic$ph_rw = dendro[, (ph - scaling_dt[.("classic", "ph"), mu])/scaling_dt[.("classic", "ph"), sd]]
 stanData_classic$standBasalArea_rw = dendro[, standBasalArea]
 
@@ -253,28 +219,32 @@ loo::loo_compare(list(waic_ssm, waic_classic))
 #? -----------------------------------------------------------------------------------------
 #* ----------------------    PART II: Compute sensitivity analysis    ----------------------
 #? -----------------------------------------------------------------------------------------
-sensitivityAnalysis = function(model, stanData, matrices = c("A", "B", "AB"), order = "second", N = 2^14, bootstrap_iter = 3e3, type = "QRN")
+sensitivityAnalysis = function(model, dbh0, sd_dbh, env0, matrices = c("A", "B", "AB"), order = "second", N = 2^14, boot = FALSE,
+	bootstrap_iter = NULL, type = "QRN")
 {
-	## Assign probability distributions to explanatory variables
-	# Environmental variables
-	tas_pdf = check_density(density(stanData$tas))
-	precip_pdf = check_density(density(stanData$precip))
-	ph_pdf = check_density(density(stanData$ph))
+	## Check dbh0 and env0
+	if (any(abs(c(dbh0, env0)) > 3))
+		warning("Are you sure that dbh0 and env0 are scaled?")
 
-	# Diameters and basal area
-	dbh_pdf = check_density(density(stanData$dbh_init, from = 0))
-	ba = stanData$standBasalArea
-	ba = ba[ba <= quantile(ba, 0.995)]
+	## Check boot
+	if (boot && is.null(bootstrap_iter))
+	{
+		warning("Boot is true, but no boostrap_iter provided! A value of 3000 was assigned by default")
+		bootstrap_iter = 3000
+	}
 
-	## Gather all pdfs in a list
-	ls_pdf = list(dbh = dbh_pdf, precip = precip_pdf, tas = tas_pdf, ph = ph_pdf)
-
+	if (!boot && !is.null(bootstrap_iter))
+	{
+		warning("Boot is false, so the provided value for bootstrap_iter is disregarded")
+		bootstrap_iter = NULL
+	}
+	
 	## Prepare the sampling matrices
 	# Common variables
 	params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2", "ph_slope", "ph_slope2",
 		"competition_slope")
 
-	explanatory_vars = c("dbh", "precip", "tas", "ph", "basalArea")
+	explanatory_vars = "dbh"
 
 	# Check normality
 	mean_sd_dt = check_normality(model = model, params = params)
@@ -293,17 +263,8 @@ sensitivityAnalysis = function(model, stanData, matrices = c("A", "B", "AB"), or
 	for (param in params)
 		sobol_mat[, param] = qnorm(sobol_mat[, param], mean_sd_dt[param, mu], mean_sd_dt[param, sigma])
 
-	# --- Data
-	for (currentVar in explanatory_vars)
-	{
-		if (currentVar != "basalArea")
-		{
-			f = approxfun(x = cumsum(ls_pdf[[currentVar]]$y)/sum(ls_pdf[[currentVar]]$y), y = ls_pdf[[currentVar]]$x)
-			sobol_mat[, currentVar] = f(sobol_mat[, currentVar])
-		} else {
-			sobol_mat[, currentVar] = quantile_foldedNormal(q = sobol_mat[, currentVar], a = 27.93, b = 15.34)
-		}
-	}
+	# --- Diameters
+	sobol_mat[, "dbh"] = qnorm(p = sobol_mat[, "dbh"], mean = dbh0, sd = 3/sd_dbh)
 
 	if (any(is.na(sobol_mat)))
 		stop(paste("Number of NAs in Sobol's matrix:", sum(is.na(sobol_mat))))
@@ -324,47 +285,72 @@ sensitivityAnalysis = function(model, stanData, matrices = c("A", "B", "AB"), or
 			sobol_mat[i, "tas_slope2"],
 			sobol_mat[i, "ph_slope2"])
 		
-		vec = c(sobol_mat[i, "dbh"]/stanData$sd_dbh,
-		(sobol_mat[i, "precip"] - stanData$pr_mu)/stanData$pr_sd,
-		(sobol_mat[i, "tas"] - stanData$tas_mu)/stanData$tas_sd,
-		(sobol_mat[i, "ph"] - stanData$ph_mu)/stanData$ph_sd,
-		(sobol_mat[i, "basalArea"] - stanData$ba_mu)/stanData$ba_sd)
+		dbh = sobol_mat[i, "dbh"]
 		
-		y[i] = growth_fct_meanlog(dbh = vec["dbh"], pr = vec["precip"], tas = vec["tas"], ph = vec["ph"], basalArea = vec["basalArea"],
-			params = params_vec, sd_dbh = stanData$sd_dbh, standardised_variables = TRUE)
+		y[i] = growth_fct_meanlog(dbh = dbh, pr = env0["precip"], tas = env0["tas"], ph = env0["ph"], basalArea = env0["basalArea"],
+			params = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)
 
 		if (i %% 20000 == 0)
 			print(paste0(round(100*i/nrow(sobol_mat), 2), "% done"))
 	}
+	print("100% done")
 
 	# Sobol indices
-	ind = sobol_indices(matrices = matrices, Y = y, N = N, params = c(params, explanatory_vars), first = "saltelli", total = "jansen",
-		boot = TRUE, order = order, R = bootstrap_iter, parallel = "multicore", type = "percent", conf = 0.95, ncpus = 8)
+	ind = sobol_indices(matrices = matrices, Y = y, N = N, params = c(params, "dbh"), first = "saltelli", total = "jansen",
+		boot = boot, order = order, R = bootstrap_iter, parallel = "multicore", type = "percent", conf = 0.95, ncpus = 8)
 
 	return(ind)
 }
 
-sa_ssm = sensitivityAnalysis(model = ssm, stanData = stanData_ssm)
-total_ssm = sa_ssm$results[sensitivity == "Ti"]
-total_ssm = total_ssm[order(-original), .SD, by = sensitivity]
-saveRDS(sa_ssm, paste0(tree_path, run, "_sa_ssm"))
+sa_ssm = sensitivityAnalysis(model = ssm, dbh0 = 1.2, sd_dbh = stanData_ssm$sd_dbh, order = "first",
+	env0 = c(precip = 0.8, tas = -0.5, ph = 0.21, basalArea = 0.58), N = 2^16)$results
+sa_ssm = data.table::dcast(data = sa_ssm, formula = parameters ~ sensitivity, value.var = "original")
+sa_ssm[, sum(Si)]
+sa_ssm = sa_ssm[order(-Si), .SD]
 
-sa_classic = sensitivityAnalysis(model = ssm, stanData = stanData_classic)
-total_classic = sa_classic$results[sensitivity == "Ti"]
-total_classic = total_classic[order(-original), .SD, by = sensitivity]
-saveRDS(sa_classic, paste0(tree_path, run, "_sa_classic"))
+# total_ssm = sa_ssm$results[sensitivity == "Ti"]
+# total_ssm = total_ssm[order(-original), .SD, by = sensitivity]
+# saveRDS(sa_ssm, paste0(tree_path, run, "_sa_ssm"))
+
+sa_classic = sensitivityAnalysis(model = classic, dbh0 = 1.2, sd_dbh = stanData_classic$sd_dbh, order = "first",
+	env0 = c(precip = 0.8, tas = -0.5, ph = 0.21, basalArea = 0.58), N = 2^16)$results
+sa_classic = data.table::dcast(data = sa_classic, formula = parameters ~ sensitivity, value.var = "original")
+sa_classic[, sum(Si)]
+sa_classic = sa_classic[order(-Si), .SD]
+
+# total_classic = sa_classic$results[sensitivity == "Ti"]
+# total_classic = total_classic[order(-original), .SD, by = sensitivity]
+# saveRDS(sa_classic, paste0(tree_path, run, "_sa_classic"))
+
+comp = merge.data.table(sa_ssm, sa_classic, by = "parameters", suffixes = c("_ssm", "_classic"))
+comp[, diff_Si := 100*(Si_ssm - Si_classic)/Si_classic]
+comp[, diff_Ti := 100*(Ti_ssm - Ti_classic)/Ti_classic]
+
+comp[, .(parameters, diff_Si, diff_Ti)]
 
 
-momo = cmdstan_model("./basalArea.stan")
+#? ------------------------------------------------------------------------------------------------------------------------
+#* ----------------------    PART III: Compute sensitivity analysis with respect to climate input    ----------------------
+#? ------------------------------------------------------------------------------------------------------------------------
 
-## Run model
-n_chains = 4
+fraction_range_climate = function(stanData, model_type, shouldScale = FALSE, frac = 0.01, scaling_dt = NULL)
+{
+	if (shouldScale && is.null(scaling_dt))
+		stop("Scaling demanded, but no scaling provided!")
+	
+	range_dt = data.table(variable = c("precip", "tas", "ph"), q05 = numeric(3), q95 = numeric(3))
+	setkey(range_dt, variable)
+	for (currentVar in range_dt[, variable])
+	{
+		clim = stanData_ssm[[currentVar]]
+		if (shouldScale)
+			clim = (clim - scaling_dt[.(model_type, currentVar), mu])/scaling_dt[.(model_type, currentVar), sd]
+		range_dt[currentVar, c("q05", "q95") := as.list(quantile(clim, c(0.05, 0.95)))]
+	}
 
-ba_su = sample(x = ba, size = 1e5, replace = FALSE)
+	range_dt[, range := q95 - q05]
+	range_dt[, sd_sa := frac*range]
 
-results = momo$sample(data = list(N = length(ba_su), Y = ba_su), parallel_chains = n_chains, refresh = 50, chains = n_chains)
-
-
-hist(ba, prob = TRUE)
-curve(pdf_foldedNormal(x, 27.93, 15.34), lwd = 2, col = "#CD1A21", add = TRUE)
+	return(range)
+}
 
