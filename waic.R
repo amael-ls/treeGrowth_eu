@@ -301,7 +301,11 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 	## Run sensitivity analysis
 	ind = vector(mode = "list", length = n_param)
 	var_vec_y = numeric(length = n_param)
-	freq_print = round(5*n_param/100)
+	range_dt = data.table(run = seq_along(sample_ind), min_y = -Inf, max_y = +Inf)
+	
+	freq_print = 1
+	if (n_param > 19)
+		freq_print = round(5*n_param/100)
 
 	for (j in seq_along(sample_ind))
 	{
@@ -327,13 +331,14 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 
 		}
 		var_vec_y[j] = var(y)
+		range_dt[j, c("min_y", "max_y") := .(min(y), max(y))]
 
 		# --- Sobol indices
 		ind[[j]] = sobol_indices(matrices = matrices, Y = y, N = N, params = explanatory_vars, first = first, total = total,
 			order = order)$results
 
 		if (j %% freq_print == 0)
-			print(paste0(round(100*j/n_param, 2), "% done"))
+			print(paste0(round(100*j/n_param), "% done"))
 	}
 	print("100% done")
 
@@ -341,81 +346,7 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 	if (any(ind[, original] < 0))
 			warning(paste("There are negatives Si, with min value:", round(ind[, min(original)], 7)))
 
-	return(list(sa = ind, var_y = var_vec_y, n_param = n_param))
-}
-
-## Function to plot sensitivity analysis for data
-plot_sa = function(sa_ssm_data, sa_classic_data, dataNames, plot_opt = "separate", type = "Si", n = 512)
-{	
-	dens_ssm = vector(mode = "list", length = length(dataNames))
-	names(dens_ssm) = dataNames
-	dens_classic = vector(mode = "list", length = length(dataNames))
-	names(dens_classic) = dataNames
-
-	for (currentData in dataNames)
-	{
-		dens_ssm[[currentData]] = density(sa_ssm_data[.(currentData, type), original], n = n)
-		dens_classic[[currentData]] = density(sa_classic_data[.(currentData, type), original], n = n)
-	}
-
-	if (plot_opt == "separate")
-	{
-		for (currentData in dataNames)
-		{
-			colours = MetBrewer::met.brewer("Hokusai3", 2)
-			colours_str = grDevices::colorRampPalette(colours)(2)
-			colours_str_pol = paste0(colours_str, "66")
-
-			min_x = min(dens_ssm[[currentData]]$x, dens_classic[[currentData]]$x)
-			max_x = max(dens_ssm[[currentData]]$x, dens_classic[[currentData]]$x)
-			max_y = max(dens_ssm[[currentData]]$y, dens_classic[[currentData]]$y)
-
-			min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
-			max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
-
-			plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), ylab = "frequence", main = currentData,
-				xlab = "Sensitivity")
-
-			lines(x = dens_ssm[[currentData]]$x, y = dens_ssm[[currentData]]$y, col = colours_str[1], lwd = 2)
-			polygon(dens_ssm[[currentData]], col = colours_str_pol[1])
-			
-			lines(x = dens_classic[[currentData]]$x, y = dens_classic[[currentData]]$y, col = colours_str[2], lwd = 2)
-			polygon(dens_classic[[currentData]], col = colours_str_pol[2])
-			
-			legend(x = "topright", legend = c("SSM", "Classic"), fill = colours_str, box.lwd = 0)
-		}
-	} else {
-		min_x = min(min(sapply(dens_ssm, function(zz) {return (min(zz$x))})), min(sapply(dens_classic, function(zz) {return (min(zz$x))})))
-		max_x = max(max(sapply(dens_ssm, function(zz) {return (max(zz$x))})), max(sapply(dens_classic, function(zz) {return (max(zz$x))})))
-		max_y = max(max(sapply(dens_ssm, function(zz) {return (max(zz$y))})), max(sapply(dens_classic, function(zz) {return (max(zz$y))})))
-
-		min_x = ifelse(min_x < 0, 0, 0.9*min_x) # To extend 10% from min_x
-		max_x = ifelse(max_x > 1, 1, 1.1*max_x) # To extend 10% from max_x
-		
-		plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), ylab = "frequence", main = currentData,
-			xlab = "Sensitivity")
-
-		colours = MetBrewer::met.brewer("Hokusai3", length(dataNames))
-		colours_str = grDevices::colorRampPalette(colours)(length(dataNames))
-		colours_str_pol = paste0(colours_str, "66")
-
-		names(colours_str) = dataNames
-		names(colours_str_pol) = dataNames
-
-		for (currentData in dataNames)
-		{
-			lines(x = dens_ssm[[currentData]]$x, y = dens_ssm[[currentData]]$y, col = colours_str[currentData], lwd = 3, lty = 1)
-			polygon(dens_ssm[[currentData]], col = colours_str_pol[currentData], border = NA)
-			
-			lines(x = dens_classic[[currentData]]$x, y = dens_classic[[currentData]]$y, col = colours_str[currentData], lwd = 3, lty = 2)
-			polygon(dens_classic[[currentData]], col = colours_str_pol[currentData], border = NA)
-			
-		}
-		legend(x = "topright", legend = c("SSM", "Classic"), lty = c(1, 2), lwd = 3, box.lwd = 0, title = "Model")
-		legend(x = "topright", legend = dataNames, fill = colours_str, box.lwd = 0, inset = c(0.15, 0), title = "Data")
-	}
-
-	return(list(dens_ssm = dens_ssm, dens_classic = dens_classic))
+	return(list(sa = ind, var_y = var_vec_y, n_param = n_param, range_dt = range_dt))
 }
 
 #? ----------------------------------------------------------------------------------------
@@ -424,11 +355,17 @@ plot_sa = function(sa_ssm_data, sa_classic_data, dataNames, plot_opt = "separate
 #### Load results
 ## Common variables
 # args = c("Betula pendula", "1", "dbhm", "precipm", "tasm")				# OK, ssm better
+# args = c("Betula pendula", "1")											# OK, ssm better
 # args = c("Fagus sylvatica", "1", "dbhm", "precipm", "tasm")				# OK, ssm better
+# args = c("Fagus sylvatica", "1")											# OK, ssm better
 # args = c("Picea abies", "1", "dbhm", "precipm", "tasm")					# OK, ssm better
+# args = c("Picea abies", "1")												# OK, ssm better
 # args = c("Pinus pinaster", "1", "dbhm", "precipm", "tasm")				# OK, ssm better
-# args = c("Pinus sylvestris", "1", "dbhm", "precipm", "tasm")			# OK, ssm better
-# args = c("Quercus petraea" , "1", "dbhm", "precipm", "tasm")			# OK, ssm better
+# args = c("Pinus pinaster", "1")											# OK, ssm better
+# args = c("Pinus sylvestris", "1", "dbhm", "precipm", "tasm")				# OK, ssm better
+# args = c("Pinus sylvestris", "1")											# OK, ssm better
+# args = c("Quercus petraea" , "1", "dbhm", "precipm", "tasm")				# OK, ssm better
+# args = c("Quercus petraea" , "1")											# OK, ssm better
 args = commandArgs(trailingOnly = TRUE)
 for (i in seq_along(args))
 	print(paste0("Arg ", i, ": <", args[i], ">"))
@@ -436,26 +373,28 @@ for (i in seq_along(args))
 args[1] = paste(args[1], args[2])
 args = args[-2]
 
-if (length(args) != 5)
+# if (length(args) != 5)
+# 	stop("Supply in this order the species, the run_id, and the quantiles for dbh, tas, and precip", call. = FALSE)
+if (length(args) != 2)
 	stop("Supply in this order the species, the run_id, and the quantiles for dbh, tas, and precip", call. = FALSE)
 
 
 (species = as.character(args[1]))
 (run = as.integer(args[2]))
-(dbh_quantile_opt = as.character(args[3]))
-(pr_quantile_opt = as.character(args[4]))
-(tas_quantile_opt = as.character(args[5]))
+# (dbh_quantile_opt = as.character(args[3]))
+# (pr_quantile_opt = as.character(args[4]))
+# (tas_quantile_opt = as.character(args[5]))
 
-ls_opt_Qt = paste0(rep(c("dbh", "tas", "precip"), each = 2), c("m", "M"))
+# ls_opt_Qt = paste0(rep(c("dbh", "tas", "precip"), each = 2), c("m", "M"))
 
-if (!all(c(dbh_quantile_opt, pr_quantile_opt, tas_quantile_opt) %in% ls_opt_Qt))
-	stop(paste("Only the following options can be used:", paste(ls_opt_Qt, collapse = ", ")))
+# if (!all(c(dbh_quantile_opt, pr_quantile_opt, tas_quantile_opt) %in% ls_opt_Qt))
+# 	stop(paste("Only the following options can be used:", paste(ls_opt_Qt, collapse = ", ")))
 
-opt_code = paste0(stri_sub(str = c(dbh_quantile_opt, pr_quantile_opt, tas_quantile_opt), from = -1), collapse = "_")
+# opt_code = paste0(stri_sub(str = c(dbh_quantile_opt, pr_quantile_opt, tas_quantile_opt), from = -1), collapse = "_")
 
-qt_opt = c("dbh" = ifelse(dbh_quantile_opt == "dbhm", "5%", "95%"),
-	"precip" = ifelse(pr_quantile_opt == "precipm", "q05", "q95"),
-	"tas" = ifelse(tas_quantile_opt == "tasm", "q05", "q95"))
+# qt_opt = c("dbh" = ifelse(dbh_quantile_opt == "dbhm", "5%", "95%"),
+# 	"precip" = ifelse(pr_quantile_opt == "precipm", "q05", "q95"),
+# 	"tas" = ifelse(tas_quantile_opt == "tasm", "q05", "q95"))
 
 tree_path = paste0("./", species, "/")
 if (!dir.exists(tree_path))
@@ -557,37 +496,49 @@ loo::loo_compare(list(waic_ssm, waic_classic))
 #? -----------------------------------------------------------------------------------------
 #### Climate range
 clim_dt_ssm = fraction_range_climate(stanData = stanData_ssm, model_type = "ssm", shouldScale = TRUE, scaling_dt = scaling_dt)
-clim_dt_classic = fraction_range_climate(stanData = stanData_classic, model_type = "classic", shouldScale = TRUE, scaling_dt = scaling_dt)
+clim_dt_classic = fraction_range_climate(stanData = stanData_ssm, model_type = "classic", shouldScale = TRUE, scaling_dt = scaling_dt)
+#! I want to have the same climate range, so even for classic, I use ssm! Actually this line is useless, it is just for backward compatibility
 
-dbh0_ssm = unname(quantile(stanData_ssm$dbh_init, c(0.05, 0.95))[qt_opt["dbh"]])/stanData_ssm$sd_dbh
-dbh0_classic = unname(quantile(stanData_classic$dbh_init, c(0.05, 0.95))[qt_opt["dbh"]])/stanData_classic$sd_dbh
+# clim_dt_ssm = merge.data.table(x = clim_dt_ssm, y = scaling_dt[("ssm")], by = "variable")
+# clim_dt_classic = merge.data.table(x = clim_dt_classic, y = scaling_dt[("classic")], by = "variable")
 
-#### Sensitivity of growth with respect to parameters and data
-## SSM
-sa_ssm = sensitivityAnalysis(model = ssm, dbh0 = dbh0_ssm, sd_dbh = stanData_ssm$sd_dbh,
-	env0 = c(precip = clim_dt_ssm["precip", get(qt_opt["precip"])], tas = clim_dt_ssm["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
-	clim_dt = clim_dt_ssm, N = 2^19)
-saveRDS(sa_ssm, paste0(tree_path, "sa_ssm_", opt_code, ".rds"))
+# clim_dt_ssm[, mu.x := mu.x*sd + mu.y]
+# clim_dt_ssm[, q05 := q05*sd + mu.y]
+# clim_dt_ssm[, q95 := q95*sd + mu.y]
 
-sa_ssm = data.table::dcast(data = sa_ssm$results, formula = parameters ~ sensitivity, value.var = "original")
-sa_ssm[, sum(Si)]
-sa_ssm = sa_ssm[order(-Si), .SD]
+# clim_dt_classic[, mu.x := mu.x*sd + mu.y]
+# clim_dt_classic[, q05 := q05*sd + mu.y]
+# clim_dt_classic[, q95 := q95*sd + mu.y]
 
-if (any(sa_ssm[, Si] < 0))
-	warning(paste("There are negatives Si for SSM, with min value:", round(sa_ssm[, min(Si)], 7)))
+# dbh0_ssm = unname(quantile(stanData_ssm$dbh_init, c(0.05, 0.95))[qt_opt["dbh"]])/stanData_ssm$sd_dbh
+# dbh0_classic = unname(quantile(stanData_classic$dbh_init, c(0.05, 0.95))[qt_opt["dbh"]])/stanData_classic$sd_dbh
 
-## Classic
-sa_classic = sensitivityAnalysis(model = classic, dbh0 = dbh0_classic, sd_dbh = stanData_classic$sd_dbh,
-	env0 = c(precip = clim_dt_classic["precip", get(qt_opt["precip"])], tas = clim_dt_classic["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
-	clim_dt = clim_dt_classic, N = 2^19)
-saveRDS(sa_classic, paste0(tree_path, "sa_classic_", opt_code, ".rds"))
+# #### Sensitivity of growth with respect to parameters and data
+# ## SSM
+# sa_ssm = sensitivityAnalysis(model = ssm, dbh0 = dbh0_ssm, sd_dbh = stanData_ssm$sd_dbh,
+# 	env0 = c(precip = clim_dt_ssm["precip", get(qt_opt["precip"])], tas = clim_dt_ssm["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
+# 	clim_dt = clim_dt_ssm, N = 2^19)
+# saveRDS(sa_ssm, paste0(tree_path, "sa_ssm_", opt_code, ".rds"))
 
-sa_classic = data.table::dcast(data = sa_classic$results, formula = parameters ~ sensitivity, value.var = "original")
-sa_classic[, sum(Si)]
-sa_classic = sa_classic[order(-Si), .SD]
+# sa_ssm = data.table::dcast(data = sa_ssm$results, formula = parameters ~ sensitivity, value.var = "original")
+# sa_ssm[, sum(Si)]
+# sa_ssm = sa_ssm[order(-Si), .SD]
 
-if (any(sa_classic[, Si] < 0))
-	warning(paste("There are negatives Si for classic, with min value:", round(sa_classic[, min(Si)], 7)))
+# if (any(sa_ssm[, Si] < 0))
+# 	warning(paste("There are negatives Si for SSM, with min value:", round(sa_ssm[, min(Si)], 7)))
+
+# ## Classic
+# sa_classic = sensitivityAnalysis(model = classic, dbh0 = dbh0_classic, sd_dbh = stanData_classic$sd_dbh,
+# 	env0 = c(precip = clim_dt_classic["precip", get(qt_opt["precip"])], tas = clim_dt_classic["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
+# 	clim_dt = clim_dt_classic, N = 2^19)
+# saveRDS(sa_classic, paste0(tree_path, "sa_classic_", opt_code, ".rds"))
+
+# sa_classic = data.table::dcast(data = sa_classic$results, formula = parameters ~ sensitivity, value.var = "original")
+# sa_classic[, sum(Si)]
+# sa_classic = sa_classic[order(-Si), .SD]
+
+# if (any(sa_classic[, Si] < 0))
+# 	warning(paste("There are negatives Si for classic, with min value:", round(sa_classic[, min(Si)], 7)))
 
 # [1] "The following are detected to be non-normal:"
 # [1] "averageGrowth" "dbh_slope"     "dbh_slope2"   
@@ -597,24 +548,32 @@ if (any(sa_classic[, Si] < 0))
 #### Sensitivity of growth with respect to data only
 ## SSM
 sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh0 = quantile(stanData_ssm$dbh_init, c(0.05, 0.95))/stanData_ssm$sd_dbh,
-	sd_dbh = stanData_ssm$sd_dbh, n_param = 5e2, N = 2^16, clim_dt = clim_dt_ssm, seed = 123)
-# sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh0 = dbh0_ssm, sd_dbh = stanData_ssm$sd_dbh, n_param = 1e3, N = 2^14,
+	sd_dbh = stanData_ssm$sd_dbh, n_param = 500, N = 2^16, clim_dt = clim_dt_ssm, seed = 123)
+# sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh0 = dbh0_ssm, sd_dbh = stanData_ssm$sd_dbh, n_param = 1e3, N = 2^16,
 # 	env0 = c(precip = clim_dt_ssm["precip", get(qt_opt["precip"])], tas = clim_dt_ssm["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
 # 	clim_dt = clim_dt_ssm, seed = 123)
 
-saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_", opt_code, "_data.rds"))
+saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_data.rds"))
+# saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_", opt_code, "_data.rds"))
 
 ## Classic
-sa_classic_data = sensitivityAnalysis_data(model = classic, dbh0 = dbh0_classic, sd_dbh = stanData_classic$sd_dbh, n_param = 1e3, N = 2^14,
-	env0 = c(precip = clim_dt_classic["precip", get(qt_opt["precip"])], tas = clim_dt_classic["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
-	clim_dt = clim_dt_classic, seed = 123)
+sa_classic_data = sensitivityAnalysis_data(model = classic, dbh0 = quantile(stanData_ssm$dbh_init, c(0.05, 0.95))/stanData_ssm$sd_dbh,
+	sd_dbh = stanData_classic$sd_dbh, n_param = 500, N = 2^16, clim_dt = clim_dt_classic, seed = 123)
+# sa_classic_data = sensitivityAnalysis_data(model = classic, dbh0 = dbh0_classic, sd_dbh = stanData_classic$sd_dbh, n_param = 1e3, N = 2^16,
+# 	env0 = c(precip = clim_dt_classic["precip", get(qt_opt["precip"])], tas = clim_dt_classic["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
+# 	clim_dt = clim_dt_classic, seed = 123)
 
-saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_", opt_code, "_data.rds"))
+saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_data.rds"))
+# saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_", opt_code, "_data.rds"))
 
-setkey(sa_ssm_data, parameters, sensitivity)
-setkey(sa_classic_data, parameters, sensitivity)
+# setkey(sa_ssm_data$sa, parameters, sensitivity)
+# setkey(sa_classic_data$sa, parameters, sensitivity)
 
-plot_sa(sa_ssm_data, sa_classic_data, dataNames = c("dbh", "precip", "tas", "ph"), plot_opt = "all", type = "Si", n = 2048)
+# plot_sa(sa_ssm_data$sa, sa_classic_data$sa, dataNames = c("dbh", "precip", "tas", "ph"), plot_opt = "separate", type = "Si", n = 2048)
+
+
+print(sa_ssm_data$sa[sensitivity == "Si", sum(original), by = run][, range(V1)])
+print(sa_classic_data$sa[sensitivity == "Si", sum(original), by = run][, range(V1)])
 
 
 
@@ -813,75 +772,3 @@ plot_sa(sa_ssm_data, sa_classic_data, dataNames = c("dbh", "precip", "tas", "ph"
 
 
 # ####! END CRASH TEST ZONE II
-
-
-
-
-
-# ####! CRASH TEST ZONE III: Plot from discussion with Lisa
-print(2)
-sa_ssm_data_list = list(fagus_sylvatica = readRDS("./Fagus sylvatica/sa_ssm_data.rds"),
-	quercus_petraea = readRDS("./Quercus petraea/sa_ssm_m_m_m_data.rds"))
-
-plot_list_sa = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c("dbh", "precip", "tas", "ph", "standBasalArea"),
-	ls_titles = c(dbh = "Diameter", precip = "Precipitation", tas = "Temperature", ph = "pH", standBasalArea = "Basal area"))
-{
-	# Check data
-	if (length(sa_ssm_data_list) != length(sa_classic_data_list))
-		stop("Error, list should be of the same size")
-
-	ls_species = names(sa_ssm_data_list)
-	if (!all(ls_species %in% names(sa_classic_data_list)))
-		stop("Error, list should contain the same species names")
-
-	if (length(ls_titles) != length(ls_data))
-		stop("ls_data and ls_titles should be of the same size")
-
-	if (!all(ls_data %in% sapply(sa_ssm_data_list, function(zz) {return(unique(zz[, parameters]))})))
-		stop("Some data are not in the SSM list")
-	
-	if (!all(ls_data %in% sapply(sa_classic_data_list, function(zz) {return(unique(zz[, parameters]))})))
-		stop("Some data are not in the classic list")
-
-	# Define empty plot
-	x_max = 2*length(sa_ssm_data_list)
-	y_max = max(max(sapply(sa_ssm_data_list, function(zz) {return (max(zz[sensitivity == "Si", original]))})),
-		max(sapply(sa_classic_data_list, function(zz) {return (max(zz[sensitivity == "Si", original]))})))
-
-	currentVar = ls_data[1] #! TO DELETE, ALTHOUGH IT CHANGES NOTHING
-	for (currentVar in ls_data)
-	{
-		plot(0, type = "n", xlim = c(0, x_max), ylim = c(0, y_max), ylab = "SA", main = ls_titles[currentVar],
-			xlab = "Species", las = 1)
-
-		x_orig = 0.5
-		currentSpecies = ls_species[1] #! TO DELETE, ALTHOUGH IT CHANGES NOTHING
-		for (currentSpecies in ls_species)
-		{
-			x1 = x_orig - 0.05
-			x2 = x1 + 0.05
-			y1 = quantile(sa_ssm_data_list[[currentSpecies]][(sensitivity == "Si") & (parameters == currentVar), original],
-				c(0.05, 0.5, 0.95))
-			y2 = quantile(sa_classic_data_list[[currentSpecies]][(sensitivity == "Si") & (parameters == currentVar), original],
-				c(0.05, 0.5, 0.95))
-
-			segments(x0 = x1, y0 = y1["5%"], x1 = x1, y1 = y1["95%"])
-			points(x = x1, y = y1["50%"], pch = 19, cex = 1)
-			points(x = x1, y = y1["5%"], pch = "-", cex = 1.1)
-			points(x = x1, y = y1["95%"], pch = "-", cex = 1.1)
-
-			segments(x0 = x2, y0 = y2["5%"], x1 = x2, y1 = y2["95%"])
-			points(x = x2, y = y2["50%"], pch = 19, cex = 1)
-			points(x = x2, y = y2["5%"], pch = "-", cex = 1.1)
-			points(x = x2, y = y2["95%"], pch = "-", cex = 1.1)
-
-			x_orig = x_orig + 1
-		}
-	}
-
-	
-}
-
-
-# ####! END CRASH TEST ZONE III
-
