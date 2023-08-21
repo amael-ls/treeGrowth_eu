@@ -30,7 +30,6 @@ library(tikzDevice)
 library(cmdstanr)
 library(sensobol)
 library(stringi)
-library(foreach)
 
 #### Tool functions
 ## Source functions
@@ -102,23 +101,361 @@ correl_draws = function(model, params, threshold = 0.75)
 		}
 }
 
+## Function to compute the climate range from stan data
+fraction_range_climate = function(stanData, model_type, shouldScale = FALSE, frac = 0.01, scaling_dt = NULL)
+{
+	if (shouldScale && is.null(scaling_dt))
+		stop("Scaling demanded, but no scaling provided!")
+	
+	range_dt = data.table(variable = c("precip", "tas", "ph", "standBasalArea"), q05 = numeric(4), q95 = numeric(4), mu = numeric(4))
+	setkey(range_dt, variable)
+	for (currentVar in range_dt[, variable])
+	{
+		clim = stanData[[currentVar]]
+		if (shouldScale)
+			clim = (clim - scaling_dt[.(model_type, currentVar), mu])/scaling_dt[.(model_type, currentVar), sd]
+		range_dt[currentVar, c("q05", "q95", "mu") := as.list(c(quantile(clim, c(0.05, 0.95)), mean(clim)))]
+	}
+
+	range_dt[, range := q95 - q05]
+	range_dt[, sd_sa := frac*range]
+
+	return(range_dt)
+}
+
+## Function to compute sensitivity of growth with respect to uncertainty in the parameters and data
+sensitivityAnalysis = function(model, dbh0, sd_dbh, env0, clim_dt, matrices = c("A", "B", "AB"), order = "first", N = 2^14, boot = FALSE,
+	bootstrap_iter = NULL, type = "QRN", first = "saltelli", total = "jansen")
+{
+	## Check dbh0 and env0
+	if (abs(dbh0) > 5)
+		warning("Are you sure that dbh0 is scaled?")
+
+	if ((env0["precip"] < clim_dt["precip", q05]) || (env0["tas"] < clim_dt["tas", q05]) || (env0["ph"] < clim_dt["ph", q05]))
+		warning("Are you sure that env0 is scaled? There are low values below the 5 quantile")
+
+	if ((env0["precip"] > clim_dt["precip", q95]) || (env0["tas"] > clim_dt["tas", q95]) || (env0["ph"] > clim_dt["ph", q95]))
+		warning("Are you sure that env0 is scaled? There are large values beyond the 95 quantile")
+
+	## Check boot
+	if (boot && is.null(bootstrap_iter))
+	{
+		warning("Boot is true, but no boostrap_iter provided! A value of 3000 was assigned by default")
+		bootstrap_iter = 3000
+	}
+
+	if (!boot && !is.null(bootstrap_iter))
+	{
+		warning("Boot is false, so the provided value for bootstrap_iter is disregarded")
+		bootstrap_iter = NULL
+	}
+	
+	## Prepare the sampling matrices
+	# Common variables
+	params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2", "ph_slope", "ph_slope2",
+		"competition_slope")
+	
+	explanatory_vars = c("dbh", "precip", "tas", "ph")
+
+	# Check normality
+	mean_sd_dt = check_normality(model = model, params = params)
+
+	if (any(mean_sd_dt[, !isNormal]))
+	{
+		print("The following are detected to be non-normal:")
+		print(mean_sd_dt[(!isNormal), parameter])
+	}
+
+	## Create matrices
+	sobol_mat = sobol_matrices(matrices = matrices, N = N, order = order, type = type, params = c(params, explanatory_vars))
+
+	# Rescale the Sobol matrix
+	# --- Parameters
+	for (param in params)
+		sobol_mat[, param] = qnorm(sobol_mat[, param], mean_sd_dt[param, mu], mean_sd_dt[param, sigma])
+
+	# --- Explanatory variables
+	for (currentVar in explanatory_vars)
+	{
+		if (currentVar == "dbh")
+		{
+			sobol_mat[, "dbh"] = qnorm(p = sobol_mat[, "dbh"], mean = dbh0, sd = 3/sd_dbh)
+		} else {
+			sobol_mat[, currentVar] = qnorm(p = sobol_mat[, currentVar], mean = env0[currentVar], sd = clim_dt[currentVar, sd_sa])
+		}
+	}
+	
+	if (any(is.na(sobol_mat)))
+		stop(paste("Number of NAs in Sobol's matrix:", sum(is.na(sobol_mat))))
+
+	## Run sensitivity analysis
+	# Model output
+	y = numeric(nrow(sobol_mat))
+	for (i in seq_len(nrow(sobol_mat)))
+	{
+		params_vec = c(sobol_mat[i, "averageGrowth"],
+			sobol_mat[i, "dbh_slope"],
+			sobol_mat[i, "dbh_slope2"],
+			sobol_mat[i, "pr_slope"],
+			sobol_mat[i, "tas_slope"],
+			sobol_mat[i, "ph_slope"],
+			sobol_mat[i, "competition_slope"],
+			sobol_mat[i, "pr_slope2"],
+			sobol_mat[i, "tas_slope2"],
+			sobol_mat[i, "ph_slope2"])
+		
+		y[i] = growth_fct_meanlog(dbh = sobol_mat[i, "dbh"], pr = sobol_mat[i, "precip"], tas = sobol_mat[i, "tas"],
+			ph = sobol_mat[i, "ph"], basalArea = env0["basalArea"],
+			params = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)
+
+		if (i %% 20000 == 0)
+			print(paste0(round(100*i/nrow(sobol_mat), 2), "% done"))
+	}
+	print("100% done")
+
+	# Sobol indices
+	ind = sobol_indices(matrices = matrices, Y = y, N = N, params = c(params, explanatory_vars), first = first, total = total,
+		boot = boot, order = order, R = bootstrap_iter, parallel = "multicore", type = "percent", conf = 0.95, ncpus = 8)
+
+	return(list(sa = ind, var_y = var(y)))
+}
+
+## Function to compute sensitivity of growth with respect to uncertainty in the data only
+sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 = NULL, matrices = c("A", "B", "AB"), order = "first", N = 2^14,
+	type = "QRN", first = "saltelli", total = "jansen", seed = NULL)
+{
+	## Check dbh0 and env0
+	if (any(abs(dbh0) > 5))
+		warning("Are you sure that dbh0 is scaled?")
+
+	if (!is.null(env0))
+	{
+		if ((env0["precip"] < clim_dt["precip", q05]) || (env0["tas"] < clim_dt["tas", q05]) || (env0["ph"] < clim_dt["ph", q05]))
+			warning("Are you sure that env0 is scaled? There are low values below the 5 quantile")
+
+		if ((env0["precip"] > clim_dt["precip", q95]) || (env0["tas"] > clim_dt["tas", q95]) || (env0["ph"] > clim_dt["ph", q95]))
+			warning("Are you sure that env0 is scaled? There are large values beyond the 95 quantile")
+	}
+
+	if ((length(dbh0) != 1) && (length(dbh0) != 2))
+	{
+		warning("Only the first two values of dbh0 are used")
+		dbh0 = dbh0[1:2]
+	}
+
+	if (length(dbh0) == 2)
+	{
+		if (dbh0[1] > dbh0[2])
+		{
+			dbh0[1] = dbh0[2] - dbh0[1] + (dbh0[2] = dbh0[1])
+			warning("The values for dbh0 were swaped")
+		}
+	}
+	
+	## Prepare the sampling matrices
+	# Common variables
+	params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2", "ph_slope", "ph_slope2",
+		"competition_slope")
+
+	if (!is.null(seed))
+		set.seed(seed)
+	
+	params_values = getParams(model_cmdstan = model, params_names = params, type = "all")
+	
+	n_iter = model$metadata()$iter_sampling
+	n_chains = model$num_chains()
+	n_tot = n_iter*n_chains
+	
+	sample_ind = sample(x = 1:n_tot, size = n_param, replace = FALSE)
+
+	explanatory_vars = c("dbh", "precip", "tas", "ph", "standBasalArea")
+
+	## Create matrices
+	sobol_mat = sobol_matrices(matrices = matrices, N = N, order = order, type = type, params = c(explanatory_vars))
+
+	# Rescale the Sobol matrix
+	# --- Explanatory variables
+	for (currentVar in explanatory_vars)
+	{
+		if (currentVar == "dbh")
+		{
+			if (length(dbh0) == 1)
+			{
+				sobol_mat[, "dbh"] = qnorm(p = sobol_mat[, "dbh"], mean = dbh0, sd = 3/sd_dbh)
+			} else {
+				sobol_mat[, "dbh"] = qunif(p = sobol_mat[, "dbh"], min = dbh0[1], max = dbh0[2])
+			}
+		} else {
+			if (!is.null(env0))
+			{
+				sobol_mat[, currentVar] = qnorm(p = sobol_mat[, currentVar], mean = env0[currentVar], sd = clim_dt[currentVar, sd_sa])
+			} else {
+				sobol_mat[, currentVar] = qunif(p = sobol_mat[, currentVar], min = clim_dt[currentVar, q05], max = clim_dt[currentVar, q95])
+			}
+		}
+	}
+	
+	if (any(is.na(sobol_mat)))
+		stop(paste("Number of NAs in Sobol's matrix:", sum(is.na(sobol_mat))))
+
+	## Run sensitivity analysis
+	ind = vector(mode = "list", length = n_param)
+	var_vec_y = numeric(length = n_param)
+	freq_print = round(5*n_param/100)
+
+	for (j in seq_along(sample_ind))
+	{
+		current_ind = sample_ind[j]
+		params_vec = c(averageGrowth = params_values[, , "averageGrowth"][current_ind],
+			dbh_slope = params_values[, , "dbh_slope"][current_ind],
+			dbh_slope2 = params_values[, , "dbh_slope2"][current_ind],
+			pr_slope = params_values[, , "pr_slope"][current_ind],
+			tas_slope = params_values[, , "tas_slope"][current_ind],
+			ph_slope = params_values[, , "ph_slope"][current_ind],
+			competition_slope = params_values[, , "competition_slope"][current_ind],
+			pr_slope2 = params_values[, , "pr_slope2"][current_ind],
+			tas_slope2 = params_values[, , "tas_slope2"][current_ind],
+			ph_slope2 = params_values[, , "ph_slope2"][current_ind])
+		
+		# --- Model output
+		y = numeric(nrow(sobol_mat))
+		for (i in seq_len(nrow(sobol_mat)))
+		{	
+			y[i] = growth_fct_meanlog(dbh = sobol_mat[i, "dbh"], pr = sobol_mat[i, "precip"], tas = sobol_mat[i, "tas"],
+				ph = sobol_mat[i, "ph"], basalArea = sobol_mat[i, "standBasalArea"],
+				params = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)
+
+		}
+		var_vec_y[j] = var(y)
+
+		# --- Sobol indices
+		ind[[j]] = sobol_indices(matrices = matrices, Y = y, N = N, params = explanatory_vars, first = first, total = total,
+			order = order)$results
+
+		if (j %% freq_print == 0)
+			print(paste0(round(100*j/n_param, 2), "% done"))
+	}
+	print("100% done")
+
+	ind = rbindlist(l = ind, idcol = "run")
+	if (any(ind[, original] < 0))
+			warning(paste("There are negatives Si, with min value:", round(ind[, min(original)], 7)))
+
+	return(list(sa = ind, var_y = var_vec_y, n_param = n_param))
+}
+
+## Function to plot sensitivity analysis for data
+plot_sa = function(sa_ssm_data, sa_classic_data, dataNames, plot_opt = "separate", type = "Si", n = 512)
+{	
+	dens_ssm = vector(mode = "list", length = length(dataNames))
+	names(dens_ssm) = dataNames
+	dens_classic = vector(mode = "list", length = length(dataNames))
+	names(dens_classic) = dataNames
+
+	for (currentData in dataNames)
+	{
+		dens_ssm[[currentData]] = density(sa_ssm_data[.(currentData, type), original], n = n)
+		dens_classic[[currentData]] = density(sa_classic_data[.(currentData, type), original], n = n)
+	}
+
+	if (plot_opt == "separate")
+	{
+		for (currentData in dataNames)
+		{
+			colours = MetBrewer::met.brewer("Hokusai3", 2)
+			colours_str = grDevices::colorRampPalette(colours)(2)
+			colours_str_pol = paste0(colours_str, "66")
+
+			min_x = min(dens_ssm[[currentData]]$x, dens_classic[[currentData]]$x)
+			max_x = max(dens_ssm[[currentData]]$x, dens_classic[[currentData]]$x)
+			max_y = max(dens_ssm[[currentData]]$y, dens_classic[[currentData]]$y)
+
+			min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+			max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+
+			plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), ylab = "frequence", main = currentData,
+				xlab = "Sensitivity")
+
+			lines(x = dens_ssm[[currentData]]$x, y = dens_ssm[[currentData]]$y, col = colours_str[1], lwd = 2)
+			polygon(dens_ssm[[currentData]], col = colours_str_pol[1])
+			
+			lines(x = dens_classic[[currentData]]$x, y = dens_classic[[currentData]]$y, col = colours_str[2], lwd = 2)
+			polygon(dens_classic[[currentData]], col = colours_str_pol[2])
+			
+			legend(x = "topright", legend = c("SSM", "Classic"), fill = colours_str, box.lwd = 0)
+		}
+	} else {
+		min_x = min(min(sapply(dens_ssm, function(zz) {return (min(zz$x))})), min(sapply(dens_classic, function(zz) {return (min(zz$x))})))
+		max_x = max(max(sapply(dens_ssm, function(zz) {return (max(zz$x))})), max(sapply(dens_classic, function(zz) {return (max(zz$x))})))
+		max_y = max(max(sapply(dens_ssm, function(zz) {return (max(zz$y))})), max(sapply(dens_classic, function(zz) {return (max(zz$y))})))
+
+		min_x = ifelse(min_x < 0, 0, 0.9*min_x) # To extend 10% from min_x
+		max_x = ifelse(max_x > 1, 1, 1.1*max_x) # To extend 10% from max_x
+		
+		plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), ylab = "frequence", main = currentData,
+			xlab = "Sensitivity")
+
+		colours = MetBrewer::met.brewer("Hokusai3", length(dataNames))
+		colours_str = grDevices::colorRampPalette(colours)(length(dataNames))
+		colours_str_pol = paste0(colours_str, "66")
+
+		names(colours_str) = dataNames
+		names(colours_str_pol) = dataNames
+
+		for (currentData in dataNames)
+		{
+			lines(x = dens_ssm[[currentData]]$x, y = dens_ssm[[currentData]]$y, col = colours_str[currentData], lwd = 3, lty = 1)
+			polygon(dens_ssm[[currentData]], col = colours_str_pol[currentData], border = NA)
+			
+			lines(x = dens_classic[[currentData]]$x, y = dens_classic[[currentData]]$y, col = colours_str[currentData], lwd = 3, lty = 2)
+			polygon(dens_classic[[currentData]], col = colours_str_pol[currentData], border = NA)
+			
+		}
+		legend(x = "topright", legend = c("SSM", "Classic"), lty = c(1, 2), lwd = 3, box.lwd = 0, title = "Model")
+		legend(x = "topright", legend = dataNames, fill = colours_str, box.lwd = 0, inset = c(0.15, 0), title = "Data")
+	}
+
+	return(list(dens_ssm = dens_ssm, dens_classic = dens_classic))
+}
+
 #? ----------------------------------------------------------------------------------------
 #* ----------------------    PART I: Compute PSIS-LOO CV and waic    ----------------------
 #? ----------------------------------------------------------------------------------------
 #### Load results
 ## Common variables
-# args = c("Betula pendula", "1")			# OK, ssm better
-# args = c("Fagus sylvatica", "1")			# OK, ssm better
-# args = c("Picea abies", "1")				# OK, ssm better
-# args = c("Pinus pinaster", "1")			# OK, ssm better
-# args = c("Pinus sylvestris", "1")			# OK, ssm better
-# args = c("Quercus petraea" , "1")			# OK, ssm better
-args = commandArgs(trailingOnly = TRUE) # args = c("Fagus sylvatica", "1")
-if (length(args) < 2)
-	stop("Supply in this order the species and the run_id", call. = FALSE)
+# args = c("Betula pendula", "1", "dbhm", "precipm", "tasm")				# OK, ssm better
+# args = c("Fagus sylvatica", "1", "dbhm", "precipm", "tasm")				# OK, ssm better
+# args = c("Picea abies", "1", "dbhm", "precipm", "tasm")					# OK, ssm better
+# args = c("Pinus pinaster", "1", "dbhm", "precipm", "tasm")				# OK, ssm better
+# args = c("Pinus sylvestris", "1", "dbhm", "precipm", "tasm")			# OK, ssm better
+# args = c("Quercus petraea" , "1", "dbhm", "precipm", "tasm")			# OK, ssm better
+args = commandArgs(trailingOnly = TRUE)
+for (i in seq_along(args))
+	print(paste0("Arg ", i, ": <", args[i], ">"))
 
-species = as.character(args[1])
-run = as.integer(args[2])
+args[1] = paste(args[1], args[2])
+args = args[-2]
+
+if (length(args) != 5)
+	stop("Supply in this order the species, the run_id, and the quantiles for dbh, tas, and precip", call. = FALSE)
+
+
+(species = as.character(args[1]))
+(run = as.integer(args[2]))
+(dbh_quantile_opt = as.character(args[3]))
+(pr_quantile_opt = as.character(args[4]))
+(tas_quantile_opt = as.character(args[5]))
+
+ls_opt_Qt = paste0(rep(c("dbh", "tas", "precip"), each = 2), c("m", "M"))
+
+if (!all(c(dbh_quantile_opt, pr_quantile_opt, tas_quantile_opt) %in% ls_opt_Qt))
+	stop(paste("Only the following options can be used:", paste(ls_opt_Qt, collapse = ", ")))
+
+opt_code = paste0(stri_sub(str = c(dbh_quantile_opt, pr_quantile_opt, tas_quantile_opt), from = -1), collapse = "_")
+
+qt_opt = c("dbh" = ifelse(dbh_quantile_opt == "dbhm", "5%", "95%"),
+	"precip" = ifelse(pr_quantile_opt == "precipm", "q05", "q95"),
+	"tas" = ifelse(tas_quantile_opt == "tasm", "q05", "q95"))
 
 tree_path = paste0("./", species, "/")
 if (!dir.exists(tree_path))
@@ -151,23 +488,22 @@ current_dbh(dendro)
 dendro = dendro[dbh_increment_in_mm > 0]
 
 ## Load scalings
-# Load scalings
-# ba_scaling_ssm = readRDS(paste0(tree_path, run, "_ba_normalisation.rds")) #! To remove?
+# Load climate and ph scalings (dbh and basal area useless here, as BA already standardised, and the good sd_dbh is in stanData)
 climate_scaling_ssm = readRDS(paste0(tree_path, run, "_climate_normalisation.rds"))
 ph_scaling_ssm = readRDS(paste0(tree_path, run, "_ph_normalisation.rds"))
+ba_scaling_ssm = readRDS(paste0(tree_path, run, "_ba_normalisation.rds"))
 
-# ba_scaling_classic = readRDS(paste0(tree_path, run, "_ba_normalisation_classic.rds")) #! To remove?
 climate_scaling_classic = readRDS(paste0(tree_path, run, "_climate_normalisation_classic.rds"))
 ph_scaling_classic = readRDS(paste0(tree_path, run, "_ph_normalisation_classic.rds"))
+ba_scaling_classic = readRDS(paste0(tree_path, run, "_ba_normalisation_classic.rds"))
 
-# scaling_ssm = rbindlist(list(ba_scaling_ssm, climate_scaling_ssm, ph_scaling_ssm)) #! To remove?
-scaling_ssm = rbindlist(list(climate_scaling_ssm, ph_scaling_ssm))
-# scaling_classic = rbindlist(list(ba_scaling_classic, climate_scaling_classic, ph_scaling_classic)) #! To remove?
-scaling_classic = rbindlist(list(climate_scaling_classic, ph_scaling_classic))
+scaling_ssm = rbindlist(list(climate_scaling_ssm, ph_scaling_ssm, ba_scaling_ssm))
+scaling_classic = rbindlist(list(climate_scaling_classic, ph_scaling_classic, ba_scaling_classic))
 
 scaling_dt = rbindlist(list(ssm = scaling_ssm, classic = scaling_classic), idcol = "type")
 scaling_dt[, variable := stri_replace_all(str = variable, replacement = "", regex = "_avg$")] # Change the names for ease of usage
 scaling_dt[variable == "pr", variable := "precip"] # Change the names for ease of usage
+scaling_dt[variable == "standBasalArea_interp", variable := "standBasalArea"] # Change the names for ease of usage
 
 setkey(scaling_dt, type, variable)
 
@@ -219,138 +555,333 @@ loo::loo_compare(list(waic_ssm, waic_classic))
 #? -----------------------------------------------------------------------------------------
 #* ----------------------    PART II: Compute sensitivity analysis    ----------------------
 #? -----------------------------------------------------------------------------------------
-sensitivityAnalysis = function(model, dbh0, sd_dbh, env0, matrices = c("A", "B", "AB"), order = "second", N = 2^14, boot = FALSE,
-	bootstrap_iter = NULL, type = "QRN")
-{
-	## Check dbh0 and env0
-	if (any(abs(c(dbh0, env0)) > 3))
-		warning("Are you sure that dbh0 and env0 are scaled?")
+#### Climate range
+clim_dt_ssm = fraction_range_climate(stanData = stanData_ssm, model_type = "ssm", shouldScale = TRUE, scaling_dt = scaling_dt)
+clim_dt_classic = fraction_range_climate(stanData = stanData_classic, model_type = "classic", shouldScale = TRUE, scaling_dt = scaling_dt)
 
-	## Check boot
-	if (boot && is.null(bootstrap_iter))
-	{
-		warning("Boot is true, but no boostrap_iter provided! A value of 3000 was assigned by default")
-		bootstrap_iter = 3000
-	}
+dbh0_ssm = unname(quantile(stanData_ssm$dbh_init, c(0.05, 0.95))[qt_opt["dbh"]])/stanData_ssm$sd_dbh
+dbh0_classic = unname(quantile(stanData_classic$dbh_init, c(0.05, 0.95))[qt_opt["dbh"]])/stanData_classic$sd_dbh
 
-	if (!boot && !is.null(bootstrap_iter))
-	{
-		warning("Boot is false, so the provided value for bootstrap_iter is disregarded")
-		bootstrap_iter = NULL
-	}
-	
-	## Prepare the sampling matrices
-	# Common variables
-	params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2", "ph_slope", "ph_slope2",
-		"competition_slope")
+#### Sensitivity of growth with respect to parameters and data
+## SSM
+sa_ssm = sensitivityAnalysis(model = ssm, dbh0 = dbh0_ssm, sd_dbh = stanData_ssm$sd_dbh,
+	env0 = c(precip = clim_dt_ssm["precip", get(qt_opt["precip"])], tas = clim_dt_ssm["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
+	clim_dt = clim_dt_ssm, N = 2^19)
+saveRDS(sa_ssm, paste0(tree_path, "sa_ssm_", opt_code, ".rds"))
 
-	explanatory_vars = "dbh"
-
-	# Check normality
-	mean_sd_dt = check_normality(model = model, params = params)
-
-	if (any(mean_sd_dt[, !isNormal]))
-	{
-		print("The following are detected to be non-normal:")
-		print(mean_sd_dt[(!isNormal), parameter])
-	}
-
-	## Create matrices
-	sobol_mat = sobol_matrices(matrices = matrices, N = N, order = order, type = type, params = c(params, explanatory_vars))
-
-	# Rescale the Sobol matrix
-	# --- Parameters
-	for (param in params)
-		sobol_mat[, param] = qnorm(sobol_mat[, param], mean_sd_dt[param, mu], mean_sd_dt[param, sigma])
-
-	# --- Diameters
-	sobol_mat[, "dbh"] = qnorm(p = sobol_mat[, "dbh"], mean = dbh0, sd = 3/sd_dbh)
-
-	if (any(is.na(sobol_mat)))
-		stop(paste("Number of NAs in Sobol's matrix:", sum(is.na(sobol_mat))))
-
-	## Run sensitivity analysis
-	# Model output
-	y = numeric(nrow(sobol_mat))
-	for (i in seq_len(nrow(sobol_mat)))
-	{
-		params_vec = c(sobol_mat[i, "averageGrowth"],
-			sobol_mat[i, "dbh_slope"],
-			sobol_mat[i, "dbh_slope2"],
-			sobol_mat[i, "pr_slope"],
-			sobol_mat[i, "tas_slope"],
-			sobol_mat[i, "ph_slope"],
-			sobol_mat[i, "competition_slope"],
-			sobol_mat[i, "pr_slope2"],
-			sobol_mat[i, "tas_slope2"],
-			sobol_mat[i, "ph_slope2"])
-		
-		dbh = sobol_mat[i, "dbh"]
-		
-		y[i] = growth_fct_meanlog(dbh = dbh, pr = env0["precip"], tas = env0["tas"], ph = env0["ph"], basalArea = env0["basalArea"],
-			params = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)
-
-		if (i %% 20000 == 0)
-			print(paste0(round(100*i/nrow(sobol_mat), 2), "% done"))
-	}
-	print("100% done")
-
-	# Sobol indices
-	ind = sobol_indices(matrices = matrices, Y = y, N = N, params = c(params, "dbh"), first = "saltelli", total = "jansen",
-		boot = boot, order = order, R = bootstrap_iter, parallel = "multicore", type = "percent", conf = 0.95, ncpus = 8)
-
-	return(ind)
-}
-
-sa_ssm = sensitivityAnalysis(model = ssm, dbh0 = 1.2, sd_dbh = stanData_ssm$sd_dbh, order = "first",
-	env0 = c(precip = 0.8, tas = -0.5, ph = 0.21, basalArea = 0.58), N = 2^16)$results
-sa_ssm = data.table::dcast(data = sa_ssm, formula = parameters ~ sensitivity, value.var = "original")
+sa_ssm = data.table::dcast(data = sa_ssm$results, formula = parameters ~ sensitivity, value.var = "original")
 sa_ssm[, sum(Si)]
 sa_ssm = sa_ssm[order(-Si), .SD]
 
-# total_ssm = sa_ssm$results[sensitivity == "Ti"]
-# total_ssm = total_ssm[order(-original), .SD, by = sensitivity]
-# saveRDS(sa_ssm, paste0(tree_path, run, "_sa_ssm"))
+if (any(sa_ssm[, Si] < 0))
+	warning(paste("There are negatives Si for SSM, with min value:", round(sa_ssm[, min(Si)], 7)))
 
-sa_classic = sensitivityAnalysis(model = classic, dbh0 = 1.2, sd_dbh = stanData_classic$sd_dbh, order = "first",
-	env0 = c(precip = 0.8, tas = -0.5, ph = 0.21, basalArea = 0.58), N = 2^16)$results
-sa_classic = data.table::dcast(data = sa_classic, formula = parameters ~ sensitivity, value.var = "original")
+## Classic
+sa_classic = sensitivityAnalysis(model = classic, dbh0 = dbh0_classic, sd_dbh = stanData_classic$sd_dbh,
+	env0 = c(precip = clim_dt_classic["precip", get(qt_opt["precip"])], tas = clim_dt_classic["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
+	clim_dt = clim_dt_classic, N = 2^19)
+saveRDS(sa_classic, paste0(tree_path, "sa_classic_", opt_code, ".rds"))
+
+sa_classic = data.table::dcast(data = sa_classic$results, formula = parameters ~ sensitivity, value.var = "original")
 sa_classic[, sum(Si)]
 sa_classic = sa_classic[order(-Si), .SD]
 
-# total_classic = sa_classic$results[sensitivity == "Ti"]
-# total_classic = total_classic[order(-original), .SD, by = sensitivity]
-# saveRDS(sa_classic, paste0(tree_path, run, "_sa_classic"))
+if (any(sa_classic[, Si] < 0))
+	warning(paste("There are negatives Si for classic, with min value:", round(sa_classic[, min(Si)], 7)))
 
-comp = merge.data.table(sa_ssm, sa_classic, by = "parameters", suffixes = c("_ssm", "_classic"))
-comp[, diff_Si := 100*(Si_ssm - Si_classic)/Si_classic]
-comp[, diff_Ti := 100*(Ti_ssm - Ti_classic)/Ti_classic]
+# [1] "The following are detected to be non-normal:"
+# [1] "averageGrowth" "dbh_slope"     "dbh_slope2"   
+# [4] "ph_slope"      "ph_slope2"     "pr_slope2"    
+# [7] "tas_slope2" 
 
-comp[, .(parameters, diff_Si, diff_Ti)]
+#### Sensitivity of growth with respect to data only
+## SSM
+sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh0 = quantile(stanData_ssm$dbh_init, c(0.05, 0.95))/stanData_ssm$sd_dbh,
+	sd_dbh = stanData_ssm$sd_dbh, n_param = 5e2, N = 2^16, clim_dt = clim_dt_ssm, seed = 123)
+# sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh0 = dbh0_ssm, sd_dbh = stanData_ssm$sd_dbh, n_param = 1e3, N = 2^14,
+# 	env0 = c(precip = clim_dt_ssm["precip", get(qt_opt["precip"])], tas = clim_dt_ssm["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
+# 	clim_dt = clim_dt_ssm, seed = 123)
+
+saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_", opt_code, "_data.rds"))
+
+## Classic
+sa_classic_data = sensitivityAnalysis_data(model = classic, dbh0 = dbh0_classic, sd_dbh = stanData_classic$sd_dbh, n_param = 1e3, N = 2^14,
+	env0 = c(precip = clim_dt_classic["precip", get(qt_opt["precip"])], tas = clim_dt_classic["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0),
+	clim_dt = clim_dt_classic, seed = 123)
+
+saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_", opt_code, "_data.rds"))
+
+setkey(sa_ssm_data, parameters, sensitivity)
+setkey(sa_classic_data, parameters, sensitivity)
+
+plot_sa(sa_ssm_data, sa_classic_data, dataNames = c("dbh", "precip", "tas", "ph"), plot_opt = "all", type = "Si", n = 2048)
 
 
-#? ------------------------------------------------------------------------------------------------------------------------
-#* ----------------------    PART III: Compute sensitivity analysis with respect to climate input    ----------------------
-#? ------------------------------------------------------------------------------------------------------------------------
 
-fraction_range_climate = function(stanData, model_type, shouldScale = FALSE, frac = 0.01, scaling_dt = NULL)
-{
-	if (shouldScale && is.null(scaling_dt))
-		stop("Scaling demanded, but no scaling provided!")
+# ## Comparison
+# comp = merge.data.table(sa_ssm, sa_classic, by = "parameters", suffixes = c("_ssm", "_classic"))
+# comp[, diff_Si := 100*(Si_ssm - Si_classic)/Si_classic]
+# comp[, diff_Ti := 100*(Ti_ssm - Ti_classic)/Ti_classic]
+
+# comp[, .(parameters, diff_Si, diff_Ti)]
+# comp = comp[order(-Si_ssm), .SD]
+# comp[, .(parameters, diff_Si)]
+
+
+
+# ## Check second order
+# sa_ssm_2 = sensitivityAnalysis(model = ssm, dbh0 = dbh0_ssm, sd_dbh = stanData_ssm$sd_dbh, order = "second",
+# 	env0 = c(precip = clim_dt_ssm["precip", get(qt_opt["precip"])], tas = clim_dt_ssm["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0), clim_dt = clim_dt_ssm, N = 2^19)$results
+# sa_ssm_2[, sum(original), by = sensitivity] #! Shows that there is no interaction, which was expected! 
+# sa_ssm_2[parameters == "dbh_slope.dbh"]
+# sa_ssm_2[parameters == "dbh"]
+# sa_ssm_2[sensitivity == "Si", sum(original)] + sa_ssm_2[sensitivity == "Sij", sum(original)]
+
+# ####! CRASH TEST ZONE
+# params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+# 	"ph_slope", "ph_slope2", "competition_slope")
+# explanatory_vars = c("dbh", "precip", "tas", "ph")
+
+# ## Function to create the "product names", such as dbh with dbh_slope, tas with tas_slope and tas_slope2, etc...
+# product_names = function(search_in, to_search)
+# {
+# 	results = c()
+# 	for (reg in to_search)
+# 	{
+# 		save_reg = reg
+# 		if (reg == "precip")
+# 			reg = "pr"
+# 		results = append(x = results, values = paste0(search_in[stri_detect(str = search_in, regex = reg)], ".", save_reg))
+# 	}
+
+# 	return (results)
+# }
+
+# cross_names = product_names(search_in = params, to_search = explanatory_vars)
+
+# ## SSM, 2nd order
+# sa_ssm_2 = sensitivityAnalysis(model = ssm, dbh0 = dbh0_ssm, sd_dbh = stanData_ssm$sd_dbh, order = "second",
+# 	env0 = c(precip = clim_dt_ssm["precip", get(qt_opt["precip"])], tas = clim_dt_ssm["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0), clim_dt = clim_dt_ssm, N = 2^19)
+
+# saveRDS(sa_ssm_2, paste0(tree_path, "sa_ssm_2.rds"))
+
+# sa_ssm_2 = sa_ssm_2$results
+# if (any(sa_ssm_2[, original] < 0))
+# 	warning(paste("There are negatives values for ssm second order, with a minimum of", round(sa_ssm_2[, min(original)], 5)))
+
+# sa_ssm_2[, sum(original), by = sensitivity]
+# sa_ssm_2[sensitivity == "Si", sum(original)] + sa_ssm_2[sensitivity == "Sij", sum(original)]
+
+# sa_ssm_2[parameters %in% cross_names]
+# sa_ssm_2[sensitivity == "Sij"][!(parameters %in% cross_names), sum(original)]
+
+# Si_ssm = data.table::dcast(data = sa_ssm_2[sensitivity %in% c("Si", "Ti")], formula = parameters ~ sensitivity, value.var = "original")
+# Sij_ssm = data.table::dcast(data = sa_ssm_2[sensitivity == "Sij"], formula = parameters ~ sensitivity, value.var = "original")
+# Sij_ssm_cross = data.table::dcast(data = sa_ssm_2[parameters %in% cross_names], formula = parameters ~ sensitivity, value.var = "original")
+
+# Si_ssm = Si_ssm[order(-Si), .SD]
+# Sij_ssm = Sij_ssm[order(-Sij), .SD]
+# Sij_ssm_cross = Sij_ssm_cross[order(-Sij), .SD]
+
+
+# comp_1_2_order = merge.data.table(x = Si_ssm, y = sa_ssm, by = "parameters", suffixes = c("_2", "_1"))
+# comp_1_2_order[, Si_ratio_percent := 100*Si_2/Si_1]
+
+
+# ## By themes (cf p. 37, Saltelli 2008)
+# ssm_from_params = sa_ssm[parameters %in% params, sum(Si)]
+# ssm_from_data = sa_ssm[parameters %in% explanatory_vars, sum(Si)]
+
+# classic_from_params = sa_classic[parameters %in% params, sum(Si)]
+# classic_from_data = sa_classic[parameters %in% explanatory_vars, sum(Si)]
+
+# 100*(ssm_from_params - classic_from_params)/classic_from_params
+# 100*(ssm_from_data - classic_from_data)/classic_from_data
+
+# ####! END CRASH TEST ZONE
+
+
+# ####! CRASH TEST ZONE II: test posterior SA(G, data)
+# ## Function to compute sensitivity of growth with respect to uncertainty in the data only
+# sensitivityAnalysis_data = function(model, dbh0, sd_dbh, env0, clim_dt, n_param, matrices = c("A", "B", "AB"), order = "first", N = 2^14,
+# 	type = "QRN", first = "saltelli", total = "jansen", seed = NULL)
+# {
+# 	## Check dbh0 and env0
+# 	if (abs(dbh0) > 5)
+# 		warning("Are you sure that dbh0 is scaled?")
+
+# 	if ((env0["precip"] < clim_dt["precip", q05]) || (env0["tas"] < clim_dt["tas", q05]) || (env0["ph"] < clim_dt["ph", q05]))
+# 		warning("Are you sure that env0 is scaled? There are low values below the 5 quantile")
+
+# 	if ((env0["precip"] > clim_dt["precip", q95]) || (env0["tas"] > clim_dt["tas", q95]) || (env0["ph"] > clim_dt["ph", q95]))
+# 		warning("Are you sure that env0 is scaled? There are large values beyond the 95 quantile")
 	
-	range_dt = data.table(variable = c("precip", "tas", "ph"), q05 = numeric(3), q95 = numeric(3))
-	setkey(range_dt, variable)
-	for (currentVar in range_dt[, variable])
+# 	## Prepare the sampling matrices
+# 	# Common variables
+# 	params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2", "ph_slope", "ph_slope2",
+# 		"competition_slope")
+
+# 	if (!is.null(seed))
+# 		set.seed(seed)
+	
+# 	params_values = getParams(model_cmdstan = model, params_names = params, type = "all")
+	
+# 	n_iter = model$metadata()$iter_sampling
+# 	n_chains = model$num_chains()
+# 	n_tot = n_iter*n_chains
+	
+# 	sample_ind = sample(x = 1:n_tot, size = n_param, replace = FALSE)
+
+# 	explanatory_vars = c("dbh", "precip", "tas", "ph")
+
+# 	## Create matrices
+# 	sobol_mat = sobol_matrices(matrices = matrices, N = N, order = order, type = type, params = c(explanatory_vars))
+
+# 	# Rescale the Sobol matrix
+# 	# --- Explanatory variables
+# 	for (currentVar in explanatory_vars)
+# 	{
+# 		if (currentVar == "dbh")
+# 		{
+# 			sobol_mat[, "dbh"] = qnorm(p = sobol_mat[, "dbh"], mean = dbh0, sd = 3/sd_dbh)
+# 		} else {
+# 			sobol_mat[, currentVar] = qnorm(p = sobol_mat[, currentVar], mean = env0[currentVar], sd = clim_dt[currentVar, sd_sa])
+# 		}
+# 	}
+	
+# 	if (any(is.na(sobol_mat)))
+# 		stop(paste("Number of NAs in Sobol's matrix:", sum(is.na(sobol_mat))))
+
+# 	## Run sensitivity analysis
+# 	ind = vector(mode = "list", length = n_param)
+# 	for (j in seq_along(sample_ind))
+# 	{
+# 		current_ind = sample_ind[j]
+# 		params_vec = c(averageGrowth = params_values[, , "averageGrowth"][current_ind],
+# 			dbh_slope = params_values[, , "dbh_slope"][current_ind],
+# 			dbh_slope2 = params_values[, , "dbh_slope2"][current_ind],
+# 			pr_slope = params_values[, , "pr_slope"][current_ind],
+# 			tas_slope = params_values[, , "tas_slope"][current_ind],
+# 			ph_slope = params_values[, , "ph_slope"][current_ind],
+# 			competition_slope = params_values[, , "competition_slope"][current_ind],
+# 			pr_slope2 = params_values[, , "pr_slope2"][current_ind],
+# 			tas_slope2 = params_values[, , "tas_slope2"][current_ind],
+# 			ph_slope2 = params_values[, , "ph_slope2"][current_ind])
+		
+# 		# --- Model output
+# 		y = numeric(nrow(sobol_mat))
+# 		for (i in seq_len(nrow(sobol_mat)))
+# 		{	
+# 			y[i] = growth_fct_meanlog(dbh = sobol_mat[i, "dbh"], pr = sobol_mat[i, "precip"], tas = sobol_mat[i, "tas"],
+# 				ph = sobol_mat[i, "ph"], basalArea = env0["basalArea"],
+# 				params = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)
+
+# 		}
+
+# 		# --- Sobol indices
+# 		ind[[j]] = sobol_indices(matrices = matrices, Y = y, N = N, params = explanatory_vars, first = first, total = total,
+# 			order = order)$results
+
+# 		if (j %% 5 == 0)
+# 			print(paste0(round(100*j/n_param, 2), "% done"))
+# 	}
+# 	print("100% done")
+
+# 	ind = rbindlist(l = ind, idcol = "run")
+# 	if (any(ind[, original] < 0))
+# 			warning("There are negatives Si")
+
+# 	return(ind)
+# }
+
+# sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh0 = dbh0_ssm, sd_dbh = stanData_ssm$sd_dbh, n_param = 1e3, N = 2^14,
+# 	env0 = c(precip = clim_dt_ssm["precip", get(qt_opt["precip"])], tas = clim_dt_ssm["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0), clim_dt = clim_dt_ssm, seed = 123)
+
+# saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_data.rds"))
+
+# sa_classic_data = sensitivityAnalysis_data(model = classic, dbh0 = dbh0_ssm, sd_dbh = stanData_classic$sd_dbh, n_param = 1e3, N = 2^14,
+# 	env0 = c(precip = clim_dt_ssm["precip", get(qt_opt["precip"])], tas = clim_dt_ssm["tas", get(qt_opt["tas"])], ph = 0, basalArea = 0), clim_dt = clim_dt_classic, seed = 123)
+
+# saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_data.rds"))
+
+
+# setkey(sa_ssm_data, parameters, sensitivity)
+# setkey(sa_classic_data, parameters, sensitivity)
+
+# sa_ssm_data[sensitivity == "Si", sum(original), by = run][, range(V1)]
+# sa_classic_data[sensitivity == "Si", sum(original), by = run][, range(V1)]
+
+
+# ####! END CRASH TEST ZONE II
+
+
+
+
+
+# ####! CRASH TEST ZONE III: Plot from discussion with Lisa
+print(2)
+sa_ssm_data_list = list(fagus_sylvatica = readRDS("./Fagus sylvatica/sa_ssm_data.rds"),
+	quercus_petraea = readRDS("./Quercus petraea/sa_ssm_m_m_m_data.rds"))
+
+plot_list_sa = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c("dbh", "precip", "tas", "ph", "standBasalArea"),
+	ls_titles = c(dbh = "Diameter", precip = "Precipitation", tas = "Temperature", ph = "pH", standBasalArea = "Basal area"))
+{
+	# Check data
+	if (length(sa_ssm_data_list) != length(sa_classic_data_list))
+		stop("Error, list should be of the same size")
+
+	ls_species = names(sa_ssm_data_list)
+	if (!all(ls_species %in% names(sa_classic_data_list)))
+		stop("Error, list should contain the same species names")
+
+	if (length(ls_titles) != length(ls_data))
+		stop("ls_data and ls_titles should be of the same size")
+
+	if (!all(ls_data %in% sapply(sa_ssm_data_list, function(zz) {return(unique(zz[, parameters]))})))
+		stop("Some data are not in the SSM list")
+	
+	if (!all(ls_data %in% sapply(sa_classic_data_list, function(zz) {return(unique(zz[, parameters]))})))
+		stop("Some data are not in the classic list")
+
+	# Define empty plot
+	x_max = 2*length(sa_ssm_data_list)
+	y_max = max(max(sapply(sa_ssm_data_list, function(zz) {return (max(zz[sensitivity == "Si", original]))})),
+		max(sapply(sa_classic_data_list, function(zz) {return (max(zz[sensitivity == "Si", original]))})))
+
+	currentVar = ls_data[1] #! TO DELETE, ALTHOUGH IT CHANGES NOTHING
+	for (currentVar in ls_data)
 	{
-		clim = stanData_ssm[[currentVar]]
-		if (shouldScale)
-			clim = (clim - scaling_dt[.(model_type, currentVar), mu])/scaling_dt[.(model_type, currentVar), sd]
-		range_dt[currentVar, c("q05", "q95") := as.list(quantile(clim, c(0.05, 0.95)))]
+		plot(0, type = "n", xlim = c(0, x_max), ylim = c(0, y_max), ylab = "SA", main = ls_titles[currentVar],
+			xlab = "Species", las = 1)
+
+		x_orig = 0.5
+		currentSpecies = ls_species[1] #! TO DELETE, ALTHOUGH IT CHANGES NOTHING
+		for (currentSpecies in ls_species)
+		{
+			x1 = x_orig - 0.05
+			x2 = x1 + 0.05
+			y1 = quantile(sa_ssm_data_list[[currentSpecies]][(sensitivity == "Si") & (parameters == currentVar), original],
+				c(0.05, 0.5, 0.95))
+			y2 = quantile(sa_classic_data_list[[currentSpecies]][(sensitivity == "Si") & (parameters == currentVar), original],
+				c(0.05, 0.5, 0.95))
+
+			segments(x0 = x1, y0 = y1["5%"], x1 = x1, y1 = y1["95%"])
+			points(x = x1, y = y1["50%"], pch = 19, cex = 1)
+			points(x = x1, y = y1["5%"], pch = "-", cex = 1.1)
+			points(x = x1, y = y1["95%"], pch = "-", cex = 1.1)
+
+			segments(x0 = x2, y0 = y2["5%"], x1 = x2, y1 = y2["95%"])
+			points(x = x2, y = y2["50%"], pch = 19, cex = 1)
+			points(x = x2, y = y2["5%"], pch = "-", cex = 1.1)
+			points(x = x2, y = y2["95%"], pch = "-", cex = 1.1)
+
+			x_orig = x_orig + 1
+		}
 	}
 
-	range_dt[, range := q95 - q05]
-	range_dt[, sd_sa := frac*range]
-
-	return(range)
+	
 }
+
+
+# ####! END CRASH TEST ZONE III
 
