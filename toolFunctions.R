@@ -3178,3 +3178,36 @@ plotGrowth_dbh = function(species, run, ls_info, caption = TRUE, extension = NUL
 		dev.off()
 	}
 }
+
+## Function to print the parameters in a latex table
+printParams = function(ls_species, params_names, run = 1)
+{
+	ssm_params = vector(mode = "list", length = length(ls_species))
+	names(ssm_params) = ls_species
+	classic_params = vector(mode = "list", length = length(ls_species))
+	names(classic_params) = ls_species
+
+	for (species in ls_species)
+	{
+		# Paths and check-up
+		tree_path = paste0("./", species, "/")
+		if (!dir.exists(tree_path))
+			stop(paste0("Path not found for species <", species, ">."))
+
+		# Results
+		# --- State-Space Model approach
+		info_lastRun = getLastRun(path = tree_path, begin = "growth-", extension = "_main.rds$", run = run)
+		ssm = readRDS(paste0(tree_path, info_lastRun[["file"]]))
+
+		# --- Classic approach
+		info_lastRun = getLastRun(path = tree_path, begin = "growth-", extension = "_classic.rds$", run = run)
+		classic = readRDS(paste0(tree_path, info_lastRun[["file"]]))
+
+		ssm_params[[species]] = getParams(model_cmdstan = ssm, params_names = params_names, type = "quantile")
+		classic_params[[species]] = getParams(model_cmdstan = classic, params_names = params_names, type = "quantile")
+	}
+	ssm_params = rbindlist(l = ssm_params, idcol = "speciesName_sci")
+	classic_params = rbindlist(l = classic_params, idcol = "speciesName_sci")
+
+	return (list(ssm_params = ssm_params, classic_params = classic_params))
+}
