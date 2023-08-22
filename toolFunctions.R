@@ -1771,7 +1771,8 @@ optimumPredictorValue = function(slope, slope2, scaling_mu = NULL, scaling_sd = 
 }
 
 ## Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
-plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected_plot_id = NULL, init_dbh = NULL, extension = NULL, ...)
+plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected_plot_id = NULL, init_dbh = NULL, extension = NULL,
+	simOnly = FALSE, label_axis = FALSE, ...)
 {
 	# Local function to format data
 	formatNewData = function(tree_path, run, variable, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
@@ -1813,6 +1814,14 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 			stanData_classic$x_r = c(pr_rep, tas_rep, gradient_classic, ba_rep)
 		}
 
+		if (variable == "ba")
+		{
+			gradient_ssm = (scaled_gradient - stanData_ssm$ba_mu)/stanData_ssm$ba_sd
+			gradient_classic = (scaled_gradient - stanData_classic$ba_mu)/stanData_classic$ba_sd
+			stanData_ssm$x_r = c(pr_rep, tas_rep, gradient_ssm, ba_rep)
+			stanData_classic$x_r = c(pr_rep, tas_rep, ph_rep, gradient_classic)
+		}
+
 		stanData_ssm$n_climate_new = n_climate_new
 		stanData_ssm$n_dbh_new = n_dbh_new
 		stanData_ssm$n_growth = stanData_ssm$n_latentGrowth
@@ -1833,8 +1842,8 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 	if (!dir.exists(tree_path))
 		stop(paste0("Path not found for species <", species, ">."))
 
-	if (!all(variables %in% c("pr", "tas", "ph")))
-		stop("Variables are limited to 'pr', 'tas', and 'ph'")
+	if (!all(variables %in% c("pr", "tas", "ph", "ba")))
+		stop("Variables are limited to 'pr', 'tas', 'ph', and 'ba'")
 
 	if (!is.null(extension))
 	{
@@ -1849,14 +1858,13 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 	# Results
 	# --- State-Space Model approach
 	info_lastRun = getLastRun(path = tree_path, begin = "growth-", extension = "_main.rds$", run = run)
-	lastRun = info_lastRun[["file"]]
-	ssm = readRDS(paste0(tree_path, lastRun))
-	nb_nfi = ssm$metadata()$stan_variable_sizes$etaObs
+	ssm = readRDS(paste0(tree_path, info_lastRun[["file"]]))
 
 	# --- Classic approach
 	info_lastRun = getLastRun(path = tree_path, begin = "growth-", extension = "_classic.rds$", run = run)
-	lastRun = info_lastRun[["file"]]
-	classic = readRDS(paste0(tree_path, lastRun))
+	classic = readRDS(paste0(tree_path, info_lastRun[["file"]]))
+
+	nb_nfi = ssm$metadata()$stan_variable_sizes$etaObs # Same if I use classic obviously
 
 	# Associated estimated parameters
 	params_names = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
@@ -1930,15 +1938,30 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 		ph_max = unname(unlist(speciesInfo_runs[species, ..varMax]))
 	}
 	n_ph = round(unname(round(ph_max - ph_min) + 1)/0.2) # To force a delta_ph of around 0.2
+	
+	# ------ Ph
+	if (any(ba_ind))
+	{
+		if (!all(c("ba_min", "ba_max") %in% ls_names[ba_ind]))
+			stop("If you want to provide informations on temperature, please provide ph_min, ph_max")
+		ba_min = providedArgs[["ba_min"]]
+		ba_max = providedArgs[["ba_max"]]
+	} else {
+		varMin = paste0("ba_025_", run)
+		varMax = paste0("ba_975_", run)
+		ba_min = unname(unlist(speciesInfo_runs[species, ..varMin]))
+		ba_max = unname(unlist(speciesInfo_runs[species, ..varMax]))
+	}
+	n_ba = round(unname(round(ba_max - ba_min) + 1)/8) # To force a delta_ba of around 8
 
 	# Diameter space
-	dbh_ind = stri_detect(str = ls_names, regex = ".*_dbh$")
+	dbh_ind = stri_detect(str = ls_names, regex = "^dbh_m.*")
 	if (any(dbh_ind))
 	{
-		if (!all(ls_names[ph_ind] %in% c("dbh_min", "dbh_max")))
-			stop("If you want to provide informations on diameters, please provide dbh_min and dbh_max")
-		lower_dbh = providedArgs[["lower_dbh"]]
-		upper_dbh = providedArgs[["upper_dbh"]]
+		if (!all(c("dbh_min", "dbh_max") %in% ls_names[dbh_ind]))
+			stop("If you want to provide informations on diameters, please provide both dbh_min and dbh_max")
+		lower_dbh = providedArgs[["dbh_min"]]
+		upper_dbh = providedArgs[["dbh_max"]]
 	} else {
 		varMin = paste0("dbh_025_", run)
 		varMax = paste0("dbh_975_", run)
@@ -1950,13 +1973,29 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 	# Simulate growth along the environmental gradient for many dbh
 	# --- Common variables
 	n_chains = ssm$num_chains() # Same for classic approach
-	minGradient = c(pr = pr_min, tas = tas_min, ph = ph_min)
-	maxGradient = c(pr = pr_max, tas = tas_max, ph = ph_max)
-	n_env = c(pr = n_pr, tas = n_tas, ph = n_ph)
+	minGradient = c(pr = pr_min, tas = tas_min, ph = ph_min, ba = ba_min)
+	maxGradient = c(pr = pr_max, tas = tas_max, ph = ph_max, ba = ba_max)
+	n_env = c(pr = n_pr, tas = n_tas, ph = n_ph, ba = n_ba)
+
+	sim_ssm_classic = NA
+	if (simOnly)
+	{
+		sim_ssm_classic = vector(mode = "list", length = 2)
+		names(sim_ssm_classic) = c("ssm", "classic")
+		sim_ssm_classic[["ssm"]] = vector(mode = "list", length = 2*length(variables))
+		names(sim_ssm_classic[["ssm"]]) = c(variables, paste0("growth_quantiles_", variables))
+		sim_ssm_classic[["classic"]] = vector(mode = "list", length = 2*length(variables))
+		names(sim_ssm_classic[["classic"]]) = c(variables, paste0("growth_quantiles_", variables))
+
+		sim_scaled_gradient = vector(mode = "list", length = length(variables)) # Same gradient regardless of the method (ssm or classic)
+		names(sim_scaled_gradient) = variables
+	}
 	
+	# --- Loop over variables
 	for (currentVar in variables)
 	{
 		stanData = formatNewData(tree_path, run, currentVar, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
+		filename = NA
 
 		# --- Generate quantities
 		generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData[["stanData_ssm"]], parallel_chains = n_chains)
@@ -1970,8 +2009,8 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 		# --- Select the optimum dbh for growth
 		optimumDbh_ssm = optimumPredictorValue(slope = estimated_params_ssm["dbh_slope"], slope2 = estimated_params_ssm["dbh_slope2"],
 			scaling_sd = stanData[["stanData_ssm"]]$sd_dbh)
-		optimumDbh_classic = optimumPredictorValue(slope = estimated_params_classic["dbh_slope"], slope2 = estimated_params_classic["dbh_slope2"],
-			scaling_sd = stanData[["stanData_classic"]]$sd_dbh)
+		optimumDbh_classic = optimumPredictorValue(slope = estimated_params_classic["dbh_slope"],
+			slope2 = estimated_params_classic["dbh_slope2"], scaling_sd = stanData[["stanData_classic"]]$sd_dbh)
 
 		new_dbh = seq(lower_dbh, upper_dbh, length.out = n_dbh_new)
 		optimum_ind_dbh_ssm = which.min(abs(new_dbh - optimumDbh_ssm))
@@ -1996,15 +2035,29 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 		growth_q95_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.95)
 		growth_classic = apply(X = growth_classic, FUN = mean, MARGIN = 3)
 
+		if (simOnly)
+		{
+			currentQuantile = paste0("growth_quantiles_", currentVar)
+			sim_ssm_classic[["ssm"]][[currentVar]] = growth_ssm
+			sim_ssm_classic[["ssm"]][[currentQuantile]] = list(growth_q5_ssm, growth_q95_ssm)
+			
+			sim_ssm_classic[["classic"]][[currentVar]] = growth_classic
+			sim_ssm_classic[["classic"]][[currentQuantile]] = list(growth_q5_classic, growth_q95_classic)
+
+			sim_scaled_gradient[[currentVar]] = stanData[["scaled_gradient"]]
+			
+			next
+		}
+
 		# --- plot
 		if (currentVar == "pr")
 		{
-			selectedVariable = "Precipitation"
+			selectedVariable = "Precipitation (mm/year)"
 			xlim = c(speciesInfo[, min(pr_025)], speciesInfo[, max(pr_975)])
 		}
 		if (currentVar == "tas")
 		{
-			selectedVariable = "Temperature"
+			selectedVariable = "Temperature (°C)"
 			xlim = c(speciesInfo[, min(tas_025)], speciesInfo[, max(tas_975)])
 		}
 		if (currentVar == "ph")
@@ -2012,37 +2065,51 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 			selectedVariable = "pH"
 			xlim = c(speciesInfo[, min(ph_025)], speciesInfo[, max(ph_975)])
 		}
-		
+		if (currentVar == "ba")
+		{
+			selectedVariable = "Basal area (m^2/ha)" # This will need to be modified manually for each tikz figure
+			xlim = c(speciesInfo[, min(ba_025)], speciesInfo[, max(ba_975)])
+		}
+
+		if (label_axis)
+		{
+			xlab = selectedVariable
+			ylab = "Growth (mm/year)"
+		} else {
+			xlab = ""
+			ylab = ""
+		}
+
 		if (!is.null(extension))
 		{
 			for (currentExt in extension)
 			{
-				filename = paste0(tree_path, "ssm-vs-classic_approach_", selectedVariable, ".", currentExt)
+				filename = paste0(tree_path, "ssm-vs-classic_approach_", currentVar, "_", species, ".", currentExt)
 				if (currentExt == "pdf")
 					pdf(filename, height = 10, width = 10)
 				if (currentExt == "tex")
 					tikz(filename, height = 3, width = 3)
-				plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "Growth", col = "#F4C430", type = "l",
-					lwd = 2, lty = 1, xlim = xlim, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
-				lines(stanData[["scaled_gradient"]], growth_classic, col = "#034C4F", lwd = 2, lty = 2)
+				plot(stanData[["scaled_gradient"]], growth_ssm, xlab = xlab, ylab = ylab, col = "#E9851D", type = "l",
+					lwd = 2, lty = 1, las = 1, xlim = xlim, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
+				lines(stanData[["scaled_gradient"]], growth_classic, col = "#2E77AB", lwd = 2, lty = 2)
 				polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_ssm), growth_q95_ssm),
-					col = "#F4C43022", border = NA)
+					col = "#E9851D66", border = NA)
 				polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_classic), growth_q95_classic),
-					col = "#034C4F22", border = NA)
+					col = "#2E77AB66", border = NA)
 				if (caption)
-					legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#F4C430", "#034C4F"), box.lwd = 0)
+					legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#E9851D", "#2E77AB"), box.lwd = 0)
 				dev.off()
 			}
 		} else {
-			plot(stanData[["scaled_gradient"]], growth_ssm, xlab = selectedVariable, ylab = "Growth", col = "#F4C430", type = "l",
-				lwd = 2, lty = 1, xlim = xlim, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
-			lines(stanData[["scaled_gradient"]], growth_classic, col = "#034C4F", lwd = 2, lty = 2)
+			plot(stanData[["scaled_gradient"]], growth_ssm, xlab = xlab, ylab = ylab, col = "#E9851D", type = "l",
+				lwd = 2, lty = 1, las = 1, xlim = xlim, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
+			lines(stanData[["scaled_gradient"]], growth_classic, col = "#2E77AB", lwd = 2, lty = 2)
 			polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_ssm), growth_q95_ssm),
-				col = "#F4C43022", border = NA)
+				col = "#E9851D66", border = NA)
 			polygon(c(rev(stanData[["scaled_gradient"]]), stanData[["scaled_gradient"]]), c(rev(growth_q5_classic), growth_q95_classic),
-				col = "#034C4F22", border = NA)
+				col = "#2E77AB66", border = NA)
 			if (caption)
-				legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#F4C430", "#034C4F"), box.lwd = 0)
+				legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#E9851D", "#2E77AB"), box.lwd = 0)
 			dev.off()
 		}
 	}
@@ -2139,11 +2206,11 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 			tikz(filename, height = 1.2, width = 3.883282)
 			op = par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.3, 0), tck = -0.015)
 		}
-		plot(year_start:year_end, simulatedGrowth_avg_ssm, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#F4C430",
+		plot(year_start:year_end, simulatedGrowth_avg_ssm, type = "l", xlab = "Year", ylab = "Growth (mm/yr)", lwd = 2, col = "#E9851D",
 			ylim = c(min(simulatedGrowth_avg_ssm_q2.5), max(simulatedGrowth_avg_ssm_q97.5)))
 		polygon(c(rev(year_start:year_end), year_start:year_end), c(rev(simulatedGrowth_avg_ssm_q2.5), simulatedGrowth_avg_ssm_q97.5),
-			col = "#F4C43022", border = NA)
-		legend(x = "topleft", legend = "SSM", fill = "#F4C430", box.lwd = 0)
+			col = "#E9851D66", border = NA)
+		legend(x = "topleft", legend = "SSM", fill = "#E9851D", box.lwd = 0)
 		dev.off()
 
 		filename = paste0(tree_path, "classic_approach_time_series.", extension)
@@ -2154,14 +2221,17 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 			tikz(filename, height = 1.2, width = 3.883282)
 			op = par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.3, 0), tck = -0.015)
 		}
-		plot(year_start:year_end, simulatedGrowth_avg_classic, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#034C4F",
+		plot(year_start:year_end, simulatedGrowth_avg_classic, type = "l", xlab = "Year", ylab = "Growth (mm/yr)", lwd = 2, col = "#2E77AB",
 			ylim = c(min(simulatedGrowth_avg_classic_q2.5), max(simulatedGrowth_avg_classic_q97.5)))
 		polygon(c(rev(year_start:year_end), year_start:year_end), c(rev(simulatedGrowth_avg_classic_q2.5), simulatedGrowth_avg_classic_q97.5),
-			col = "#034C4F22", border = NA)
+			col = "#2E77AB66", border = NA)
 		abline(h = simulatedGrowth_avg_clim_avg, lwd = 2, lty = 2)
-		legend(x = "topleft", legend = "Classic", fill = "#034C4F", box.lwd = 0)
+		legend(x = "topleft", legend = "Classic", fill = "#2E77AB", box.lwd = 0)
 		dev.off()
 	}
+
+	if (simOnly)
+		return(list(sim_scaled_gradient = sim_scaled_gradient, sim_ssm_classic = sim_ssm_classic))
 
 	return(list(optimumDbh_ssm = optimumDbh_ssm, optimumDbh_classic = optimumDbh_classic, filename = filename))
 }
