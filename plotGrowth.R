@@ -70,4 +70,4 @@ print(checkup)
 
 plotGrowth_dbh(species = species, run = run, ls_info = ls_info, caption = FALSE, extension = "tex",
 	dbh_min = info_runs[species, dbh_025_1], dbh_max = info_runs[species, dbh_975_1],
-	xlim = info_runs[, c(min(dbh_025_1), max(dbh_975_1))])
+	span = info_runs[, c(min(dbh_025_1), max(dbh_975_1))])

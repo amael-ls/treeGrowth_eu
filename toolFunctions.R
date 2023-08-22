@@ -3295,7 +3295,7 @@ plotGrowth_dbh = function(species, run, ls_info, caption = TRUE, extension = NUL
 			if (currentExt == "tex")
 				tikz(filename, height = 3, width = 3)
 			plot(stanData[["dbh"]], growth_ssm, xlab = xlab, ylab = ylab, col = "#E9851D", type = "l",
-				lwd = 2, lty = 1, las = 1, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
+				lwd = 2, lty = 1, las = 1, xlim = span, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
 			lines(stanData[["dbh"]], growth_classic, col = "#2E77AB", lwd = 2, lty = 2)
 			polygon(c(rev(stanData[["dbh"]]), stanData[["dbh"]]), c(rev(growth_q5_ssm), growth_q95_ssm),
 				col = "#E9851D66", border = NA)
