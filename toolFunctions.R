@@ -3027,3 +3027,154 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 	return (list(simulated_dbh_ssm = simulated_dbh_ssm, simulated_dbh_classic = simulated_dbh_classic,
 		simulated_dbh_classic_avg = simulated_dbh_classic_avg, years = year_start:(year_end + 1)))
 }
+
+## Function to plot growth vs dbh with the uncertainty related to parameters estimation (minus process error)
+plotGrowth_dbh = function(species, run, ls_info, caption = TRUE, extension = NULL, label_axis = FALSE, ...)
+{
+	# Local function to format data
+	formatNewData = function(tree_path, run, n_dbh_new, lower_dbh, upper_dbh)
+	{
+		stanData_ssm = readRDS(paste0(tree_path, run, "_stanData.rds"))
+		stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
+
+		n_climate_new = 1
+
+		# --- Species-specific averages (scaled)
+		pr_rep = 0
+		tas_rep = 0
+		ph_rep = 0
+		ba_rep = 0
+
+		stanData_ssm$x_r = c(pr_rep, tas_rep, ph_rep, ba_rep)
+		stanData_classic$x_r = c(pr_rep, tas_rep, ph_rep, ba_rep)
+
+		stanData_ssm$n_climate_new = 1
+		stanData_ssm$n_dbh_new = n_dbh_new
+		stanData_ssm$n_growth = stanData_ssm$n_latentGrowth
+		stanData_ssm$lower_bound = unname(lower_dbh)
+		stanData_ssm$upper_bound = unname(upper_dbh)
+
+		stanData_classic$n_climate_new = 1
+		stanData_classic$n_dbh_new = n_dbh_new
+		stanData_classic$lower_bound = unname(lower_dbh)
+		stanData_classic$upper_bound = unname(upper_dbh)
+
+		return(list(stanData_ssm = stanData_ssm, stanData_classic = stanData_classic, dbh = seq(lower_dbh, upper_dbh, length.out = n_dbh_new)))
+	}
+
+	# Paths and check-up
+	tree_path = paste0("./", species, "/")
+	if (!dir.exists(tree_path))
+		stop(paste0("Path not found for species <", species, ">."))
+
+	if (!is.null(extension))
+	{
+		if (!all(extension %in% c("pdf", "tex")))
+			stop("Extension can only be pdf or tex")
+	}
+
+	# Info species to get parametrisation range 
+	speciesInfo = ls_info[["info"]]
+	speciesInfo_runs = ls_info[["range_subset"]]
+
+	# Results
+	# --- State-Space Model approach
+	info_lastRun = getLastRun(path = tree_path, begin = "growth-", extension = "_main.rds$", run = run)
+	lastRun = info_lastRun[["file"]]
+	ssm = readRDS(paste0(tree_path, lastRun))
+
+	# --- Classic approach
+	info_lastRun = getLastRun(path = tree_path, begin = "growth-", extension = "_classic.rds$", run = run)
+	lastRun = info_lastRun[["file"]]
+	classic = readRDS(paste0(tree_path, lastRun))
+
+	# Simulate growth for many dbh, environment set to 0 (i.e., average)
+	# --- Stan models to simulate growth
+	gq_model_ssm = cmdstan_model("generate_growth.stan")
+	gq_model_classic = cmdstan_model("generate_growth_classic.stan")
+
+	# --- Diameter space
+	providedArgs = list(...)
+	nbArgs = length(providedArgs)
+	ls_names = names(providedArgs)
+
+	dbh_ind = stri_detect(str = ls_names, regex = "^dbh_m.*")
+	if (any(dbh_ind))
+	{
+		if (!all(c("dbh_min", "dbh_max") %in% ls_names[dbh_ind]))
+			stop("If you want to provide informations on diameters, please provide both dbh_min and dbh_max")
+		lower_dbh = providedArgs[["dbh_min"]]
+		upper_dbh = providedArgs[["dbh_max"]]
+	} else {
+		varMin = paste0("dbh_025_", run)
+		varMax = paste0("dbh_975_", run)
+		lower_dbh = unname(unlist(speciesInfo_runs[species, ..varMin]))
+		upper_dbh = unname(unlist(speciesInfo_runs[species, ..varMax]))
+	}
+	n_dbh_new = round(unname(round(upper_dbh - lower_dbh) + 1)/5) # To force a delta_dbh of around 5 mm
+
+	# Simulate growth along the environmental gradient for many dbh
+	# --- Common variables
+	n_chains = ssm$num_chains() # Same for classic approach
+	stanData = formatNewData(tree_path, run, n_dbh_new, lower_dbh, upper_dbh)
+
+	# --- Generate quantities
+	generate_quantities_ssm = gq_model_ssm$generate_quantities(ssm$draws(), data = stanData[["stanData_ssm"]], parallel_chains = n_chains)
+	generate_quantities_classic = gq_model_classic$generate_quantities(classic$draws(), data = stanData[["stanData_classic"]],
+		parallel_chains = n_chains)
+
+	growth_ssm = stanData[["stanData_ssm"]]$sd_dbh*generate_quantities_ssm$draws("simulatedGrowth_avg")
+	growth_classic = stanData[["stanData_classic"]]$sd_dbh*generate_quantities_classic$draws("simulatedGrowth_avg")
+
+	# --- Compute the 5 and 95 quantiles due to uncertainty on parameters (no process error!)
+	growth_q5_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.05)
+	growth_q95_ssm = apply(X = growth_ssm, FUN = quantile, MARGIN = 3, probs = 0.95)
+	growth_ssm = apply(X = growth_ssm, FUN = mean, MARGIN = 3)
+
+	growth_q5_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.05)
+	growth_q95_classic = apply(X = growth_classic, FUN = quantile, MARGIN = 3, probs = 0.95)
+	growth_classic = apply(X = growth_classic, FUN = mean, MARGIN = 3)
+
+	# --- plot
+	if (label_axis)
+	{
+		xlab = "Diameter (mm)"
+		ylab = "Growth (mm/year)"
+	} else {
+		xlab = ""
+		ylab = ""
+	}
+
+	if (!is.null(extension))
+	{
+		for (currentExt in extension)
+		{
+			filename = paste0(tree_path, "ssm-vs-classic_approach_dbh_", species, ".", currentExt)
+			if (currentExt == "pdf")
+				pdf(filename, height = 10, width = 10)
+			if (currentExt == "tex")
+				tikz(filename, height = 3, width = 3)
+			plot(stanData[["dbh"]], growth_ssm, xlab = xlab, ylab = ylab, col = "#E9851D", type = "l",
+				lwd = 2, lty = 1, las = 1, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
+			lines(stanData[["dbh"]], growth_classic, col = "#2E77AB", lwd = 2, lty = 2)
+			polygon(c(rev(stanData[["dbh"]]), stanData[["dbh"]]), c(rev(growth_q5_ssm), growth_q95_ssm),
+				col = "#E9851D66", border = NA)
+			polygon(c(rev(stanData[["dbh"]]), stanData[["dbh"]]), c(rev(growth_q5_classic), growth_q95_classic),
+				col = "#2E77AB66", border = NA)
+			if (caption)
+				legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#E9851D", "#2E77AB"), box.lwd = 0)
+			dev.off()
+		}
+	} else {
+		plot(stanData[["dbh"]], growth_ssm, xlab = xlab, ylab = ylab, col = "#E9851D", type = "l",
+			lwd = 2, lty = 1, las = 1, ylim = c(0, max(c(growth_q95_ssm, growth_q95_classic))))
+		lines(stanData[["dbh"]], growth_classic, col = "#2E77AB", lwd = 2, lty = 2)
+		polygon(c(rev(stanData[["dbh"]]), stanData[["dbh"]]), c(rev(growth_q5_ssm), growth_q95_ssm),
+			col = "#E9851D66", border = NA)
+		polygon(c(rev(stanData[["dbh"]]), stanData[["dbh"]]), c(rev(growth_q5_classic), growth_q95_classic),
+			col = "#2E77AB66", border = NA)
+		if (caption)
+			legend(x = "topright", legend = c("SSM", "Classic"), fill = c("#E9851D", "#2E77AB"), box.lwd = 0)
+		dev.off()
+	}
+}
