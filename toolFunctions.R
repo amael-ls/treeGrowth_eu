@@ -24,6 +24,7 @@
 #	- validationTreeRing: Function to compare tree ring time-series with simulated time series from the fitted models
 #	- infoSpecies: Function to give species-specific range and dataset range of predictors and dbh
 #	- climQuantiles: Function to compute, extract, and save climatic quantiles on rasters
+#	- printParams: Function to print the parameters in a latex table
 #
 ## Comments
 # This R file contains tool functions only that help me to analyse the results and do some check-up. Note that some functions are quite
@@ -35,7 +36,7 @@
 getParams = function(model_cmdstan, params_names, type = "mean", ...)
 {
 	if (!(type %in% c("all", "chain-iter", "mean", "median", "quantile")))
-		stop("Unknown type. Please choose iter-chain, mean, median, or quantile")
+		stop("Unknown type. Please choose all, iter-chain, mean, median, or quantile")
 	
 	if (type %in% c("chain-iter", "mean", "median"))
 	{
@@ -268,7 +269,6 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	# Check-up
 	if (!all(class(draws) == c("draws_array", "draws", "array")))
 		stop("Draws should be an array (a list) extracted from a CmdStanMCMC object (CmdStanMCMC objects)")
-
 	
 	if (!is.null(fun))
 	{
@@ -560,8 +560,8 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 	# Plot prior
 	if (!is.null(fun))
 	{
-		curve(fun(x, arg1, arg2), add = TRUE, lwd = 2, col = "#F4C430")
-		DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#F4C43066", density = NA)
+		curve(fun(x, arg1, arg2), add = TRUE, lwd = 2, col = "#E9851D")
+		DescTools::Shade(fun(x, arg1, arg2), breaks = c(min_x, max_x), col = "#E9851D66", density = NA)
 	}
 
 	# Add legend
@@ -571,19 +571,19 @@ lazyPosterior = function(draws, fun = NULL, expand_bounds = FALSE, filename = NU
 
 	if (!multi && !is.null(ls_nfi))
 		if (length(ls_nfi) != 1)
-			warning("To many NFI provided in ls_nfi! The legend might not be correctly printed")
+			warning("Too many NFI provided in ls_nfi! The legend might not be correctly printed")
 
 	if (multi)
 	{
 		legend_text = ifelse(is.null(fun), paste("Posterior", if (!is.null(ls_nfi)) ls_nfi else 1:length_params),
 			c("Prior", paste("Posterior", if (!is.null(ls_nfi)) ls_nfi else 1:length_params)))
-		legend_colours = ifelse(is.null(fun), colours_str, c("#F4C430", colours_str))
+		legend_colours = ifelse(is.null(fun), colours_str, c("#E9851D", colours_str))
 		
 		legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
 	} else {
 		legend_text = ifelse(is.null(fun), paste("Posterior", ifelse(!is.null(ls_nfi), ls_nfi, "")),
 			c("Prior", paste("Posterior", ifelse(!is.null(ls_nfi), ls_nfi, ""))))
-		legend_colours = ifelse(is.null(fun), "#295384", c("#F4C430", "#295384"))
+		legend_colours = ifelse(is.null(fun), "#295384", c("#E9851D", "#295384"))
 
 		legend(x = "topright", legend = legend_text, fill = legend_colours, box.lwd = 0)
 	}
@@ -1575,18 +1575,18 @@ probaExtremeObs = function(posteriorSim, ...)
 }
 
 ## Function to rescale parameters (intercept and slopes)
-rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
+rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors, returnList = TRUE)
 {
 	required_params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope",
-		"tas_slope2", "ph_slope", "ph_slope2", "competition_slope", "sigmaProc")
+		"tas_slope2", "ph_slope", "ph_slope2", "competition_slope")
 	
-	if (!all(names(params) %in% required_params))
+	if (!all(required_params %in% names(params)))
 		stop("Some required parameters are missing")
 
-	if (!all(names(mu_predictors) %in% c("pr", "tas", "ph", "basalArea")))
+	if (!all(c("pr", "tas", "ph", "basalArea") %in% names(mu_predictors)))
 		stop("Some required mu are missing")
 
-	if (!all(names(sd_predictors) %in% c("pr", "tas", "ph", "basalArea")))
+	if (!all(c("pr", "tas", "ph", "basalArea") %in% names(sd_predictors)))
 		stop("Some required sd are missing")
 	
 	# beta_0 = scaled beta_0 - Σ scaled gamma_i * mu_i/sd_i + Σ scaled delta_j * mu_j^2/sd_j^2 + log(sd_dbh)
@@ -1623,14 +1623,65 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 	slope_quadratic_predictors_rescale["tas_slope2"] = params["tas_slope2"]/sd_predictors["tas"]^2
 	slope_quadratic_predictors_rescale["ph_slope2"] = params["ph_slope2"]/sd_predictors["ph"]^2
 
-	errors_rescale = numeric(1)
-	names(errors_rescale) = c("sigmaProc")
-
-	errors_rescaled["sigmaProc"] = params["sigmaProc"] # It does not change for the lognormal, only meanlog get a "+ log(sd_dbh)"
+	if (!returnList)
+		return(c(intercept_rescale, slope_dbh_rescale, slope_quadratic_dbh_rescale,
+			slope_predictors_rescale["pr_slope"], slope_quadratic_predictors_rescale["pr_slope2"],
+			slope_predictors_rescale["tas_slope"], slope_quadratic_predictors_rescale["tas_slope2"],
+			slope_predictors_rescale["ph_slope"], slope_quadratic_predictors_rescale["ph_slope2"],
+			slope_predictors_rescale["competition_slope"]))
 
 	return(list(intercept_rescale = intercept_rescale, slope_dbh_rescale = slope_dbh_rescale,
 		slope_quadratic_dbh_rescale = slope_quadratic_dbh_rescale, slope_predictors_rescale = slope_predictors_rescale,
-		slope_quadratic_predictors_rescale = slope_quadratic_predictors_rescale, errors_rescale = errors_rescale))
+		slope_quadratic_predictors_rescale = slope_quadratic_predictors_rescale))
+}
+
+## Function to rescale poisteriors (intercept and slopes)
+rescalePosterior = function(model, sd_dbh, mu_predictors, sd_predictors)
+{
+	if (!all(c("CmdStanMCMC", "CmdStanFit", "R6") %in% class(model)))
+		stop("model must be an MCMC object fitted with cmdstanr")
+
+	params_names = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
+		"ph_slope", "ph_slope2", "competition_slope")
+	
+	ls_draws = vector(mode = "list", length = length(params_names))
+	names(ls_draws) = params_names
+	for (param in params_names)
+		ls_draws[[param]] = model$draws(param)
+
+	n_chains = model$num_chains()
+	n_iter = model$metadata()$iter_sampling
+
+	posteriors = array(data = NA, dim = c(n_iter, n_chains, length(params_names)), dimnames = list(NULL, NULL, params_names))
+	posteriors = posterior::as_draws_array(posteriors)
+
+	for (chain in seq_len(n_chains))
+	{
+		for (iter in seq_len(n_iter))
+		{
+			currentParams = c(averageGrowth = ls_draws[["averageGrowth"]][iter, chain, ],
+			dbh_slope = ls_draws[["dbh_slope"]][iter, chain, ],
+			dbh_slope2 = ls_draws[["dbh_slope2"]][iter, chain, ],
+			pr_slope = ls_draws[["pr_slope"]][iter, chain, ],
+			pr_slope2 = ls_draws[["pr_slope2"]][iter, chain, ],
+			tas_slope = ls_draws[["tas_slope"]][iter, chain, ],
+			tas_slope2 = ls_draws[["tas_slope2"]][iter, chain, ],
+			ph_slope = ls_draws[["ph_slope"]][iter, chain, ],
+			ph_slope2 = ls_draws[["ph_slope2"]][iter, chain, ],
+			competition_slope = ls_draws[["competition_slope"]][iter, chain, ])
+
+			params = rescaleParams(currentParams, sd_dbh, mu_predictors, sd_predictors, returnList = FALSE)
+			if (!all(names(params) == params_names))
+				stop("Parameters' name mismatch. Check the names AND the order of the names")
+
+			posteriors[iter, chain, ] = params
+
+			if (iter %% 200 == 0)
+				print(paste("Chain", chain, ": iteration", iter, "over", n_iter, "done"))
+		}
+		print(paste("Chain", chain, "over", n_chains, "done"))
+	}
+	return (posteriors)
 }
 
 ## Function to compute growth, the data table must be sorted by year within tree id and plot id
@@ -2907,18 +2958,18 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 
 	# Prepare climate
 	dataEnv_ls = getEnvSeries(species, run)
-	precipitations = dataEnv_ls[["dataEnv"]][selected_plot_id, pr]
-	temperatures = dataEnv_ls[["dataEnv"]][selected_plot_id, tas]
-	ph = dataEnv_ls[["dataEnv"]][selected_plot_id, ph]
-	basalAreas = dataEnv_ls[["dataEnv"]][selected_plot_id, standBasalArea_interp]
+	precipitations = dataEnv_ls[["dataEnv"]][selected_plot_id, pr, by = .EACHI][, pr]
+	temperatures = dataEnv_ls[["dataEnv"]][selected_plot_id, tas, by = .EACHI][, tas]
+	ph = dataEnv_ls[["dataEnv"]][selected_plot_id, ph, by = .EACHI][, ph]
+	basalAreas = dataEnv_ls[["dataEnv"]][selected_plot_id, standBasalArea_interp, by = .EACHI][, standBasalArea_interp]
 
 	if (length(temperatures) != sum(nbYearsGrowth_new) + length(init_dbh))
 		stop("Dimensions mismatch between climate and number of latent growth, individuals")
 
 	# Extract common time-span for all the trees
-	time_span = dataEnv_ls[["dataEnv"]][selected_plot_id, min(year), by = plot_id]
+	time_span = dataEnv_ls[["dataEnv"]][unique(selected_plot_id), min(year), by = plot_id]
 	setnames(x = time_span, old = "V1", new = "minYear")
-	time_span[ , maxYear := dataEnv_ls[["dataEnv"]][selected_plot_id, max(year), by = plot_id][, V1]]
+	time_span[, maxYear := dataEnv_ls[["dataEnv"]][unique(selected_plot_id), max(year), by = plot_id][, V1]]
 
 	year_start = max(time_span[, minYear]) # Maximum starting year (for both dbh and growth)
 	year_end = min(time_span[, maxYear]) # Minimum ending year (for dbh only)
@@ -2944,7 +2995,8 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 
 	stanData_classic$x_r = c(precipitations, temperatures, ph, basalAreas)
 
-	x_r_avg = dataEnv_ls[["dataEnv"]][selected_plot_id, lapply(.SD, mean), .SDcols = c("pr", "tas", "ph", "standBasalArea_interp"), by = plot_id]
+	x_r_avg = dataEnv_ls[["dataEnv"]][unique(selected_plot_id), lapply(.SD, mean), .SDcols = c("pr", "tas", "ph", "standBasalArea_interp"),
+		by = plot_id]
 	x_r_avg = x_r_avg[rep(x = x_r_avg[, .I], times = as.numeric(table(selected_plot_id)))] # selected_plot_id is in the good order
 	
 	x_r_avg[, pr := (pr - dataEnv_ls[["scaling_clim_classic"]]["pr_avg", mu])/dataEnv_ls[["scaling_clim_classic"]]["pr_avg", sd]]
@@ -3046,12 +3098,12 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 				tikz(filename, height = 1.2, width = 3.883282)
 				op = par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.3, 0), tck = -0.015)
 			}
-			plot(year_start:year_end_growth, growth_dt_ssm_avg, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#F4C430",
+			plot(year_start:year_end_growth, growth_dt_ssm_avg, type = "l", xlab = "Year", ylab = "Growth (mm/yr)", lwd = 2, col = "#E9851D",
 				ylim = range(simulatedGrowth_avg_ssm_qt[, V1]))
 			polygon(c(rev(year_start:year_end_growth), year_start:year_end_growth),
-				c(rev(simulatedGrowth_avg_ssm_qt["q025", V1]), simulatedGrowth_avg_ssm_qt["q975", V1]), col = "#F4C43022", border = NA)
+				c(rev(simulatedGrowth_avg_ssm_qt["q025", V1]), simulatedGrowth_avg_ssm_qt["q975", V1]), col = "#E9851D66", border = NA)
 			if (caption)
-				legend(x = "topleft", legend = "SSM", fill = "#F4C430", box.lwd = 0)
+				legend(x = "topleft", legend = "SSM", fill = "#E9851D", box.lwd = 0)
 			dev.off()
 
 			filename = paste0(tree_path, "classic_approach_time_series.", currentExt)
@@ -3062,34 +3114,34 @@ growth_timeSeries = function(species, run, selected_plot_id, init_dbh, nbYearsGr
 				tikz(filename, height = 1.2, width = 3.883282)
 				op = par(mar = c(2.5, 2.5, 0.8, 0.8), mgp = c(1.5, 0.3, 0), tck = -0.015)
 			}
-			plot(year_start:year_end_growth, growth_dt_classic_avg, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#034C4F",
+			plot(year_start:year_end_growth, growth_dt_classic_avg, type = "l", xlab = "Year", ylab = "Growth (mm/yr)", lwd = 2, col = "#2E77AB",
 				ylim = range(simulatedGrowth_avg_classic_qt[, V1]))
 			polygon(c(rev(year_start:year_end_growth), year_start:year_end_growth),
 				c(rev(simulatedGrowth_avg_classic_qt["q025", V1]), simulatedGrowth_avg_classic_qt["q975", V1]),
-				col = "#034C4F22", border = NA)
+				col = "#2E77AB66", border = NA)
 			abline(h = mean(simulatedGrowth_avg_clim_avg), lwd = 2, lty = 2)
 			if (caption)
-				legend(x = "topleft", legend = "Classic", fill = "#034C4F", box.lwd = 0)
+				legend(x = "topleft", legend = "Classic", fill = "#2E77AB", box.lwd = 0)
 			dev.off()
 		}
 	} else {
 		# --- SSM
-		plot(year_start:year_end_growth, growth_dt_ssm_avg, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#F4C430",
+		plot(year_start:year_end_growth, growth_dt_ssm_avg, type = "l", xlab = "Year", ylab = "Growth (mm/yr)", lwd = 2, col = "#E9851D",
 			ylim = range(simulatedGrowth_avg_ssm_qt[, V1]))
 		polygon(c(rev(year_start:year_end_growth), year_start:year_end_growth),
-			c(rev(simulatedGrowth_avg_ssm_qt["q025", V1]), simulatedGrowth_avg_ssm_qt["q975", V1]), col = "#F4C43022", border = NA)
+			c(rev(simulatedGrowth_avg_ssm_qt["q025", V1]), simulatedGrowth_avg_ssm_qt["q975", V1]), col = "#E9851D66", border = NA)
 		if (caption)
-			legend(x = "topleft", legend = "SSM", fill = "#F4C430", box.lwd = 0)
+			legend(x = "topleft", legend = "SSM", fill = "#E9851D", box.lwd = 0)
 
 		# --- Classic
-		plot(year_start:year_end_growth, growth_dt_classic_avg, type = "l", xlab = "Year", ylab = "Growth", lwd = 2, col = "#034C4F",
+		plot(year_start:year_end_growth, growth_dt_classic_avg, type = "l", xlab = "Year", ylab = "Growth (mm/yr)", lwd = 2, col = "#2E77AB",
 			ylim = range(simulatedGrowth_avg_classic_qt[, V1]))
 		polygon(c(rev(year_start:year_end_growth), year_start:year_end_growth),
 			c(rev(simulatedGrowth_avg_classic_qt["q025", V1]), simulatedGrowth_avg_classic_qt["q975", V1]),
-			col = "#034C4F22", border = NA)
+			col = "#2E77AB66", border = NA)
 		abline(h = mean(simulatedGrowth_avg_clim_avg), lwd = 2, lty = 2)
 		if (caption)
-			legend(x = "topleft", legend = "Classic", fill = "#034C4F", box.lwd = 0)
+			legend(x = "topleft", legend = "Classic", fill = "#2E77AB", box.lwd = 0)
 	}
 
 	return (list(simulated_dbh_ssm = simulated_dbh_ssm, simulated_dbh_classic = simulated_dbh_classic,
