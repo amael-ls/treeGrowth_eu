@@ -1589,13 +1589,14 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 	if (!all(names(sd_predictors) %in% c("pr", "tas", "ph", "basalArea")))
 		stop("Some required sd are missing")
 	
-	# beta_0 = scaled beta_0 - Σ scaled gamma_i * mu_i/sd_i + Σ scaled delta_j * mu_j^2/sd_j^2
+	# beta_0 = scaled beta_0 - Σ scaled gamma_i * mu_i/sd_i + Σ scaled delta_j * mu_j^2/sd_j^2 + log(sd_dbh)
 	intercept_rescale = params["averageGrowth"] - params["pr_slope"]*mu_predictors["pr"]/sd_predictors["pr"] -
 		params["tas_slope"]*mu_predictors["tas"]/sd_predictors["tas"] - params["ph_slope"]*mu_predictors["ph"]/sd_predictors["ph"] -
 		params["competition_slope"]*mu_predictors["basalArea"]/sd_predictors["basalArea"] +
 		params["pr_slope2"]*mu_predictors["pr"]^2/sd_predictors["pr"]^2 +
 		params["tas_slope2"]*mu_predictors["tas"]^2/sd_predictors["tas"]^2 +
-		params["ph_slope2"]*mu_predictors["ph"]^2/sd_predictors["ph"]^2
+		params["ph_slope2"]*mu_predictors["ph"]^2/sd_predictors["ph"]^2 +
+		log(sd_dbh)
 	
 	# beta_1 = scaled beta_1/sd_dbh
 	slope_dbh_rescale = params["dbh_slope"]/sd_dbh
@@ -1625,7 +1626,7 @@ rescaleParams = function(params, sd_dbh, mu_predictors, sd_predictors)
 	errors_rescale = numeric(1)
 	names(errors_rescale) = c("sigmaProc")
 
-	errors_rescaled["sigmaProc"] = sd_dbh^2*params["sigmaProc"] #! NOT SURE OF THIS!!! I THINK IT DOES NOT WORK NOW THAT I USE LOGNORMAL
+	errors_rescaled["sigmaProc"] = params["sigmaProc"] # It does not change for the lognormal, only meanlog get a "+ log(sd_dbh)"
 
 	return(list(intercept_rescale = intercept_rescale, slope_dbh_rescale = slope_dbh_rescale,
 		slope_quadratic_dbh_rescale = slope_quadratic_dbh_rescale, slope_predictors_rescale = slope_predictors_rescale,
