@@ -3,8 +3,6 @@
 	This stan script is too compute the WAIC of both models (SSM and Classic approaches). The WAIC computation is the same between the two
 	because the growth processus is the same. Only the estimated parameters theta_G differ!
 
-	SHIT, I MIGHT HAVE TO WRITE TWO DIFFERENT SCRIPTS, BECAUSE OF A CHANGE OF NAMES BETWEEN latent_growth AND latent_avg_annual_growth
-
 	Note that I ended all the variables related to the ring-width time series by rw (for ring-width)
 */
 
@@ -83,17 +81,7 @@ parameters {
 	// --- Process error, which is the sdlog parameter of a lognormal distrib /!\
 	real<lower = 0.5/sd_dbh^2> sigmaProc;
 
-	// --- Extreme error, by default at least twice the min observation error. Rüger 2011 found it is around 8 times larger
-	// array [n_inventories] real<lower = 2*0.1/sqrt(12)*25.4/sd_dbh> etaObs; // Std. Dev. of a normal distrib /!\
-	
-	// array [n_inventories] real<lower = 0, upper = 1> proba; // Probabilities of occurrence of extreme errors (etaObs) for each NFI
-
-	// Latent states
-	// --- Parent (i.e., primary) dbh
-	// vector<lower = 0.1/sd_dbh, upper = 3000/sd_dbh>[n_indiv] latent_dbh_parents; // Real (and unobserved) first measurement dbh (parents)
-
-	// --- Growth
-	// vector<lower = 0>[n_latentGrowth] latent_growth; // Real (and unobserved) yearly growth
+	// No need to put the other parameters (latent states and observation error)
 }
 
 generated quantities {
@@ -116,6 +104,4 @@ generated quantities {
 		}
 	}
 }
-
-// model = cmdstanr::cmdstan_model("./waic.stan")
 
