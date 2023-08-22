@@ -1,6 +1,18 @@
 
 #### Aim of prog: Compare the SSM approach to the classic approach using the PSIS-LOO CV approach and sensitivity analysis
 ## Comments
+# For this program, I use radial increment based on wood cores from Martínez-Sancho 2020: https://doi.org/10.1038/s41597-019-0340-y
+# 	Dendroecological Collection, tree-ring and wood density data from seven tree species across Europe.
+# These data have not been used to parametrise the growth model because they do not match the error structure used in our model
+# these data are only available for the 7 following species:
+# 	- Betula pendula
+# 	- Fagus sylvatica
+# 	- Picea abies
+# 	- Pinus pinaster
+# 	- Pinus sylvestris
+# 	- Populus nigra
+# 	- Quercus petraea
+#
 # The theory of WAIC and PSIS-LOO CV is described in Vehtari.2017:
 #	Practical Bayesian model evaluation using leave-one-out cross-validation and WAIC
 #	DOI: 10.1007/s11222-016-9696-4
