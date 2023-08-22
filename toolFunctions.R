@@ -1823,7 +1823,7 @@ optimumPredictorValue = function(slope, slope2, scaling_mu = NULL, scaling_sd = 
 
 ## Function to plot growth vs a response variable with the uncertainty related to parameters estimation (minus process error)
 plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected_plot_id = NULL, init_dbh = NULL, extension = NULL,
-	simOnly = FALSE, label_axis = FALSE, ...)
+	simOnly = FALSE, label_axis = FALSE, span = NULL, ...)
 {
 	# Local function to format data
 	formatNewData = function(tree_path, run, variable, n_env, n_dbh_new, lower_dbh, upper_dbh, minGradient, maxGradient)
@@ -2104,22 +2104,42 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 		if (currentVar == "pr")
 		{
 			selectedVariable = "Precipitation (mm/year)"
-			xlim = c(speciesInfo[, min(pr_025)], speciesInfo[, max(pr_975)])
+			if (is.null(span))
+			{
+				xlim = c(speciesInfo[, min(pr_025)], speciesInfo[, max(pr_975)])
+			} else {
+				xlim = span[[currentVar]]
+			}
 		}
 		if (currentVar == "tas")
 		{
 			selectedVariable = "Temperature (°C)"
-			xlim = c(speciesInfo[, min(tas_025)], speciesInfo[, max(tas_975)])
+			if (is.null(span))
+			{
+				xlim = c(speciesInfo[, min(tas_025)], speciesInfo[, max(tas_975)])
+			} else {
+				xlim = span[[currentVar]]
+			}
 		}
 		if (currentVar == "ph")
 		{
 			selectedVariable = "pH"
-			xlim = c(speciesInfo[, min(ph_025)], speciesInfo[, max(ph_975)])
+			if (is.null(span))
+			{
+				xlim = c(speciesInfo[, min(ph_025)], speciesInfo[, max(ph_975)])
+			} else {
+				xlim = span[[currentVar]]
+			}
 		}
 		if (currentVar == "ba")
 		{
-			selectedVariable = "Basal area (m^2/ha)" # This will need to be modified manually for each tikz figure
-			xlim = c(speciesInfo[, min(ba_025)], speciesInfo[, max(ba_975)])
+			selectedVariable = "Basal area (m^2/ha)" # This will create compilation problems for tikz figures!
+			if (is.null(span))
+			{
+				xlim = c(speciesInfo[, min(ba_025)], speciesInfo[, max(ba_975)])
+			} else {
+				xlim = span[[currentVar]]
+			}
 		}
 
 		if (label_axis)
