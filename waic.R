@@ -13,11 +13,29 @@
 #	DOI: 10.48550/arxiv.2101.10103
 #	https://arxiv.org/abs/2101.10103
 #
-#	Note that for a better understanding, the book Sensitivity Analysis: Primer (Saltelli, 2008) is a good option.
-#	"Variance based sensitivity analysis of model output. Design and estimator for the total sensitivity index" (Saltell.2010) gives an overview 
+#	Note that for a better understanding, the book Sensitivity Analysis: The Primer (Saltelli, 2008) is a good option.
+#	"Variance based sensitivity analysis of model output. Design and estimator for the total sensitivity index" xz(Saltell.2010) gives an overview 
 #	of Total Sensitivity Indices.
 #	DOI: 10.1016/j.cpc.2009.09.018
 #	https://www.sciencedirect.com/science/article/abs/pii/S0010465509003087?via%3Dihub
+#
+## Explanations on the tree rings data
+#	The data contains for each year the dbh increment, in mm, for that year. In the following example, the dbh increment from the 1st January
+#		1980 to 31st December 1980 is 0.16 mm.
+# 
+#		   plot_id  tree_id longitude latitude [...] dbh  year dbh_increment_in_mm starting_dbh       ph      pr      tas
+#		1:  ATFS13 ATFS1304  14.06788 46.49724 [...] 200  1980                0.16       154.64 5.311581 2063.37 4.000000
+#		2:  ATFS13 ATFS1304  14.06788 46.49724 [...] 200  1981                0.38       154.64 5.311581 1692.40 4.775000
+#		[...]
+#		36: ATFS13 ATFS1304  14.06788 46.49724 [...] 200  2015                3.14       154.64 5.311581 2030.09 7.375000
+#	
+#		and the increment in 2015 is 3.14 mm. The column dbh corresponds to the diameter measured one year after the last,
+#		i.e., in 2016 in this example.
+#
+#	I defined the starting_dbh as the dbh the tree would have at the first year of the record (here, 1980). I computed it by substracting
+#		the sum of increments to the dbh. Note that it neglects the growth that occured the year of dbh measurement (here, 2016) but it
+#		should not affect the results: Growth is a continuous function of dbh, and its derivative with respect to dbh (which is dbh_slope)
+#		is 'small' (whatever that means!)
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -217,7 +235,7 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 #? ----------------------------------------------------------------------------------------
 #### Load results
 ## Common variables
-# args = c("Betula pendula", "1")											# OK, ssm better
+# args = c("Betula pendula", "1")											# NO, classic better
 # args = c("Fagus sylvatica", "1")											# OK, ssm better
 # args = c("Picea abies", "1")												# OK, ssm better
 # args = c("Pinus pinaster", "1")											# OK, ssm better
@@ -231,8 +249,7 @@ args[1] = paste(args[1], args[2])
 args = args[-2]
 
 if (length(args) != 2)
-	stop("Supply in this order the species, the run_id, and the quantiles for dbh, tas, and precip", call. = FALSE)
-
+	stop("Supply in this order the species and the run_id", call. = FALSE)
 
 (species = as.character(args[1]))
 (run = as.integer(args[2]))
