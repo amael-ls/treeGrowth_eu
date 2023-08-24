@@ -13,24 +13,6 @@
 # 	- Populus nigra
 # 	- Quercus petraea
 #
-# The theory of WAIC and PSIS-LOO CV is described in Vehtari.2017:
-#	Practical Bayesian model evaluation using leave-one-out cross-validation and WAIC
-#	DOI: 10.1007/s11222-016-9696-4
-#	https://doi.org/10.1007/s11222-016-9696-4
-#
-#	Note that I stupidly reprogrammed the function waic in an older version and found exactly the same results! This version uses the package loo
-#
-# The theory of sensitivity analysis is described simply in Puy.2021:
-#	sensobol: an R package to compute variance-based sensitivity indices
-#	DOI: 10.48550/arxiv.2101.10103
-#	https://arxiv.org/abs/2101.10103
-#
-#	Note that for a better understanding, the book Sensitivity Analysis: The Primer (Saltelli, 2008) is a good option.
-#	"Variance based sensitivity analysis of model output. Design and estimator for the total sensitivity index" xz(Saltell.2010) gives an overview 
-#	of Total Sensitivity Indices.
-#	DOI: 10.1016/j.cpc.2009.09.018
-#	https://www.sciencedirect.com/science/article/abs/pii/S0010465509003087?via%3Dihub
-#
 ## Explanations on the tree rings data
 #	The data contains for each year the dbh increment, in mm, for that year. In the following example, the dbh increment from the 1st January
 #		1980 to 31st December 1980 is 0.16 mm.
@@ -48,6 +30,29 @@
 #		the sum of increments to the dbh. Note that it neglects the growth that occured the year of dbh measurement (here, 2016) but it
 #		should not affect the results: Growth is a continuous function of dbh, and its derivative with respect to dbh (which is dbh_slope)
 #		is 'small' (whatever that means!)
+#
+## The theory of WAIC and PSIS-LOO CV is described in Vehtari.2017:
+#	Practical Bayesian model evaluation using leave-one-out cross-validation and WAIC
+#	DOI: 10.1007/s11222-016-9696-4
+#	https://doi.org/10.1007/s11222-016-9696-4
+#
+#	Note that I stupidly reprogrammed the function waic in an older version and found exactly the same results! This version uses the package loo
+#
+## The theory of sensitivity analysis is described simply in Puy.2021:
+#	sensobol: an R package to compute variance-based sensitivity indices
+#	DOI: 10.48550/arxiv.2101.10103
+#	https://arxiv.org/abs/2101.10103
+#
+#	Note that for a better understanding, the book Sensitivity Analysis: The Primer (Saltelli, 2008) is a good option.
+#	"Variance based sensitivity analysis of model output. Design and estimator for the total sensitivity index" xz(Saltell.2010) gives an overview 
+#	of Total Sensitivity Indices.
+#	DOI: 10.1016/j.cpc.2009.09.018
+#	https://www.sciencedirect.com/science/article/abs/pii/S0010465509003087?via%3Dihub
+#
+## Climate range for SA:
+#	I want to use the same climate range for both SSM and Classic SA. Indeed, it would make the comparison impossible otherwise!
+#	The most logical is to use the range from the annual climate (i.e., SSM)
+#
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -91,28 +96,6 @@ current_dbh = function(dendro)
 	}
 }
 
-## Function to compute the climate range from stan data
-fraction_range_climate = function(stanData, model_type, shouldScale = FALSE, frac = 0.01, scaling_dt = NULL)
-{
-	if (shouldScale && is.null(scaling_dt))
-		stop("Scaling demanded, but no scaling provided!")
-	
-	range_dt = data.table(variable = c("precip", "tas", "ph", "standBasalArea"), q05 = numeric(4), q95 = numeric(4), mu = numeric(4))
-	setkey(range_dt, variable)
-	for (currentVar in range_dt[, variable])
-	{
-		clim = stanData[[currentVar]]
-		if (shouldScale)
-			clim = (clim - scaling_dt[.(model_type, currentVar), mu])/scaling_dt[.(model_type, currentVar), sd]
-		range_dt[currentVar, c("q05", "q95", "mu") := as.list(c(quantile(clim, c(0.05, 0.95)), mean(clim)))]
-	}
-
-	range_dt[, range := q95 - q05]
-	range_dt[, sd_sa := frac*range]
-
-	return(range_dt)
-}
-
 ## Function to compute sensitivity of growth with respect to uncertainty in the data only
 sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 = NULL, matrices = c("A", "B", "AB"), order = "first", N = 2^14,
 	type = "QRN", first = "saltelli", total = "jansen", seed = NULL)
@@ -123,10 +106,10 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 
 	if (!is.null(env0))
 	{
-		if ((env0["precip"] < clim_dt["precip", q05]) || (env0["tas"] < clim_dt["tas", q05]) || (env0["ph"] < clim_dt["ph", q05]))
+		if ((env0["pr"] < clim_dt["q05", pr]) || (env0["tas"] < clim_dt["q05", tas]) || (env0["ph"] < clim_dt["q05", ph]))
 			warning("Are you sure that env0 is scaled? There are low values below the 5 quantile")
 
-		if ((env0["precip"] > clim_dt["precip", q95]) || (env0["tas"] > clim_dt["tas", q95]) || (env0["ph"] > clim_dt["ph", q95]))
+		if ((env0["pr"] > clim_dt["q95", pr]) || (env0["tas"] > clim_dt["q95", tas]) || (env0["ph"] > clim_dt["q95", ph]))
 			warning("Are you sure that env0 is scaled? There are large values beyond the 95 quantile")
 	}
 
@@ -153,15 +136,27 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 	if (!is.null(seed))
 		set.seed(seed)
 	
-	params_values = getParams(model_cmdstan = model, params_names = params, type = "all")
+	if (n_param > 1)
+	{
+		params_values = getParams(model_cmdstan = model, params_names = params, type = "all")
+	} else {
+		params_values = getParams(model_cmdstan = model, params_names = params, type = "median")
+		params_values = array(data = params_values, dim = c(1, 1, length(params_values)), dimnames = list("iteration", "chain", params))
+		params_values = posterior::as_draws_array(params_values)
+	}
 	
 	n_iter = model$metadata()$iter_sampling
 	n_chains = model$num_chains()
 	n_tot = n_iter*n_chains
 	
-	sample_ind = sample(x = 1:n_tot, size = n_param, replace = FALSE)
+	if (n_param > 1)
+	{
+		sample_ind = sample(x = 1:n_tot, size = n_param, replace = FALSE)
+	} else {
+		sample_ind = 1
+	}
 
-	explanatory_vars = c("dbh", "precip", "tas", "ph", "standBasalArea")
+	explanatory_vars = c("dbh", "pr", "tas", "ph", "ba")
 
 	## Create matrices
 	sobol_mat = sobol_matrices(matrices = matrices, N = N, order = order, type = type, params = c(explanatory_vars))
@@ -183,7 +178,8 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 			{
 				sobol_mat[, currentVar] = qnorm(p = sobol_mat[, currentVar], mean = env0[currentVar], sd = clim_dt[currentVar, sd_sa])
 			} else {
-				sobol_mat[, currentVar] = qunif(p = sobol_mat[, currentVar], min = clim_dt[currentVar, q05], max = clim_dt[currentVar, q95])
+				sobol_mat[, currentVar] = qunif(p = sobol_mat[, currentVar], min = clim_dt["q05", get(currentVar)],
+					max = clim_dt["q95", get(currentVar)])
 			}
 		}
 	}
@@ -217,9 +213,9 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 		# --- Model output
 		y = numeric(nrow(sobol_mat))
 		for (i in seq_len(nrow(sobol_mat)))
-		{	
-			y[i] = growth_fct_meanlog(dbh = sobol_mat[i, "dbh"], pr = sobol_mat[i, "precip"], tas = sobol_mat[i, "tas"],
-				ph = sobol_mat[i, "ph"], basalArea = sobol_mat[i, "standBasalArea"],
+		{
+			y[i] = growth_fct_meanlog(dbh = sobol_mat[i, "dbh"], pr = sobol_mat[i, "pr"], tas = sobol_mat[i, "tas"],
+				ph = sobol_mat[i, "ph"], basalArea = sobol_mat[i, "ba"],
 				params = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)
 
 		}
@@ -311,8 +307,7 @@ scaling_classic = rbindlist(list(climate_scaling_classic, ph_scaling_classic, ba
 
 scaling_dt = rbindlist(list(ssm = scaling_ssm, classic = scaling_classic), idcol = "type")
 scaling_dt[, variable := stri_replace_all(str = variable, replacement = "", regex = "_avg$")] # Change the names for ease of usage
-scaling_dt[variable == "pr", variable := "precip"] # Change the names for ease of usage
-scaling_dt[variable == "standBasalArea_interp", variable := "standBasalArea"] # Change the names for ease of usage
+scaling_dt[variable == "standBasalArea_interp", variable := "ba"] # Change the names for ease of usage
 
 setkey(scaling_dt, type, variable)
 
@@ -321,7 +316,7 @@ setkey(scaling_dt, type, variable)
 stanData_ssm = readRDS(paste0(tree_path, run, "_stanData.rds"))
 stanData_ssm$n_data_rw = dendro[, .N]
 
-stanData_ssm$precip_rw = dendro[, (pr - scaling_dt[.("ssm", "precip"), mu])/scaling_dt[.("ssm", "precip"), sd]]
+stanData_ssm$precip_rw = dendro[, (pr - scaling_dt[.("ssm", "pr"), mu])/scaling_dt[.("ssm", "pr"), sd]]
 stanData_ssm$tas_rw = dendro[, (tas - scaling_dt[.("ssm", "tas"), mu])/scaling_dt[.("ssm", "tas"), sd]]
 stanData_ssm$ph_rw = dendro[, (ph - scaling_dt[.("ssm", "ph"), mu])/scaling_dt[.("ssm", "ph"), sd]]
 stanData_ssm$standBasalArea_rw = dendro[, standBasalArea]
@@ -333,7 +328,7 @@ stanData_ssm$ring_width = dendro[, dbh_increment_in_mm/stanData_ssm$sd_dbh]
 stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
 stanData_classic$n_data_rw = dendro[, .N]
 
-stanData_classic$precip_rw = dendro[, (pr - scaling_dt[.("classic", "precip"), mu])/scaling_dt[.("classic", "precip"), sd]]
+stanData_classic$precip_rw = dendro[, (pr - scaling_dt[.("classic", "pr"), mu])/scaling_dt[.("classic", "pr"), sd]]
 stanData_classic$tas_rw = dendro[, (tas - scaling_dt[.("classic", "tas"), mu])/scaling_dt[.("classic", "tas"), sd]]
 stanData_classic$ph_rw = dendro[, (ph - scaling_dt[.("classic", "ph"), mu])/scaling_dt[.("classic", "ph"), sd]]
 stanData_classic$standBasalArea_rw = dendro[, standBasalArea]
@@ -364,24 +359,58 @@ loo::loo_compare(list(waic_ssm, waic_classic))
 #? -----------------------------------------------------------------------------------------
 #* ----------------------    PART II: Compute sensitivity analysis    ----------------------
 #? -----------------------------------------------------------------------------------------
-#### Climate range
-clim_dt_ssm = fraction_range_climate(stanData = stanData_ssm, model_type = "ssm", shouldScale = TRUE, scaling_dt = scaling_dt)
-clim_dt_classic = fraction_range_climate(stanData = stanData_ssm, model_type = "classic", shouldScale = TRUE, scaling_dt = scaling_dt)
-#! I want to have the same climate range, so even for classic, I use ssm! Actually this line is useless, it is just for backward compatibility
+#### Climate range (see comments at the beginning)
+if ((file.exists("./speciesInformations.rds")) && (file.exists("./speciesInformations_runs.rds")))
+{
+	info = readRDS("./speciesInformations.rds")
+} else {
+	ls_info = infoSpecies()
+}
+
+info = data.table::melt(data = info[species], measure = patterns("^dbh_", "^tas", "^pr_", "^ph_", "^ba_"),
+	value.name = c("dbh", "tas", "pr", "ph", "ba"))
+
+info[, variable := NULL]
+info[, qtile := c("min", "q025", "q05", "med", "q95", "q975", "max")]
+
+for (i in 2:info[, .N])
+{
+	previousLine = info[i - 1, c(dbh, tas, pr, ph, ba)]
+	currentLine = info[i, c(dbh, tas, pr, ph, ba)]
+
+	if (any(currentLine - previousLine < 0))
+		stop("The qtile are wrongly assigned, check clim_dt")
+}
+
+setkey(info, qtile)
+
+info_ssm = info[, .(qtile, dbh, tas, pr, ph, ba)]
+info_classic = info[, .(qtile, dbh, tas, pr, ph, ba)]
+
+
+for (currentVar in c("tas", "pr", "ph", "ba"))
+{
+	info_ssm[, (currentVar) := (get(currentVar) - scaling_dt[.("ssm", currentVar), mu])/scaling_dt[.("ssm", currentVar), sd]]
+	info_classic[, (currentVar) := (get(currentVar) - scaling_dt[.("classic", currentVar), mu])/scaling_dt[.("classic", currentVar), sd]]
+}
 
 #### Sensitivity of growth with respect to data only
-## SSM
-sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh0 = quantile(stanData_ssm$dbh_init, c(0.05, 0.95))/stanData_ssm$sd_dbh,
-	sd_dbh = stanData_ssm$sd_dbh, n_param = 500, N = 2^16, clim_dt = clim_dt_ssm, seed = 123)
+## Common variables (note that dbh0 and sd_dbh are the same between SSM and Classic)
+dbh0 = c(info_ssm[c("q05", "q95"), dbh])/stanData_ssm$sd_dbh
+sd_dbh = stanData_ssm$sd_dbh
+n_param = 500
 
-saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_data.rds"))
+## SSM
+sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh0 = dbh0,
+	sd_dbh = sd_dbh, n_param = n_param, N = 2^16, clim_dt = info_ssm, seed = 123)
+
+saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_data_", n_param, ".rds"))
 
 ## Classic
-sa_classic_data = sensitivityAnalysis_data(model = classic, dbh0 = quantile(stanData_ssm$dbh_init, c(0.05, 0.95))/stanData_ssm$sd_dbh,
-	sd_dbh = stanData_classic$sd_dbh, n_param = 500, N = 2^16, clim_dt = clim_dt_classic, seed = 123)
+sa_classic_data = sensitivityAnalysis_data(model = classic, dbh0 = dbh0,
+	sd_dbh = sd_dbh, n_param = n_param, N = 2^16, clim_dt = info_classic, seed = 123)
 
-saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_data.rds"))
-
+saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_data_", n_param, ".rds"))
 
 print(sa_ssm_data$sa[sensitivity == "Si", sum(original), by = run][, range(V1)])
 print(sa_classic_data$sa[sensitivity == "Si", sum(original), by = run][, range(V1)])
