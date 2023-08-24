@@ -1869,7 +1869,7 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 		{
 			gradient_ssm = (scaled_gradient - stanData_ssm$ba_mu)/stanData_ssm$ba_sd
 			gradient_classic = (scaled_gradient - stanData_classic$ba_mu)/stanData_classic$ba_sd
-			stanData_ssm$x_r = c(pr_rep, tas_rep, gradient_ssm, ba_rep)
+			stanData_ssm$x_r = c(pr_rep, tas_rep, ph_rep, gradient_ssm)
 			stanData_classic$x_r = c(pr_rep, tas_rep, ph_rep, gradient_classic)
 		}
 
