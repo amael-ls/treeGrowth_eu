@@ -85,7 +85,6 @@ indices_subsample = function(run_id, treeData, climate, savingPath, mainFolder, 
 		{
 			min_year = time_space[plot, min_year]
 			max_year = time_space[plot, max_year]
-			tree = indices_dt[plot, unique(tree_id)][1]
 			for (tree in indices_dt[plot, unique(tree_id)])
 			{
 				clim_start = climate[.(plot, min_year), which = TRUE] # Returns the rows numbers instead of the rows themseleves
