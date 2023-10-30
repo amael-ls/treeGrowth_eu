@@ -26,8 +26,6 @@ library(terra)
 #### Compute climate range for each species
 ## Common variables
 ls_species = c("Betula pendula", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Quercus petraea")
-dir_climAvg = "/home/amael/scratch/avg/"
-ls_var = c("tas", "pr")
 
 dir_shapefiles = "/home/amael/shapefiles/trees/europe/chorological_maps/"
 
