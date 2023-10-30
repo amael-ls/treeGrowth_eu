@@ -3351,3 +3351,63 @@ printParams = function(ls_species, params_names, run = 1)
 
 	return (list(ssm_params = ssm_params, classic_params = classic_params))
 }
+
+## Function to get the parameters in a "gaussian style", i.e., rewrite growth as exp[-1/(2σ^2) (x - μ)^2]
+gaussStyle = function(params)
+{
+	intercept = params["averageGrowth"]
+
+	dbh_slope = params["dbh_slope"]
+	dbh_slope2 = params["dbh_slope2"]
+	
+	pr_slope = params["pr_slope"]
+	pr_slope2 = params["pr_slope2"]
+	
+	tas_slope = params["tas_slope"]
+	tas_slope2 = params["tas_slope2"]
+	
+	ph_slope = params["ph_slope"]
+	ph_slope2 = params["ph_slope2"]
+
+	competition_slope = params["competition_slope"]
+	
+	mu = c(mu_dbh = NA, mu_pr = NA, mu_tas = NA, mu_ph = NA)
+	sigma = c(sigma_dbh = NA, sigma_pr = NA, sigma_tas = NA, sigma_ph = NA)
+
+	# New dbh coefficients
+	if (dbh_slope2 < 0)
+	{
+		mu["mu_dbh"] = - dbh_slope/(2*dbh_slope2)
+		sigma["sigma_dbh"] = - 1/(2*dbh_slope2)
+	}
+
+	# New precipitation coefficients
+	if (pr_slope2 < 0)
+	{
+		mu["mu_pr"] = - pr_slope/(2*pr_slope2)
+		sigma["sigma_pr"] = - 1/(2*pr_slope2)
+	}
+
+	# New temperature coefficients
+	if (tas_slope2 < 0)
+	{
+		mu["mu_tas"] = - tas_slope/(2*tas_slope2)
+		sigma["sigma_tas"] = - 1/(2*tas_slope2)
+	}
+
+	# New pH coefficients
+	if (ph_slope2 < 0)
+	{
+		mu["mu_ph"] = - ph_slope/(2*ph_slope2)
+		sigma["sigma_ph"] = - 1/(2*ph_slope2)
+	}
+
+	# New intercept (formula tested analytically)
+	intercept = intercept +
+		ifelse(dbh_slope2 < 0, 0.5*mu["mu_dbh"]^2/sigma["sigma_dbh"], 0) +
+		ifelse(pr_slope2 < 0, 0.5*mu["mu_pr"]^2/sigma["sigma_pr"], 0) +
+		ifelse(tas_slope2 < 0, 0.5*mu["mu_tas"]^2/sigma["sigma_tas"], 0) +
+		ifelse(ph_slope2 < 0, 0.5*mu["mu_ph"]^2/sigma["sigma_ph"], 0)
+
+	return (list(mu = mu, sigma = sigma, intercept = intercept))
+}
