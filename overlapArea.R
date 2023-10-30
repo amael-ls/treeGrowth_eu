@@ -1,5 +1,11 @@
 
 #### Aim of prog: Check how much area is covered in our data vs the whole species range
+## Comments:
+# The chorological maps have been downloaded from:
+#	Caudullo, Giovanni and Erik, Welk and Jesús, San-Miguel-Ayanz (2017)
+#	“Chorological Maps for the Main European Woody Species.” in Data in Brief 12: 662–66.
+#	https://doi.org/10.1016/j.dib.2017.05.007.
+#
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -56,3 +62,16 @@ for (species in ls_species)
 	plot(ls_shapefiles[[species]], add = TRUE, col = "#CD1A2188")
 	plot(ocean, add = TRUE, col = "#0C93A322")
 }
+
+#### Other data from EFI
+quercus = rast("/Users/mistral/ownCloud/database/EU_TreeMap/QuercusRoburPetraea.tif")
+
+world = project(world, quercus)
+ocean = project(ocean, quercus)
+
+plot(quercus, axes = FALSE, legend = FALSE)
+plot(world, add = TRUE)
+
+fagus = rast("/Users/mistral/ownCloud/database/EU_TreeMap/FagusSpp.tif")
+plot(fagus, axes = FALSE, legend = FALSE)
+plot(world, add = TRUE)
