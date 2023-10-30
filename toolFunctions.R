@@ -3555,3 +3555,110 @@ extractClimate = function(...)
 
 	return (list(extract_indices = extract_indices, extracted_predictors = if (ph_alone) predictors else predictors[extract_indices]))
 }
+
+## Plot posterior extent, one variable per panel with all the species/methods
+extentPosterior = function(ssm_list, classic_list, ls_params = c("dbh_slope2", "pr_slope2", "tas_slope2", "ph_slope2"),
+	ls_titles = c(dbh_slope2 = "Diameter", pr_slope2 = "Precipitation", tas_slope2 = "Temperature", ph_slope2 = "pH"),
+	ext = NULL)
+{
+	# Check data
+	if (length(ssm_list) != length(classic_list))
+		stop("Lists should be of the same size")
+
+	ls_species = names(ssm_list)
+	if (!all(ls_species %in% names(classic_list)))
+		stop("Lists should contain the same species names")
+
+	if (length(ls_params) != length(ls_titles))
+		stop("ls_params and ls_titles should be of the same size")
+
+	if (!is.null(ext))
+	{
+		if (length(ext) > 1)
+		{
+			ext = ext[1]
+			warning("Only first extension was kept")
+		}
+		if (!(ext %in% c(".pdf", ".tex")))
+			stop("File type not recognised. Only .pdf, and .tex are recognised")
+	}
+
+	# Common variables
+	ls_species_label = stri_replace_all(str = ls_species, replacement = " ", regex = "_")
+	ls_species_label = stri_trans_totitle(ls_species_label, opts_brkiter = stri_opts_brkiter(type = "sentence"))
+
+	params_ssm_dt = vector(mode = "list", length = length(ls_species))
+	params_classic_dt = vector(mode = "list", length = length(ls_species))
+
+	for (currentSpecies in ls_species)
+	{
+		params_ssm_dt[[currentSpecies]] = getParams(model_cmdstan = ssm_list[[currentSpecies]],
+			params_names = ls_params, type = "quantile")
+		params_classic_dt[[currentSpecies]] = getParams(model_cmdstan = classic_list[[currentSpecies]],
+			params_names = ls_params, type = "quantile")
+	}
+
+	params_ssm_dt = rbindlist(l = params_ssm_dt, idcol = "speciesName_sci")
+	params_classic_dt = rbindlist(l = params_classic_dt, idcol = "speciesName_sci")
+
+	params_dt = rbindlist(l = list(ssm = params_ssm_dt, classic = params_classic_dt), idcol = "type")
+	setkey(params_dt, speciesName_sci, type, parameter)
+
+	bounds = params_dt[, .(q05_bound = min(q05), q95_bound = max(q95)), by = parameter]
+	setkey(bounds, parameter)
+
+	# Define empty plot
+	x_max = 2.25*length(ssm_list)
+	
+	for (currentVar in ls_params)
+	{
+		if (!is.null(ext))
+		{
+			if (ext == ".pdf")
+				pdf(file = paste0("extent_", currentVar, ext), height = 6, width = 9.708204) # Golden ratio
+
+			if (ext == ".tex")
+				tikz(file = paste0("extent_", currentVar, ext), height = 6, width = 9.708204) # Golden ratio
+		}
+
+		par(mar = c(5, 5, 0.2, 0.2) + 0.1)
+		plot(0, type = "n", xlim = c(0, x_max), ylim = bounds[.(currentVar), c(q05_bound, q95_bound)],
+			ylab = "", main = "", xlab = "Species", las = 1, xaxt = "n")
+
+		title(ylab = paste(ls_titles[currentVar], "coefficient"), line = 4)
+
+		x_orig = 0.5
+		x_pos_label = numeric(length(ls_species))
+		names(x_pos_label) = ls_species
+
+		for (currentSpecies in ls_species)
+		{
+			x_pos_label[currentSpecies] = x_orig
+			x1 = x_orig - 0.05
+			x2 = x_orig + 0.05
+			y1 = params_dt[.(currentSpecies, "ssm", currentVar), c(q05 = q05, med = med, q95 = q95)]
+			y2 = params_dt[.(currentSpecies, "classic", currentVar), c(q05 = q05, med = med, q95 = q95)]
+
+			segments(x0 = x1, y0 = y1["q05"], x1 = x1, y1 = y1["q95"], col = "#E9851D")
+			points(x = x1, y = y1["med"], pch = 19, cex = 1, col = "#E9851D")
+			points(x = x1, y = y1["q05"], pch = "-", cex = 2, col = "#E9851D")
+			points(x = x1, y = y1["q95"], pch = "-", cex = 2, col = "#E9851D")
+
+			segments(x0 = x2, y0 = y2["q05"], x1 = x2, y1 = y2["q95"], col = "#2E77AB")
+			points(x = x2, y = y2["med"], pch = 19, cex = 1, col = "#2E77AB")
+			points(x = x2, y = y2["q05"], pch = "-", cex = 2, col = "#2E77AB")
+			points(x = x2, y = y2["q95"], pch = "-", cex = 2, col = "#2E77AB")
+
+			abline(v = x_orig, lwd = 0.5, lty = "dashed", col = "#55555555")
+
+			x_orig = x_orig + 2.5
+		}
+		if ((bounds[.(currentVar), q05_bound] < 0) && (bounds[.(currentVar), q95_bound] > 0))
+			abline(h = 0, lwd = 0.5, lty = "dashed", col = "#CD212A99")
+		axis(side = 1, at = x_pos_label, labels = ls_species_label)
+
+		legend(x = "topright", legend = c("SSM", "Classic"), lty = 1, lwd = 3, box.lwd = 0, title = "Model", col = c("#E9851D", "#2E77AB"))
+		if (!is.null(ext))
+			dev.off()
+	}
+}
