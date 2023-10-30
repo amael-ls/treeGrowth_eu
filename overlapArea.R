@@ -6,6 +6,12 @@
 #	“Chorological Maps for the Main European Woody Species.” in Data in Brief 12: 662–66.
 #	https://doi.org/10.1016/j.dib.2017.05.007.
 #
+# I also tried the chorolical maps from:
+#	Brus, D. J., Hengeveld, G. M., Walvoort, D. J. J., Goedhart, P. W., Heidema, A. H., Nabuurs, G. J. & Gunia, K. (2012)
+#	“Statistical mapping of tree species over Europe” in European Journal of Forest Research, 131(1), 145–157.
+#	https://doi.org/10.1007/s10342-011-0513-5
+#	but I actually did not used these maps. 
+#
 
 #### Clear memory and load packages
 rm(list = ls())
