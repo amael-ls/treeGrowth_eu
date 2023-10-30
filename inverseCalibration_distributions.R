@@ -14,12 +14,12 @@ library(moments)
 inverseCalibration = function(fun, ...)
 {
 	# Check if distribution is included
-	if (!isTRUE(all.equal(fun, dchisq)) &
-		!isTRUE(all.equal(fun, dgamma)) &
-		!isTRUE(all.equal(fun, dlnorm)) &
-		!isTRUE(all.equal(fun, dnaka)) &
-		!isTRUE(all.equal(fun, dnorm)) &
-		!isTRUE(all.equal(fun, dwald)) &
+	if (!isTRUE(all.equal(fun, dchisq)) &&
+		!isTRUE(all.equal(fun, dgamma)) &&
+		!isTRUE(all.equal(fun, dlnorm)) &&
+		!isTRUE(all.equal(fun, dnaka)) &&
+		!isTRUE(all.equal(fun, dnorm)) &&
+		!isTRUE(all.equal(fun, dwald)) &&
 		!isTRUE(all.equal(fun, dweibull)))
 		stop("This function only accepts dchisq, dgamma, dlnorm, dnaka, dnorm, dwald or dweibull as priors")
 	
@@ -33,7 +33,7 @@ inverseCalibration = function(fun, ...)
 	# Chi-square
 	if (isTRUE(all.equal(fun, dchisq))) # Checked and validated computation
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("df", "ncp") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) && (!all(c("df", "ncp") %in% names(providedArgs))))
 			stop("You must provide either mean and var or df and ncp for dchisq")
 		
 		if (all(c("mean", "var") %in% names(providedArgs)))
@@ -58,7 +58,7 @@ inverseCalibration = function(fun, ...)
 	# Gamma
 	if (isTRUE(all.equal(fun, dgamma))) # Checked and validated computation
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "rate") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) && (!all(c("shape", "rate") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape and rate for dgamma")
 		
 		if (all(c("mean", "var") %in% names(providedArgs)))
@@ -83,7 +83,7 @@ inverseCalibration = function(fun, ...)
 	# Lognormal
 	if (isTRUE(all.equal(fun, dlnorm))) # Checked and validated computation
 	{
-		if ((!all(c("mean", "sd") %in% names(providedArgs))) &  (!all(c("meanlog", "sdlog") %in% names(providedArgs))))
+		if ((!all(c("mean", "sd") %in% names(providedArgs))) && (!all(c("meanlog", "sdlog") %in% names(providedArgs))))
 			stop("You must provide mean and sd or meanlog and sdlog for dlnorm")
 		
 		if (all(c("mean", "sd") %in% names(providedArgs)))
@@ -112,7 +112,7 @@ inverseCalibration = function(fun, ...)
 	# Nakagami
 	if (isTRUE(all.equal(fun, nakagami::dnaka))) # Checked and validated computation (with a trick for arg2)
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "scale") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) && (!all(c("shape", "scale") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape and rate for dnaka")
 		
 		if (all(c("mean", "var") %in% names(providedArgs)))
@@ -196,7 +196,7 @@ inverseCalibration = function(fun, ...)
 	# Wald
 	if (isTRUE(all.equal(fun, dwald))) # Checked and validated computation
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("location", "scale") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) && (!all(c("location", "scale") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape and scale for dwald")
 
 		if (all(c("mean", "var") %in% names(providedArgs)))
@@ -219,7 +219,7 @@ inverseCalibration = function(fun, ...)
 	# Weibull
 	if (isTRUE(all.equal(fun, dweibull))) # Checked and validated computation
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "scale") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) && (!all(c("shape", "scale") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape and scale for dweibull")
 
 		# There is no analytical method. Check https://www.scionresearch.com/__data/assets/pdf_file/0003/59286/NZJFS1131981GARCIA304-306.pdf
