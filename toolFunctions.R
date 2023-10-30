@@ -3460,20 +3460,20 @@ extractClimate = function(...)
 			extract_indices[start:end] = indices[i, index_clim_start]:indices[i, index_clim_end]
 		}
 
-		if (climate_activated & ph_activated)
+		if (climate_activated && ph_activated)
 			predictors = data.table::merge.data.table(climate, ph, by = "plot_id")
 
-		if (climate_activated & !ph_activated)
+		if (climate_activated && !ph_activated)
 			predictors = climate
 
-		if (!climate_activated & ph_activated)
+		if (!climate_activated && ph_activated)
 		{
 			ph = data.table::merge.data.table(ph, indices[, .(plot_id, nbYears)], by = "plot_id")
 			predictors = data.table(plot_id = rep(ph[, plot_id], times = ph[, nbYears]), ph = rep(ph[, ph], times = ph[, nbYears]))
 			ph_alone = TRUE
 		}
 
-		if (climate_activated | ph_activated)
+		if (climate_activated || ph_activated)
 			isConform = TRUE
 	}
 
