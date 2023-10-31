@@ -25,6 +25,9 @@
 #	- infoSpecies: Function to give species-specific range and dataset range of predictors and dbh
 #	- climQuantiles: Function to compute, extract, and save climatic quantiles on rasters
 #	- printParams: Function to print the parameters in a latex table
+#	- gaussStyle: Function to get the parameters in a "gaussian style", i.e., rewrite growth as exp[-1/(2σ^2) (x - μ)^2]
+#	- extractClimate: Function to extract climate for a given species
+#	- extentPosterior: Function to Plot posterior extent, one variable per panel with all the species/methods
 #
 ## Comments
 # This R file contains tool functions only that help me to analyse the results and do some check-up. Note that some functions are quite
@@ -38,6 +41,8 @@ getParams = function(model_cmdstan, params_names, type = "mean", ...)
 	if (!(type %in% c("all", "chain-iter", "mean", "median", "quantile")))
 		stop("Unknown type. Please choose all, iter-chain, mean, median, or quantile")
 	
+	args = list(...)
+
 	if (type %in% c("chain-iter", "mean", "median"))
 	{
 		vals = numeric(length(params_names))
@@ -45,7 +50,6 @@ getParams = function(model_cmdstan, params_names, type = "mean", ...)
 
 		if (type == "chain-iter")
 		{
-			args = list(...)
 			if (!all(c("iter", "chain") %in% names(args)))
 				stop("You must provide iter and chain when using the option iter-chain")
 			iter = args[["iter"]]
@@ -75,10 +79,20 @@ getParams = function(model_cmdstan, params_names, type = "mean", ...)
 			return(vals)
 		}
 	} else if (type == "quantile") {
-		vals = data.table(parameter = params_names, q5 = 0, med = 0, avg = 0, q95 = 0)
+		if (!("probs" %in% names(args)))
+		{
+			probs = c(0, 0.05, 0.5, 0.95, 1)
+			vals = data.table(parameter = params_names, min = 0, q05 = 0, med = 0, avg = 0, q95 = 0, max = 0)
+		}
+		if ("probs" %in% names(args))
+		{
+			warning("I have not yet coded the general output, so far I use probs = c(0, 0.05, 0.5, 0.95, 1)")
+			probs = c(0, 0.05, 0.5, 0.95, 1)
+			vals = data.table(parameter = params_names, min = 0, q05 = 0, med = 0, avg = 0, q95 = 0, max = 0)
+		}
 		for (i in seq_along(params_names))
 		{
-			vals[i, c("q5", "med", "q95") := as.list(quantile(model_cmdstan$draws(params_names[i]), c(0.05, 0.5, 0.95)))]
+			vals[i, c("min", "q05", "med", "q95", "max") := as.list(quantile(model_cmdstan$draws(params_names[i]), c(0, 0.05, 0.5, 0.95, 1)))]
 			vals[i, avg := mean(model_cmdstan$draws(params_names[i]))]
 		}
 		return(vals)
@@ -3411,8 +3425,6 @@ gaussStyle = function(params)
 
 	return (list(mu = mu, sigma = sigma, intercept = intercept))
 }
-
-
 
 ## Extract climate for a given species
 extractClimate = function(...)
