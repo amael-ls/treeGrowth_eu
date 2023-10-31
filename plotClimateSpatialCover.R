@@ -108,6 +108,7 @@ for (species in ls_species)
 	dev.off()
 }
 
+#### Plot climate range of the distribution (clim_range) and of the data (climBounds)
 clim_range = rbindlist(clim_range, idcol = "speciesName_sci")
 setkey(clim_range, speciesName_sci, variable)
 
@@ -154,3 +155,24 @@ for (currentVariable in ls_var)
 		col = c("#295384", "black", "black"), pt.bg = c("#295384", NA, NA), bty = "n", horiz = TRUE, inset = c(0, -0.01))
 	dev.off()
 }
+
+#? --------------------------------------------------------------------------------------------------------
+######## PART II: Spatial plot of the data (plot location)
+#? --------------------------------------------------------------------------------------------------------
+#### Load data
+## Folders
+treeData_folder = "/home/amael/project_ssm/inventories/growth/"
+
+## Tree data
+treeData = readRDS(paste0(treeData_folder, "standardised_european_growth_data_reshaped.rds"))
+coords = vect(unique(treeData[, .(x, y)]), geom = c("x", "y"), crs = "EPSG:4326")
+
+# coords = sample(coords, 45000) # Useful for presentations where a too dense picture shows nothing!
+
+#### Plot
+# pdf("plots_location_growth_subsample_2.pdf", height = 10, width = 10)
+pdf("plots_location_growth.pdf", height = 10, width = 10)
+plot(europe, col = "#C4AC7C44", border = "#9E391A", axes = FALSE)
+plot(coords, pch = 20, cex = 0.025, col = "#354536", add = TRUE)
+plot(europe, col = NA, border = "#9E391A", add = TRUE)
+dev.off()
