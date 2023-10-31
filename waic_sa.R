@@ -10,7 +10,6 @@
 # 	- Picea abies
 # 	- Pinus pinaster
 # 	- Pinus sylvestris
-# 	- Populus nigra
 # 	- Quercus petraea
 #
 ## Explanations on the tree rings data
@@ -43,11 +42,15 @@
 #	DOI: 10.48550/arxiv.2101.10103
 #	https://arxiv.org/abs/2101.10103
 #
-#	Note that for a better understanding, the book Sensitivity Analysis: The Primer (Saltelli, 2008) is a good option.
-#	"Variance based sensitivity analysis of model output. Design and estimator for the total sensitivity index" xz(Saltell.2010) gives an overview 
-#	of Total Sensitivity Indices.
-#	DOI: 10.1016/j.cpc.2009.09.018
-#	https://www.sciencedirect.com/science/article/abs/pii/S0010465509003087?via%3Dihub
+#	Note that for a better understanding, I recommend the book of Saltelli 2008:
+#	Saltelli, A.; Ratto, M.; Andres, T.; Campolongo, F.; Cariboni, J.; Gatelli, D.; Saisana, M. & Tarantola, S.
+#	Global Sensitivity Analysis: The Primer
+#	DOI: 10.1002/9780470725184
+#	https://doi.org/10.1002/9780470725184
+#
+#	Note that I changed the package sensobol to the package sensitivity. This is because this package performs better with small indices
+#	and is also faster. However, it is less automatised and the user manual is not very well explained... The only thing you need to know
+#	is that the matrices X1 and X2 corresponds to the matrices A and B of 
 #
 ## Climate range for SA:
 #	I want to use the same climate range for both SSM and Classic SA. Indeed, it would make the comparison impossible otherwise!
@@ -58,12 +61,12 @@
 rm(list = ls())
 graphics.off()
 
-options(max.print = 500)
+options(max.print = 500, warn = 1) # The option warn = 1 is to make the warning appears directly rahter than after the function returns.
 
+library(sensitivity)
 library(data.table)
 library(tikzDevice)
 library(cmdstanr)
-library(sensobol)
 library(stringi)
 
 #### Tool functions
@@ -96,14 +99,21 @@ current_dbh = function(dendro)
 	}
 }
 
-## Function to compute sensitivity of growth with respect to uncertainty in the data only
-sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 = NULL, matrices = c("A", "B", "AB"), order = "first", N = 2^14,
-	type = "QRN", first = "saltelli", total = "jansen", seed = NULL)
+## Wrap of the growth_fct_meanlog adapted to a matrix format
+growth_fct_meanlog_mat = function(X, params_vec, sd_dbh, standardised_variables)
 {
-	## Check dbh0 and env0
-	if (any(abs(dbh0) > 5))
-		warning("Are you sure that dbh0 is scaled?")
+	varnames = c("dbh", "pr", "tas", "ph", "ba")
+	if (!all(varnames %in% colnames(X)))
+		stop("The colnames of the matrix X mismatch the required variables of the model")
+	
+	return (growth_fct_meanlog(dbh = X[, "dbh"], pr = X[, "pr"], tas = X[, "tas"], ph = X[, "ph"], basalArea = X[, "ba"],
+		params = params_vec, sd_dbh = sd_dbh, standardised_variables = standardised_variables))
+}
 
+## Function to compute sensitivity of growth with respect to uncertainty in the data only
+sensitivityAnalysis_data = function(model, dbh_lim, sd_dbh, clim_dt, n_param, lim_inf, lim_sup, env0 = NULL, N = 2^14, seed = NULL)
+{
+	## Check dbh_lim and env0
 	if (!is.null(env0))
 	{
 		if ((env0["pr"] < clim_dt["q05", pr]) || (env0["tas"] < clim_dt["q05", tas]) || (env0["ph"] < clim_dt["q05", ph]))
@@ -113,18 +123,24 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 			warning("Are you sure that env0 is scaled? There are large values beyond the 95 quantile")
 	}
 
-	if ((length(dbh0) != 1) && (length(dbh0) != 2))
+	if (length(dbh_lim) < 2)
+		stop("dbh_lim must be a vector of 2 values")
+
+	if (length(dbh_lim) > 2)
 	{
-		warning("Only the first two values of dbh0 are used")
-		dbh0 = dbh0[1:2]
+		warning("Only the first two values of dbh_lim are used")
+		dbh_lim = dbh_lim[1:2]
 	}
 
-	if (length(dbh0) == 2)
+	if (any(abs(dbh_lim) > 5))
+		warning(paste0("Is dbh_lim scaled? dbh_lim = (", round(dbh_lim[1], 2), ", ", round(dbh_lim[2], 2), ")"))
+
+	if (length(dbh_lim) == 2)
 	{
-		if (dbh0[1] > dbh0[2])
+		if (dbh_lim[1] > dbh_lim[2])
 		{
-			dbh0[1] = dbh0[2] - dbh0[1] + (dbh0[2] = dbh0[1])
-			warning("The values for dbh0 were swaped")
+			dbh_lim[1] = dbh_lim[2] - dbh_lim[1] + (dbh_lim[2] = dbh_lim[1])
+			warning("The values for dbh_lim were swaped")
 		}
 	}
 	
@@ -151,15 +167,27 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 	
 	if (n_param > 1)
 	{
+		if (n_param > n_tot)
+		{
+			warning(paste("n_param is larger than the amount of available samples. Value set to the maximum available:", n_tot))
+			n_param = n_tot
+		}
 		sample_ind = sample(x = 1:n_tot, size = n_param, replace = FALSE)
 	} else {
 		sample_ind = 1
 	}
 
 	explanatory_vars = c("dbh", "pr", "tas", "ph", "ba")
+	k = length(explanatory_vars)
 
 	## Create matrices
-	sobol_mat = sobol_matrices(matrices = matrices, N = N, order = order, type = type, params = c(explanatory_vars))
+	sobol_mat = matrix(data = runif(n = N*2*k), nrow = N, ncol = 2*k)
+
+	X1 = sobol_mat[, 1:k] # Correspond to matrix A in Saltelli 2008, p. 165
+	colnames(X1) = explanatory_vars
+
+	X2 = sobol_mat[, (k + 1):(2*k)] # Correspond to matrix B in Saltelli 2008, p. 165
+	colnames(X2) = explanatory_vars
 
 	# Rescale the Sobol matrix
 	# --- Explanatory variables
@@ -167,30 +195,27 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 	{
 		if (currentVar == "dbh")
 		{
-			if (length(dbh0) == 1)
-			{
-				sobol_mat[, "dbh"] = qnorm(p = sobol_mat[, "dbh"], mean = dbh0, sd = 3/sd_dbh)
-			} else {
-				sobol_mat[, "dbh"] = qunif(p = sobol_mat[, "dbh"], min = dbh0[1], max = dbh0[2])
-			}
+			X1[, "dbh"] = qunif(p = X1[, "dbh"], min = dbh_lim[1], max = dbh_lim[2])
+			X2[, "dbh"] = qunif(p = X2[, "dbh"], min = dbh_lim[1], max = dbh_lim[2])
 		} else {
 			if (!is.null(env0))
 			{
-				sobol_mat[, currentVar] = qnorm(p = sobol_mat[, currentVar], mean = env0[currentVar], sd = clim_dt[currentVar, sd_sa])
+				X1[, currentVar] = qnorm(p = X1[, currentVar], mean = env0[currentVar], sd = clim_dt[currentVar, sd_sa])
+				X2[, currentVar] = qnorm(p = X2[, currentVar], mean = env0[currentVar], sd = clim_dt[currentVar, sd_sa])
 			} else {
-				sobol_mat[, currentVar] = qunif(p = sobol_mat[, currentVar], min = clim_dt["q05", get(currentVar)],
-					max = clim_dt["q95", get(currentVar)])
+				X1[, currentVar] = qunif(p = X1[, currentVar], min = clim_dt[lim_inf, get(currentVar)],
+					max = clim_dt[lim_sup, get(currentVar)])
+				X2[, currentVar] = qunif(p = X2[, currentVar], min = clim_dt[lim_inf, get(currentVar)],
+					max = clim_dt[lim_sup, get(currentVar)])
 			}
 		}
 	}
 	
-	if (any(is.na(sobol_mat)))
-		stop(paste("Number of NAs in Sobol's matrix:", sum(is.na(sobol_mat))))
+	if (any(is.na(X1)) || any(is.na(X2)))
+		stop(paste("Number of NAs in Sobol's matrice:", sum(is.na(X1)) + sum(is.na(X2))))
 
 	## Run sensitivity analysis
 	ind = vector(mode = "list", length = n_param)
-	var_vec_y = numeric(length = n_param)
-	range_dt = data.table(run = seq_along(sample_ind), min_y = -Inf, max_y = +Inf)
 	
 	freq_print = 1
 	if (n_param > 19)
@@ -209,22 +234,13 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 			pr_slope2 = params_values[, , "pr_slope2"][current_ind],
 			tas_slope2 = params_values[, , "tas_slope2"][current_ind],
 			ph_slope2 = params_values[, , "ph_slope2"][current_ind])
-		
-		# --- Model output
-		y = numeric(nrow(sobol_mat))
-		for (i in seq_len(nrow(sobol_mat)))
-		{
-			y[i] = growth_fct_meanlog(dbh = sobol_mat[i, "dbh"], pr = sobol_mat[i, "pr"], tas = sobol_mat[i, "tas"],
-				ph = sobol_mat[i, "ph"], basalArea = sobol_mat[i, "ba"],
-				params = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)
-
-		}
-		var_vec_y[j] = var(y)
-		range_dt[j, c("min_y", "max_y") := .(min(y), max(y))]
 
 		# --- Sobol indices
-		ind[[j]] = sobol_indices(matrices = matrices, Y = y, N = N, params = explanatory_vars, first = first, total = total,
-			order = order)$results
+		ind[[j]] = setDT(sobolmartinez(model = growth_fct_meanlog_mat, X1 = X1, X2 = X2, nboot = 0, conf = 0.95,
+			params_vec = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)$S, keep.rownames = TRUE)
+
+		if (any(ind[[j]][, "original"] < 0))
+			warning(paste("There are negatives Si, with min value:", round(min(ind[[j]][, "original"], 7)), "for index j =", j))
 
 		if (j %% freq_print == 0)
 			print(paste0(round(100*j/n_param), "% done"))
@@ -233,9 +249,11 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 
 	ind = rbindlist(l = ind, idcol = "run")
 	if (any(ind[, original] < 0))
-			warning(paste("There are negatives Si, with min value:", round(ind[, min(original)], 7)))
+		warning(paste("There are negatives Si, with min value:", round(ind[, min(original)], 7)))
 
-	return(list(sa = ind, var_y = var_vec_y, n_param = n_param, range_dt = range_dt))
+	setnames(ind, old = "rn", new = "parameters")
+
+	return(list(sa = ind, n_param = n_param))
 }
 
 #? ----------------------------------------------------------------------------------------
@@ -243,24 +261,25 @@ sensitivityAnalysis_data = function(model, dbh0, sd_dbh, clim_dt, n_param, env0 
 #? ----------------------------------------------------------------------------------------
 #### Load results
 ## Common variables
-# args = c("Betula pendula", "1")											# NO, classic better
-# args = c("Fagus sylvatica", "1")											# OK, ssm better
-# args = c("Picea abies", "1")												# OK, ssm better
-# args = c("Pinus pinaster", "1")											# OK, ssm better
-# args = c("Pinus sylvestris", "1")											# OK, ssm better
-# args = c("Quercus petraea" , "1")											# OK, ssm better
+# args = c("Betula pendula", "1", "q05q95")											# NO, classic better
+# args = c("Fagus sylvatica", "1", "q05q95")										# OK, ssm better
+# args = c("Picea abies", "1", "q05q95")											# OK, ssm better
+# args = c("Pinus pinaster", "1", "q05q95")											# OK, ssm better
+# args = c("Pinus sylvestris", "1", "q05q95")										# OK, ssm better
+# args = c("Quercus petraea" , "1", "q05q95")										# OK, ssm better
 args = commandArgs(trailingOnly = TRUE)
 for (i in seq_along(args))
 	print(paste0("Arg ", i, ": <", args[i], ">"))
 
-args[1] = paste(args[1], args[2])
+args[1] = paste(args[1], args[2]) #! Because of space in species' scientific name
 args = args[-2]
 
-if (length(args) != 2)
-	stop("Supply in this order the species and the run_id", call. = FALSE)
+if (length(args) != 3)
+	stop("Supply in this order the species, the run_id, and the option for the sensitivity analysis", call. = FALSE)
 
 (species = as.character(args[1]))
 (run = as.integer(args[2]))
+(sa_opt = as.character(args[3]))
 
 tree_path = paste0("./", species, "/")
 if (!dir.exists(tree_path))
@@ -387,30 +406,44 @@ setkey(info, qtile)
 info_ssm = info[, .(qtile, dbh, tas, pr, ph, ba)]
 info_classic = info[, .(qtile, dbh, tas, pr, ph, ba)]
 
-
-for (currentVar in c("tas", "pr", "ph", "ba"))
+for (currentVar in c("tas", "pr", "ph", "ba")) # Same data table, but scaled differently!
 {
 	info_ssm[, (currentVar) := (get(currentVar) - scaling_dt[.("ssm", currentVar), mu])/scaling_dt[.("ssm", currentVar), sd]]
 	info_classic[, (currentVar) := (get(currentVar) - scaling_dt[.("classic", currentVar), mu])/scaling_dt[.("classic", currentVar), sd]]
 }
 
 #### Sensitivity of growth with respect to data only
-## Common variables (note that dbh0 and sd_dbh are the same between SSM and Classic)
-dbh0 = c(info_ssm[c("q05", "q95"), dbh])/stanData_ssm$sd_dbh
+## Common variables (note that dbh_lim and sd_dbh are the same between SSM and Classic)
+if (sa_opt == "q025q975")
+{
+	lim_inf = "q025"
+	lim_sup = "q975"
+} else if (sa_opt == "min_max")
+{
+	lim_inf = "min"
+	lim_sup = "max"
+} else {
+	lim_inf = "q05"
+	lim_sup = "q95"
+	if (sa_opt != "q05q95")
+		warning("lim_inf and lim_sup are set to default values: q05 and q95, respectively")
+}
+
+dbh_lim = c(info_ssm[c(lim_inf, lim_sup), dbh])/stanData_ssm$sd_dbh
 sd_dbh = stanData_ssm$sd_dbh
 n_param = 500
 
 ## SSM
-sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh0 = dbh0,
-	sd_dbh = sd_dbh, n_param = n_param, N = 2^16, clim_dt = info_ssm, seed = 123)
+sa_ssm_data = sensitivityAnalysis_data(model = ssm, dbh_lim = dbh_lim, sd_dbh = sd_dbh, n_param = n_param, lim_inf = lim_inf,
+	lim_sup = lim_sup, N = 2^19, clim_dt = info_ssm, seed = 123)
 
-saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_data_", n_param, ".rds"))
+saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_data_", lim_inf, "_", lim_sup, "_nParams=", n_param, ".rds"))
 
 ## Classic
-sa_classic_data = sensitivityAnalysis_data(model = classic, dbh0 = dbh0,
-	sd_dbh = sd_dbh, n_param = n_param, N = 2^16, clim_dt = info_classic, seed = 123)
+sa_classic_data = sensitivityAnalysis_data(model = classic, dbh_lim = dbh_lim, sd_dbh = sd_dbh, n_param = n_param, lim_inf = lim_inf,
+	lim_sup = lim_sup, N = 2^19, clim_dt = info_classic, seed = 123)
 
-saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_data_", n_param, ".rds"))
+saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_data_", lim_inf, "_", lim_sup, "_nParams=", n_param, ".rds"))
 
-print(sa_ssm_data$sa[sensitivity == "Si", sum(original), by = run][, range(V1)])
-print(sa_classic_data$sa[sensitivity == "Si", sum(original), by = run][, range(V1)])
+print(sa_ssm_data$sa[, sum(original), by = run][, range(V1)])
+print(sa_classic_data$sa[, sum(original), by = run][, range(V1)])
