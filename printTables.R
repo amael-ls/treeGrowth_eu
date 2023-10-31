@@ -22,11 +22,11 @@ params_names = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slo
 
 params_values = printParams(ls_species = ls_species, params_names = params_names, run = 1)
 
-ssm_05 = data.table::dcast(params_values[["ssm_params"]], parameter ~ speciesName_sci, value.var = c("q5"))
+ssm_05 = data.table::dcast(params_values[["ssm_params"]], parameter ~ speciesName_sci, value.var = c("q05"))
 ssm_med = data.table::dcast(params_values[["ssm_params"]], parameter ~ speciesName_sci, value.var = c("med"))
 ssm_95 = data.table::dcast(params_values[["ssm_params"]], parameter ~ speciesName_sci, value.var = c("q95"))
 
-classic_05 = data.table::dcast(params_values[["classic_params"]], parameter ~ speciesName_sci, value.var = c("q5"))
+classic_05 = data.table::dcast(params_values[["classic_params"]], parameter ~ speciesName_sci, value.var = c("q05"))
 classic_med = data.table::dcast(params_values[["classic_params"]], parameter ~ speciesName_sci, value.var = c("med"))
 classic_95 = data.table::dcast(params_values[["classic_params"]], parameter ~ speciesName_sci, value.var = c("q95"))
 
