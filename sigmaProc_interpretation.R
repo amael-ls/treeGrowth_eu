@@ -68,9 +68,7 @@ for (species in infoSpecies[, speciesName_sci])
 #### Load data
 ## General data
 # Trees
-treeData_classic = readRDS("./Fagus sylvatica/1_treeData_classic.rds")
-treeData_ssm = readRDS("./Fagus sylvatica/1_treeData.rds") # Should be the same as classic data (currently not because 8000 vs 12000 individuals)
-treeData = readRDS("./Fagus sylvatica/1_treeData.rds") #! This should be the only treeData loaded as ssm and classic data are the same!
+treeData = readRDS("./Fagus sylvatica/1_treeData.rds")
 
 # Climate
 clim_folder = "/home/amael/project_ssm/inventories/growth/"
@@ -131,22 +129,23 @@ scaling_ph = readRDS("Fagus sylvatica/1_ph_normalisation.rds")
 setkey(scaling_ph, variable)
 
 ## Classic approach
-classic = readRDS("./Fagus sylvatica/growth-run=1-2022-12-15_11h06_de-fr-sw_8000_main_classic.rds")
-# classic$print(c("lp__", "averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-# 	"ph_slope", "ph_slope2", "competition_slope", "etaObs", "proba", "sigmaProc"), max_rows = 20)
+classic = readRDS("./Fagus sylvatica/growth-run=1-2023-01-20_20h22_de-fr-sw_12000_main_classic.rds")
 
 ## SSM
 ssm = readRDS("./Fagus sylvatica/growth-run=1-2023-01-12_02h02_de-fr-sw_12000_main.rds")
-# ssm$print(c("lp__", "averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-# 	"ph_slope", "ph_slope2", "competition_slope", "etaObs", "proba", "sigmaProc"), max_rows = 20)
 
 #### Compute the approximation of the lognormal 
 ## Common variables
-selected_plot_id = "france_501878"
-selected_tree_id = "14"
-selected_year = 2010
+# selected_plot_id = "france_501878"
+# selected_tree_id = "14"
+# selected_year = 2010
+
+selected_plot_id = "germany_12591_3"
+selected_tree_id = "10"
+selected_year = 2000
 
 treeData[.(selected_plot_id, selected_tree_id, selected_year)]
+treeData[.(selected_plot_id, selected_tree_id)]
 
 init_dbh = unlist(treeData[.(selected_plot_id, selected_tree_id, selected_year), dbh])/scaling_dbh["dbh", sd]
 current_dbh = init_dbh
@@ -161,6 +160,13 @@ basalAreas = (dataClim[.(selected_plot_id, selected_years_clim), standBasalArea_
 ph = (soil[selected_plot_id, ph] - scaling_ph["ph", mu])/scaling_ph["ph", sd]
 nSim = 1e6
 
+plot(selected_years_clim, temperatures, pch = 19, ylim = c(min(c(temperatures, precipitations)), max(c(temperatures, precipitations))),
+	col = "#CD212A")
+points(selected_years_clim, precipitations, pch = 19, col = "#122A51")
+lines(selected_years_clim, temperatures, col = "#CD212A")
+lines(selected_years_clim, precipitations, col = "#122A51")
+abline(h = mean(temperatures), lwd = 2, col = "#CD212A")
+abline(h = mean(precipitations), lwd = 2, col = "#122A51")
 meanlog = numeric(nGrowth)
 dt_sample = setNames(data.table(matrix(data = 0, nrow = nSim, ncol = nGrowth)), paste0("sample", 1:nGrowth))
 
@@ -192,76 +198,45 @@ for (i in 1:nGrowth)
 ## Approximated lognormal distribution from the sum of lognormal random variables
 (coefSum = estimateSumLognormal(mu = meanlog, sigma = sdlog))
 
+sd_dbh = scaling_dbh["dbh", sd]
+avgGrowth = exp(meanlog + sdlog^2/2)
+
+cor(precipitations[1:nGrowth], avgGrowth)
+cor(temperatures[1:nGrowth], avgGrowth)
+
 ## Comparison with the parameters from the classic approach
 mean(classic$draws("sigmaProc"))
 avg_temperature = mean(temperatures)
 avg_precipitations = mean(precipitations)
 avg_basalArea = mean(basalAreas)
 
-meanlog_fct(dbh0 = init_dbh, precip = avg_precipitations, temperature = avg_temperature, ph = ph,
-		standBasalArea = avg_basalArea, averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2,
-		ph_slope, ph_slope2, competition_slope) + log(nGrowth)
-	# The + log(nGrowth) is there because it is dbh(t + nGrowth) = dbh(t) + nGrowth * logN(...) in the classic approach 
+meanlog_classic = meanlog_fct(dbh0 = init_dbh, precip = avg_precipitations, temperature = avg_temperature, ph = ph,
+		standBasalArea = avg_basalArea, mean(classic$draws("averageGrowth")), mean(classic$draws("dbh_slope")),
+		mean(classic$draws("dbh_slope2")), mean(classic$draws("pr_slope")), mean(classic$draws("pr_slope2")), mean(classic$draws("tas_slope")),
+		mean(classic$draws("tas_slope2")), mean(classic$draws("ph_slope")), mean(classic$draws("ph_slope2")),
+		mean(classic$draws("competition_slope")))
+	# Add + log(nGrowth) if simulating over many years, dbh(t + nGrowth) = dbh(t) + nGrowth * logN(...) in the classic approach
+
+curve(dlnorm(x, meanlog = coefSum["mu"] + log(sd_dbh) - log(nGrowth), sdlog = coefSum["sigma"]), lwd = 2, to = 30,
+	xlab = "Averaged annual growth (mm/yr)", ylab = "Posterior", col = "#122A51")
+curve(dlnorm(x, meanlog = meanlog_classic + log(sd_dbh), sdlog = mean(classic$draws("sigmaProc"))),
+	col = "#A21121", lwd = 2, add = TRUE)
+legend(x = "topright", legend = c("SSM - approx", "Classic"), col = c("#122A51", "#A21121"), lwd = 2)
 
 
-#         mu      sigma 
-# -2.6027084  0.5361847
-# -3.1820860  0.5357548
-sd_dbh = scaling_dbh["dbh", sd]
-curve(dlnorm(x, meanlog = -2.6027084 + log(sd_dbh) - log(nGrowth), sdlog = 0.5361847), lwd = 2, to = 30,
-	xlab = "Averaged annual growth (mm/yr)", ylab = "Posterior")
-curve(dlnorm(x, meanlog = -3.1820860 + log(sd_dbh), sdlog = 0.5357548), col = "#A21121", lwd = 2, add = TRUE)
-curve((dlnorm(x, meanlog = meanlog[1] + log(sd_dbh), sdlog = sdlog[1]) +
-	dlnorm(x, meanlog = meanlog[2] + log(sd_dbh), sdlog = sdlog[1]) +
-	dlnorm(x, meanlog = meanlog[3] + log(sd_dbh), sdlog = sdlog[1]) +
-	dlnorm(x, meanlog = meanlog[4] + log(sd_dbh), sdlog = sdlog[1]) +
-	dlnorm(x, meanlog = meanlog[5] + log(sd_dbh), sdlog = sdlog[1]))/5, lwd = 2, col = "#122A51", add = TRUE)
-legend(x = "topright", legend = c("SSM - approx", "Classic", "SSM"), col = c("#000000", "#A21121"), lwd = 2)
-
-# The + log(sd_dbh) is to rescale growth
-# The - log(nGrowth) is to compute the average annual growth (I only did the sum!)
-
-mean(rlnorm(1e6, meanlog = -2.6027084 + log(sd_dbh) - log(nGrowth), sdlog = 0.5361847))
-mean(rlnorm(1e6, meanlog = -3.1820860 + log(sd_dbh), sdlog = 0.5357548))
+exp(coefSum["mu"] + log(sd_dbh) - log(nGrowth) + coefSum["sigma"]^2/2)
+exp(meanlog_classic + log(sd_dbh) + mean(classic$draws("sigmaProc"))^2/2)
 
 
-zz = (rlnorm(1e6, meanlog = meanlog[1] + log(sd_dbh), sdlog = sdlog[1]) +
-	rlnorm(1e6, meanlog = meanlog[2] + log(sd_dbh), sdlog = sdlog[1]) +
-	rlnorm(1e6, meanlog = meanlog[3] + log(sd_dbh), sdlog = sdlog[1]) +
-	rlnorm(1e6, meanlog = meanlog[4] + log(sd_dbh), sdlog = sdlog[1]) +
-	rlnorm(1e6, meanlog = meanlog[5] + log(sd_dbh), sdlog = sdlog[1]))/5
+aa2 = rlnorm(1e6, meanlog = meanlog[2] + log(sd_dbh), sdlog = sdlog[2])
+aa3 = rlnorm(1e6, meanlog = meanlog[3] + log(sd_dbh), sdlog = sdlog[3])
+aa4 = rlnorm(1e6, meanlog = meanlog[4] + log(sd_dbh), sdlog = sdlog[4])
+aa5 = rlnorm(1e6, meanlog = meanlog[5] + log(sd_dbh), sdlog = sdlog[5])
+aa6 = rlnorm(1e6, meanlog = meanlog[6] + log(sd_dbh), sdlog = sdlog[6])
+aa7 = rlnorm(1e6, meanlog = meanlog[7] + log(sd_dbh), sdlog = sdlog[7])
 
-dzz = density(zz)
-
-ind = which(dzz$x < 20)
-
-xx = rlnorm(1e6, meanlog = -2.6027084 + log(sd_dbh) - log(nGrowth), sdlog = 0.5361847)
-dxx = density(xx)
-
-plot(dzz$x[ind], dzz$y[ind], lwd = 2, type = "l")
-lines(dxx$x[ind], dxx$y[ind], lwd = 2, type = "l", col = "red")
-
-current_dbh = init_dbh*sd_dbh
-
-for (i in 1:nGrowth)
-{
-	dbhCol = paste0("dbh", i)
-	meanlog[i] = meanlog_fct(dbh0 = current_dbh/sd_dbh, precip = precipitations[i], temperature = temperatures[i], ph = ph,
-		standBasalArea = basalAreas[i], averageGrowth, dbh_slope, dbh_slope2, pr_slope, pr_slope2, tas_slope, tas_slope2,
-		ph_slope, ph_slope2, competition_slope)
-	sampleCol = paste0("sample", i)
-	dt_sample[, c(sampleCol) := rlnorm(n = nSim, meanlog = meanlog[i] + log(sd_dbh), sdlog = sdlog[i])]
-	current_dbh = current_dbh + unlist(dt_sample[, lapply(.SD, mean), .SDcols = c(sampleCol)])
-}
-
-rs = rowSums(x = dt_sample)/5
-rs = rs[rs < 30]
-hist(rs, prob = TRUE)
-curve((dlnorm(x, meanlog = meanlog[1] + log(sd_dbh), sdlog = sdlog[1]) +
-	dlnorm(x, meanlog = meanlog[2] + log(sd_dbh), sdlog = sdlog[1]) +
-	dlnorm(x, meanlog = meanlog[3] + log(sd_dbh), sdlog = sdlog[1]) +
-	dlnorm(x, meanlog = meanlog[4] + log(sd_dbh), sdlog = sdlog[1]) +
-	dlnorm(x, meanlog = meanlog[5] + log(sd_dbh), sdlog = sdlog[1]))/5, lwd = 2, col = "#122A51", add = TRUE)
-curve(dlnorm(x, meanlog = -2.6027084 + log(sd_dbh) - log(nGrowth), sdlog = 0.5361847), add = TRUE, lwd = 2)
-curve(dlnorm(x, meanlog = -3.1820860 + log(sd_dbh), sdlog = 0.5357548), col = "#A21121", lwd = 2, add = TRUE)
-
+ss = aa2 + aa3 + aa4 + aa5 + aa6 + aa7
+ss = ss[ss < quantile(ss, seq(0, 1, 0.05))["95%"]]
+hist(ss, prob = TRUE)
+(aa_aprox = estimateSumLognormal(mu = meanlog[2:7], sigma = sdlog[2:7]))
+curve(dlnorm(x, meanlog = aa_aprox["mu"] + log(sd_dbh), aa_aprox["sigma"]), add = TRUE)
