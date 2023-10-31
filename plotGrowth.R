@@ -24,22 +24,16 @@ source("toolFunctions.R")
 ######## Part I: growth response to environment and to time series predictions
 #### Get data
 ## Common variables
-# args = c("Betula pendula", "1", "tas", "pr", "ph", "ba")
-# args = c("Fagus sylvatica", "1", "tas", "pr", "ph", "ba")
-# args = c("Picea abies", "1", "tas", "pr", "ph", "ba")
-# args = c("Pinus pinaster", "1", "tas", "pr", "ph", "ba")
-# args = c("Pinus sylvestris", "1", "tas", "pr", "ph", "ba")
-# args = c("Quercus petraea", "1", "tas", "pr", "ph", "ba")
-args = commandArgs(trailingOnly = TRUE)
+args = commandArgs(trailingOnly = TRUE) # Example: args = c("Betula pendula", "1", "tas", "pr", "ph", "ba")
 if (length(args) < 3)
 	stop("Supply the species_id, run_id, and at least one variable among pr, tas, and ph!", call. = FALSE)
 
-species = as.character(args[1])
-run = as.integer(args[2])
-variable = as.character(args[3:length(args)])
+(species = as.character(args[1]))
+(run = as.integer(args[2]))
+(variable = as.character(args[3:length(args)]))
 
 if (!all(variable %in% c("pr", "tas", "ph", "ba")))
-	stop("The variable must be either pr, tas, ph, or ba")
+	stop("The variables must be among pr, tas, ph, or ba")
 
 #### Plot residuals fit
 # residuals_fit(species, run, filenamePattern = "_residuals_fit.pdf")
