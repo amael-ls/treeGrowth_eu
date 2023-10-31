@@ -1,9 +1,10 @@
 
 #### Aim of prog: Describe the growth data
-## List of plots:
+## Script organisation:
 #	1. Climate range and number of individuals in the data set per species and country
 #	2. Maps of plots
 #
+## Remark: Part of this program is actually redundant with the function infoSpecies from toolFunctions.R
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -155,6 +156,8 @@ spClim_folder = "/home/amael/project_ssm/inventories/growth/spClim/"
 
 ## Tree data
 treeData = readRDS(paste0(dataFolder, "standardised_european_growth_data_reshaped.rds"))
+# treeData = treeData[speciesName_sci %in% c("Betula pendula", "Fagus sylvatica", "Picea abies", "Pinus pinaster",
+# 	"Pinus sylvestris", "Quercus petraea")]
 
 ## Climate data
 climate = readRDS(paste0(dataFolder, "europe_reshaped_climate.rds"))
@@ -185,11 +188,12 @@ saveRDS(climBounds, paste0(dataFolder, "climBounds.rds"))
 
 #### Plot climate data per species
 ## Common variables
-keptSpecies = c("Abies alba", "Acer campestre", "Acer platanoides", "Acer pseudoplatanus", "Alnus glutinosa", "Alnus incana",
-		"Betula pendula", "Betula pubescens", "Fagus sylvatica", "Larix decidua", "Larix kaempferi", "Picea abies", "Picea sitchensis",
-		"Pinus contorta", "Pinus halepensis", "Pinus nigra", "Pinus pinaster", "Pinus sylvestris", "Populus tremula", "Pseudotsuga menziesii",
-		"Quercus petraea", "Quercus robur", "Salix caprea", "Sorbus aucuparia", "Tilia cordata", "Ulmus minor")
+# keptSpecies = c("Abies alba", "Acer campestre", "Acer platanoides", "Acer pseudoplatanus", "Alnus glutinosa", "Alnus incana",
+# 		"Betula pendula", "Betula pubescens", "Fagus sylvatica", "Larix decidua", "Larix kaempferi", "Picea abies", "Picea sitchensis",
+# 		"Pinus contorta", "Pinus halepensis", "Pinus nigra", "Pinus pinaster", "Pinus sylvestris", "Populus tremula", "Pseudotsuga menziesii",
+# 		"Quercus petraea", "Quercus robur", "Salix caprea", "Sorbus aucuparia", "Tilia cordata", "Ulmus minor")
 
+keptSpecies = c("Betula pendula", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Quercus petraea")
 climBounds = climBounds[.(keptSpecies)]
 ls_species = climBounds[, unique(speciesName_sci)] # i.e., keptSpecies
 
@@ -248,9 +252,10 @@ shapefile_folder = "/home/amael/shapefiles/europe/continent/"
 # Get data
 coords = vect(unique(treeData[, .(x, y)]), geom = c("x", "y"), crs = "EPSG:4326")
 europe = vect(paste0(shapefile_folder, "europe.shp"))
+europe = makeValid(europe)
 
 # Bounding box
-bbox_europe = c(xmin = -5.69, xmax = 28, ymin = 38, ymax = 69.53)
+bbox_europe = c(xmin = -12, xmax = 35, ymin = 38, ymax = 69.53)
 europe_extent = ext(bbox_europe)
 
 # Projecting to EPSG:3035 (Lambert azimuthal equal-area projection), recommended by European Environment Agency
@@ -261,7 +266,6 @@ europe_extent = project(rast(europe_extent, crs = "EPSG:4326"), "EPSG:3035")
 europe = crop(x = europe, y = europe_extent)
 
 #### Plot
-# pdf("plots_location_growth_subsample_2.pdf", height = 10, width = 10)
 pdf("plots_location_growth.pdf", height = 10, width = 10)
 plot(europe, col = "#C4AC7C44", border = "#9E391A", axes = FALSE)
 plot(coords, pch = 20, cex = 0.025, col = "#354536", add = TRUE)
