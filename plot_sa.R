@@ -15,7 +15,7 @@ library(stringi)
 ## Function to plot sensitivity analysis, one variable per panel with all the species/methods
 plot_list_sa = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c("dbh", "pr", "tas", "ph", "ba"),
 	ls_titles = c(dbh = "Diameter", pr = "Precipitation", tas = "Temperature", ph = "pH", ba = "Basal area"),
-	ext = NULL, relative = TRUE, normalise = TRUE)
+	ext = NULL, normalise = TRUE)
 {
 	# Check data
 	if (length(sa_ssm_data_list) != length(sa_classic_data_list))
@@ -49,37 +49,20 @@ plot_list_sa = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c("dbh
 	ls_species_label = stri_replace_all(str = ls_species, replacement = " ", regex = "_")
 	ls_species_label = stri_trans_totitle(ls_species_label, opts_brkiter = stri_opts_brkiter(type = "sentence"))
 
-	# Multiply data by var(y) if not relative
-	if (!relative)
-	{
-		for (currentSpecies in ls_species)
-		{
-			sa_ssm_data_list[[currentSpecies]]$sa = merge.data.table(sa_ssm_data_list[[currentSpecies]]$sa,
-				data.table(run = seq_along(sa_ssm_data_list[[currentSpecies]]$var_y), var_y = sa_ssm_data_list[[currentSpecies]]$var_y),
-				by = "run")
-			sa_classic_data_list[[currentSpecies]]$sa = merge.data.table(sa_classic_data_list[[currentSpecies]]$sa,
-				data.table(run = seq_along(sa_classic_data_list[[currentSpecies]]$var_y), var_y = sa_classic_data_list[[currentSpecies]]$var_y),
-				by = "run")
-
-			sa_ssm_data_list[[currentSpecies]]$sa[, original := original*var_y]
-			sa_classic_data_list[[currentSpecies]]$sa[, original := original*var_y]
-		}
-	}
-
 	# Define empty plot
 	x_max = 2.25*length(sa_ssm_data_list)
-	y_max = max(max(sapply(sa_ssm_data_list, function(zz) {return (max(zz$sa[sensitivity == "Si", original]))})),
-		max(sapply(sa_classic_data_list, function(zz) {return (max(zz$sa[sensitivity == "Si", original]))})))
+	y_max = max(max(sapply(sa_ssm_data_list, function(zz) {return (max(zz$sa[, original]))})),
+		max(sapply(sa_classic_data_list, function(zz) {return (max(zz$sa[, original]))})))
 	
 	for (currentVar in ls_data)
 	{
 		if (!is.null(ext))
 		{
 			if (ext == ".pdf")
-				pdf(file = paste0(currentVar, ext), height = 6, width = 9.708204) # Golden ratio
+				pdf(file = paste0("sa_", currentVar, ext), height = 6, width = 9.708204) # Golden ratio
 
 			if (ext == ".tex")
-				tikz(file = paste0(currentVar, ext), height = 6, width = 9.708204) # Golden ratio
+				tikz(file = paste0("sa_", currentVar, ext), height = 6, width = 9.708204) # Golden ratio
 		}
 		plot(0, type = "n", xlim = c(0, x_max), ylim = c(0, y_max), ylab = "SA", main = ls_titles[currentVar],
 			xlab = "Species", las = 1, xaxt = "n")
@@ -93,9 +76,9 @@ plot_list_sa = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c("dbh
 			x_pos_label[currentSpecies] = x_orig
 			x1 = x_orig - 0.05
 			x2 = x_orig + 0.05
-			y1 = quantile(sa_ssm_data_list[[currentSpecies]]$sa[(sensitivity == "Si") & (parameters == currentVar), original],
+			y1 = quantile(sa_ssm_data_list[[currentSpecies]]$sa[parameters == currentVar, original],
 				c(0.05, 0.5, 0.95))
-			y2 = quantile(sa_classic_data_list[[currentSpecies]]$sa[(sensitivity == "Si") & (parameters == currentVar), original],
+			y2 = quantile(sa_classic_data_list[[currentSpecies]]$sa[parameters == currentVar, original],
 				c(0.05, 0.5, 0.95))
 
 			segments(x0 = x1, y0 = y1["5%"], x1 = x1, y1 = y1["95%"], col = "#E9851D")
@@ -121,8 +104,8 @@ plot_list_sa = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c("dbh
 }
 
 ## Function to plot proportion sensitivity analysis, one variable per panel with all the species/methods
-plot_list_sa_prop = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c("dbh", "pr", "tas", "ph", "ba"),
-	legend_text = c("dbh", "precip", "temp", "pH", "B.A."), ext = NULL, relative = TRUE, normalise = TRUE)
+plot_list_sa_prop = function(sa_ssm_data_list, sa_classic_data_list, colour_scheme, ls_data = c("pr", "tas", "dbh", "ba", "ph"),
+	ext = NULL, normalise = TRUE)
 {
 	# Check data
 	if (length(sa_ssm_data_list) != length(sa_classic_data_list))
@@ -132,18 +115,16 @@ plot_list_sa_prop = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c
 	if (!all(ls_species %in% names(sa_classic_data_list)))
 		stop("Lists should contain the same species names")
 
-	n_data = length(ls_data)
-	if (n_data > 5)
-		warning("The colours might not be acurate as I am using the palette Johnson from MetBrewer")
-	
-	if (length(legend_text) != n_data)
-		stop("ls_data and legend_text should be of the same size")
+	n_data = colour_scheme[, .N]
 
 	if (!all(ls_data %in% sapply(sa_ssm_data_list, function(zz) {return(unique(zz$sa[, parameters]))})))
 		stop("Some data are not in the SSM list")
 	
 	if (!all(ls_data %in% sapply(sa_classic_data_list, function(zz) {return(unique(zz$sa[, parameters]))})))
 		stop("Some data are not in the classic list")
+	
+	if (!all(ls_data %in% colour_scheme[, varsName]))
+		stop("ls_data and colour_scheme mismatch")
 
 	if (!is.null(ext))
 	{
@@ -160,10 +141,6 @@ plot_list_sa_prop = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c
 	ls_species_label = stri_replace_all(str = ls_species, replacement = " ", regex = "_")
 	ls_species_label = stri_trans_totitle(ls_species_label, opts_brkiter = stri_opts_brkiter(type = "sentence"))
 
-	colours = MetBrewer::met.brewer("Johnson", n_data)
-	colours_str = grDevices::colorRampPalette(colours)(n_data)
-	names(colours_str) = ls_data
-
 	x_max = 2.25*length(sa_ssm_data_list)
 
 	x_orig = 0.5
@@ -176,23 +153,6 @@ plot_list_sa_prop = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c
 	names(ls_rect_dt_y1) = ls_species
 	ls_rect_dt_y2 = vector(mode = "list", length = length(ls_species))
 	names(ls_rect_dt_y2) = ls_species
-
-	# Multiply data by var(y) if not relative
-	if (!relative)
-	{
-		for (currentSpecies in ls_species)
-		{
-			sa_ssm_data_list[[currentSpecies]]$sa = merge.data.table(sa_ssm_data_list[[currentSpecies]]$sa,
-				data.table(run = seq_along(sa_ssm_data_list[[currentSpecies]]$var_y), var_y = sa_ssm_data_list[[currentSpecies]]$var_y),
-				by = "run")
-			sa_classic_data_list[[currentSpecies]]$sa = merge.data.table(sa_classic_data_list[[currentSpecies]]$sa,
-				data.table(run = seq_along(sa_classic_data_list[[currentSpecies]]$var_y), var_y = sa_classic_data_list[[currentSpecies]]$var_y),
-				by = "run")
-
-			sa_ssm_data_list[[currentSpecies]]$sa[, original := original*var_y]
-			sa_classic_data_list[[currentSpecies]]$sa[, original := original*var_y]
-		}
-	}
 
 	# Compute rectangles
 	for (currentSpecies in ls_species)
@@ -214,9 +174,9 @@ plot_list_sa_prop = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c
 		{
 			x_pos_label[currentSpecies] = x_orig
 
-			y1 = quantile(sa_ssm_data_list[[currentSpecies]]$sa[(sensitivity == "Si") & (parameters == currentVar), original],
+			y1 = quantile(sa_ssm_data_list[[currentSpecies]]$sa[parameters == currentVar, original],
 				c(0.05, 0.5, 0.95))
-			y2 = quantile(sa_classic_data_list[[currentSpecies]]$sa[(sensitivity == "Si") & (parameters == currentVar), original],
+			y2 = quantile(sa_classic_data_list[[currentSpecies]]$sa[parameters == currentVar, original],
 				c(0.05, 0.5, 0.95))
 
 			# Rectangles
@@ -262,7 +222,7 @@ plot_list_sa_prop = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c
 		y_max = max(rect_dt_y1[, sum(ytop), by = .(species, variables)][, max(V1)], rect_dt_y2[, sum(ytop), by = .(species, variables)][, max(V1)])
 	}
 
-	plot(0, type = "n", xlim = c(0, x_max), ylim = c(0, y_max), ylab = "SA", main = "", xlab = "Species", las = 1, xaxt = "n")
+	plot(0, type = "n", xlim = c(0, x_max), ylim = c(0, y_max + 0.03), ylab = "SA", main = "", xlab = "Species", las = 1, xaxt = "n")
 
 	for (currentSpecies in ls_species)
 	{
@@ -270,18 +230,22 @@ plot_list_sa_prop = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c
 		{
 			rect(xleft = rect_dt_y1[.(currentSpecies, currentVar), xleft], ybottom = rect_dt_y1[.(currentSpecies, currentVar), ybottom],
 				xright = rect_dt_y1[.(currentSpecies, currentVar), xright], ytop = rect_dt_y1[.(currentSpecies, currentVar), ytop],
-				density = NULL, col = colours_str[currentVar], border = NA)
+				density = NULL, col = colour_scheme[currentVar, colour], border = NA)
 
 			rect(xleft = rect_dt_y2[.(currentSpecies, currentVar), xleft], ybottom = rect_dt_y2[.(currentSpecies, currentVar), ybottom],
 				xright = rect_dt_y2[.(currentSpecies, currentVar), xright], ytop = rect_dt_y2[.(currentSpecies, currentVar), ytop],
-				density = NULL, col = colours_str[currentVar], border = NA)
+				density = NULL, col = colour_scheme[currentVar, colour], border = NA)
 		}
 		# Vertical line species
-		abline(v = x_orig, lwd = 0.5, lty = "dashed", col = "#55555555")
+		abline(v = x_pos_label[currentSpecies], lwd = 0.5, lty = "dashed", col = "#555555")
+
+		x_s = (rect_dt_y1[.(currentSpecies, currentVar), xleft] + rect_dt_y1[.(currentSpecies, currentVar), xright])/2 # SSM label 'S'
+		x_a = (rect_dt_y2[.(currentSpecies, currentVar), xleft] + rect_dt_y2[.(currentSpecies, currentVar), xright])/2 # Averaging label 'A'
+		text(x = c(x_s, x_a), y = c(y_max, y_max), labels = c("s", "a"), pos = 3)
 	}
 	axis(side = 1, at = x_pos_label, labels = ls_species_label)
 
-	legend(x = "topleft", legend = legend_text, box.lwd = 0, fill = colours_str, horiz = TRUE,
+	legend(x = "topleft", legend = colour_scheme[ls_data, legend_text], box.lwd = 0, fill = colour_scheme[ls_data, colour], horiz = TRUE,
 		xpd = TRUE, inset = c(0, -0.1))
 	if (!is.null(ext))
 		dev.off()
@@ -290,7 +254,11 @@ plot_list_sa_prop = function(sa_ssm_data_list, sa_classic_data_list, ls_data = c
 #### Load data
 ## Common variables
 ls_species = c("Betula pendula", "Fagus sylvatica", "Picea abies", "Pinus pinaster", "Pinus sylvestris", "Quercus petraea")
-# ls_species = "Pinus pinaster" #! WATCHOUT, LOADING FOR ONE SPECIES ONLY !!!!
+sa_opt = "q05_q95" # "q05_q95" "min_max"
+
+colour_scheme = data.table(varsName = c("pr", "tas", "dbh", "ba", "ph"), legend_text = c("precip", "temp", "dbh", "B.A.", "pH"),
+	colour = c("#0086A8", "#D04E00", "#F6C200", "#A00E00", "#132B69")) # Colours scheme taken from MetBrewer::met.brewer("Johnson", 5)
+setkey(colour_scheme, varsName)
 
 sa_ssm_data_list = vector(mode = "list", length = length(ls_species))
 names(sa_ssm_data_list) = ls_species
@@ -300,55 +268,13 @@ names(sa_classic_data_list) = ls_species
 
 for (species in ls_species)
 {
-	sa_ssm_data_list[[species]] = readRDS(paste0("./", species, "/sa_ssm_data.rds")) #! WATCHOUT, LOADING FOR n_param = 1 !!!!
-	sa_classic_data_list[[species]] = readRDS(paste0("./", species, "/sa_classic_data.rds")) #! WATCHOUT, LOADING FOR n_param = 1 !!!!
+	sa_ssm_data_list[[species]] = readRDS(paste0("./", species, "/sa_ssm_data_", sa_opt, "_nParams=500.rds"))
+	sa_classic_data_list[[species]] = readRDS(paste0("./", species, "/sa_classic_data_", sa_opt, "_nParams=500.rds"))
 }
 
 #### Plot
-# plot_list_sa(sa_ssm_data_list = sa_ssm_data_list, sa_classic_data_list = sa_classic_data_list,
-# 	ls_data = c("dbh", "precip", "tas", "ph", "standBasalArea"),
-# 	ls_titles = c(dbh = "Diameter", precip = "Precipitation", tas = "Temperature", ph = "pH", standBasalArea = "Basal area"),
-# 	ext = ".pdf")
-
-
-# plot_list_sa_prop(sa_ssm_data_list = sa_ssm_data_list, sa_classic_data_list = sa_classic_data_list, ext = ".pdf", relative = TRUE)
-
-pdf("all.pdf", height = 6, width = 9.708204) # Golden ratio
-plot_list_sa(sa_ssm_data_list = sa_ssm_data_list, sa_classic_data_list = sa_classic_data_list, relative = TRUE, normalise = TRUE)
-plot_list_sa_prop(sa_ssm_data_list = sa_ssm_data_list, sa_classic_data_list = sa_classic_data_list, ext = NULL,
-	relative = FALSE, normalise = FALSE)
-plot_list_sa_prop(sa_ssm_data_list = sa_ssm_data_list, sa_classic_data_list = sa_classic_data_list, ext = NULL,
-	relative = TRUE, normalise = TRUE)
-dev.off()
-
-for (currentSpecies in ls_species)
-{
-	print(paste0("-----   ", currentSpecies, "   -----"))
-	print(mean(sa_ssm_data_list[[currentSpecies]]$var_y))
-	print(mean(sa_classic_data_list[[currentSpecies]]$var_y))
-	# sd_dbh_ssm = readRDS(paste0("./", currentSpecies, "/1_stanData.rds"))$sd_dbh
-	# sd_dbh_classic = readRDS(paste0("./", currentSpecies, "/1_stanData_classic.rds"))$sd_dbh
-	# print(paste0("-----   ", currentSpecies, "   -----"))
-	# print(mean(sd_dbh_ssm*sa_ssm_data_list[[currentSpecies]]$var_y))
-	# print(mean(sd_dbh_classic*sa_classic_data_list[[currentSpecies]]$var_y))
-}
-
-growth = readRDS(paste0("./", currentSpecies, "/1_stanData.rds"))$avg_yearly_growth_obs
-range(growth)
-hist(growth)
-var(growth)
-
-sa_ssm_data_list = list(sa_ssm_data_list[[2]])
-names(sa_ssm_data_list) = ls_species[2]
-sa_classic_data_list = list(sa_classic_data_list[[2]])
-names(sa_classic_data_list) = ls_species[2]
-
-pdf("sa_relative.pdf", height = 6, width = 9.708204) # Golden ratio
-plot_list_sa_prop(sa_ssm_data_list, sa_classic_data_list = sa_classic_data_list, ext = NULL,
-	relative = TRUE, normalise = TRUE)
-dev.off()
-
-pdf("sa_absolute.pdf", height = 6, width = 9.708204) # Golden ratio
-plot_list_sa_prop(sa_ssm_data_list, sa_classic_data_list = sa_classic_data_list, ext = NULL,
-	relative = FALSE, normalise = FALSE)
-dev.off()
+# pdf("all_in_one_split.pdf", height = 6, width = 9.708204) # Golden ratio
+plot_list_sa(sa_ssm_data_list = sa_ssm_data_list, sa_classic_data_list = sa_classic_data_list, ext = ".tex", normalise = TRUE)
+plot_list_sa_prop(sa_ssm_data_list = sa_ssm_data_list, sa_classic_data_list = sa_classic_data_list, colour_scheme = colour_scheme, ext = ".tex",
+	normalise = TRUE)
+# dev.off()
