@@ -3,7 +3,8 @@
 ## Comment
 #	I expect the quadratic terms to be more negative with SSM compare to classic, i.e., 'more significant'
 #	Note that I only talk about negative because this is also the sign I expect for the quadratic terms
-
+#
+#	This script is actually quite redundant with extentPosterior.R
 
 library(data.table)
 library(cmdstanr)
