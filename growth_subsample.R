@@ -11,19 +11,10 @@
 #	Finally, to run the model with the function sample, use the argument opencl_ids
 #	The opencl_ids is supplied as a vector of length 2, where the first element is the platform ID and the second argument is the device ID.
 #	In this case it is (0, 0) or (0, 1) if the second device is desired
-
-#?   r$> info_sample
-#?        distrib     mean      sd      var   skewness
-#?   1:     chisq 3.332272 1.38651 1.922411 -4.1981732
-#?   2:      data 3.332272 1.38651 1.922411  0.3519962
-#?   3:     gamma 3.332272 1.38651 1.922411  0.8321711
-#?   4: lognormal 3.332272 1.38651 1.922411  1.3202924
-#?   5:      naka 3.332272 1.38651 1.922411  1.2726553
-#?   6:      wald 3.332272 1.38651 1.922411  1.2482567
 #
-# Species done: 1, 2, 4-7, 10-13, 16, 17, 19-24, 26-28, 30, 32, 34, 37_1 et 4 40-42, 45
-# Species failure: 3, 8, 9, 14, 15, 18, 25, 29, 31, 33, 35, 36, 37_3 etaObs failed, 38, 39, 43, 44
-# Species running: 37 (2nd run only)
+#* Species done: 1, 2, 4-7, 10-13, 16, 17, 19-24, 26-28, 30, 32, 34, 37_1, 2 and 4, 40-42, 45
+#! Species failure: 3, 8, 9, 14, 15, 18, 25, 29, 31, 33, 35, 36, 37_3 etaObs failed, 38, 39, 43, 44
+#
 #?          speciesName_sci    tot
 #*  1:            Abies alba  45166
 #*  2:        Acer campestre   8454
@@ -587,7 +578,7 @@ start_time = Sys.time()
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
-	iter_warmup = 1500, iter_sampling = 1000, save_warmup = TRUE, init = initVal_Y_gen,
+	iter_warmup = 1500, iter_sampling = 1000, save_warmup = FALSE, init = initVal_Y_gen,
 	max_treedepth = 13, adapt_delta = 0.95, opencl_ids = c(0, ifelse(species_id %% 2 == 0, 0, 1)))
 
 end_time = Sys.time()
@@ -601,165 +592,3 @@ results$cmdstan_diagnose()
 print(end_time - start_time)
 results$print(c("lp__", "averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
 	"ph_slope", "ph_slope2", "competition_slope", "etaObs", "proba", "sigmaProc"), max_rows = 20)
-
-# results = readRDS("Abies grandis/growth-run=1-2022-06-02_00h42.rds") #! TO REMOVE AFTER !!!!!!!!!!!!!!!
-
-# my_avg = 1.296489 # From Nadja Rüger (personal communication), based on Rüger 2011 
-# my_sd = 0.208773 # From Nadja Rüger (personal communication), based on Rüger 2011
-
-# mu = log(my_avg^2/sqrt(my_sd^2 + my_avg^2))
-# sigma = sqrt(log(my_sd^2/my_avg^2 + 1))
-
-# qq = rlnorm(1e6, mu, sigma)
-# 100*mean(qq)/my_avg
-# 100*sd(qq)/my_sd
-
-# qq = rlnorm(1e6, 1.215, 0.125)
-# mean(qq)
-# sd(qq)
-
-# exp(1.215 + 0.125^2/2)
-# sqrt((exp(0.125^2) - 1)*exp(2*1.215 + 0.125^2))
-# (exp(0.125^2) - 1)*exp(2*1.215 + 0.125^2)
-
-# log(0.3441301/3.641843^2 + 1)
-
-# mu_h = 1.28
-# sigma_h = 0.16
-# curve(dlnorm(x, meanlog = log(mu_h), sdlog = sigma_h), 0, 5)
-
-# aa = rlnorm(1e6, meanlog = log(mu_h), sdlog = sigma_h)
-
-# exp(log(mu_h) + 0.16^2/2)
-# sqrt((exp(0.16^2) - 1)*exp(2*log(mu_h) + 0.16^2))
-
-# mean(aa)
-# sd(aa)
-
-# X = rlnorm(n = 1e6, meanlog = log(1.28), sdlog = 0.16)
-# hist(log(X))
-# abline(v = log(1.28), col = "red", lwd = 2)
-
-# mu_test = 1.967
-# sd_test = 0.2
-
-# X = rnorm(n = 1e6, mean = mu_test, sd = sd_test)
-# hist(exp(X), breaks = seq(min(exp(X)), max(exp(X)) + 0.01, length.out = 100))
-# abline(v = exp(mu_test + sd_test^2/2), col = "red", lwd = 2)
-# mean(exp(X))
-# exp(mu_test + sd_test^2/2)
-# sd(exp(X))
-# sqrt(exp(2*mu_test + sd_test^2)*(exp(sd_test^2) - 1))
-
-# ruger_err = function(dbh)
-# 	return(0.927 + 0.0038*dbh)
-# ruger_err(seq(0, 200, 50))
-
-# # Growth larger than 10 mm/yr
-#    country     N
-# 1:  france 30221
-# 2: germany  6341
-
-
-# # Growth larger than 15 mm/yr
-#    country    N
-# 1:  france 5067
-# 2: germany  517
-
-
-# # Growth larger than 20 mm/yr
-#    country   N
-# 1:  france 837
-# 2: germany  75
-
-# growth_dt[growth > 10, .N, by = country][, 100*N/growth_dt[, .N, by = country][, N]]
-# growth_dt[growth > 15, .N, by = country][, 100*N/growth_dt[, .N, by = country][, N]]
-# growth_dt[growth > 20, .N, by = country][, 100*N/growth_dt[, .N, by = country][, N]]
-
-# alpha = function(m, v, sd = TRUE, percent = TRUE)
-# {
-# 	if (sd)
-# 		v = v^2
-	
-# 	if (percent)
-# 	{
-# 		m = m/100
-# 		v = v/100^2
-# 	}
-
-# 	if (v >= m*(1 - m))
-# 		stop("variance out of bound")
-# 	if ((m <= 0) | (m >= 1))
-# 		stop("mean out of bound")
-	
-# 	return (m*(m*(1 - m)/v - 1))
-# }
-
-# beta = function(m, v, sd = TRUE, percent = TRUE)
-# {
-# 	if (sd)
-# 		v = v^2
-	
-# 	if (percent)
-# 	{
-# 		m = m/100
-# 		v = v/100^2
-# 	}
-
-# 	if (v >= m*(1 - m))
-# 		stop("variance out of bound")
-# 	if ((m <= 0) | (m >= 1))
-# 		stop("mean out of bound")
-	
-# 	return ((1 - m)*(m*(1 - m)/v - 1))
-# }
-
-# m = 1
-# v = 0.75
-# curve(dbeta(x, shape1 = alpha(m, v), shape2 = beta(m, v)), to = 0.2, lwd = 2, col = "#125687")
-
-# aa = rbeta(1e6, shape1 = alpha(m, v), shape2 = beta(m, v))
-# 100*range(aa)
-# 100*mean(aa)
-# 100*sd(aa)
-
-
-# aa = rlnorm(1e6, meanlog = log(1.28), sdlog = 0.09)
-# sd(aa)
-
-# bb = rlnorm(1e6, meanlog = log(1.28) - 2, sdlog = 0.5)
-# sd(bb)
-
-# curve(dlnorm(x, meanlog = log(1.28), sdlog = 0.09), from = 0, to = 5)
-# curve(dlnorm(x, meanlog = log(1.28) - 2, sdlog = 0.5), add = TRUE, col = "#126578")
-
-# #### Study of Rüger 2011's parameters
-# alpha0 = -0.437
-# alpha1 = -0.162
-# sigma_a = 0.565
-
-# beta0 = 0.756
-# beta1 =  -0.143
-# sigma_b = 0.226
-
-# gamma0 = -0.102
-# gamma1 = 0.048
-# sigma_c = 0.301
-
-# abund = 370
-# light = 0.1
-# dbh = 124
-
-# set.seed(1)
-
-# aj = alpha0 + alpha1*log10(abund) # rnorm(1, alpha0 + alpha1*log10(abund), sigma_a)
-# bj = beta0 + beta1*log10(abund) # rnorm(1, beta0 + beta1*log10(abund), sigma_b)
-# cj = gamma0 + gamma1*log10(abund) # rnorm(1, gamma0 + gamma1*log10(abund), sigma_c)
-
-# sigmaProc = rlnorm(1, meanlog = log(1.28), sdlog = 0.16)
-
-# print(mean(rlnorm(1e6, meanlog = log(1.28), sdlog = 0.16)))
-
-# expectedG = exp(aj + bj*(log(light) - log(0.05)) + cj*(log(dbh) - log(50)))
-
-# curve(dlnorm(x, meanlog = expectedG, sdlog = sigmaProc), to = 10)
