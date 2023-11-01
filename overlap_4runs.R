@@ -108,15 +108,6 @@ lazyPosteriorGrowth = function(draws, printPlot = FALSE)
 source("./toolFunctions.R")
 
 #### Common variables
-args = commandArgs(trailingOnly = TRUE)
-if (length(args) != 1)
-	stop("Supply the species", call. = FALSE)
-
-species = as.character(args[1])
-path = paste0("./", species, "/")
-
-print(paste("Running for species", species))
-
 n_runs = 4 # Number of runs used in growth_subsample.R
 
 ## Species informations
@@ -130,108 +121,90 @@ infoSpecies[, processed := isProcessed(path = speciesName_sci, multi = multiRun,
 	extension = "_de-fr-sw_12000_main.rds$", lower = 1, upper = n_runs), by = speciesName_sci]
 infoSpecies = infoSpecies[(processed)]
 
-if (!(species %in% infoSpecies[, speciesName_sci]))
-	stop(paste0("Species <", species, "> not processed"))
-
-if (infoSpecies[species, n_indiv] < threshold_indiv)
-	stop("No need to compute overlap, there is only one run")
-
-if (file.exists(paste0(path, "overlap_dt_rescale.rds")))
-	stop(paste0("Species <", species, "> already done"))
-
-nb_nfi = infoSpecies[species, n_nfi]
-
-## Parameters
-params = c("averageGrowth", "dbh_slope", "dbh_slope2", "pr_slope", "pr_slope2", "tas_slope", "tas_slope2",
-	"ph_slope", "ph_slope2", "competition_slope", "sigmaProc", "etaObs")
-
-if (nb_nfi > 1)
-	params = expand(params, nb_nfi)[["new_names"]]
-
-n_params = length(params)
-
-## Posteriors object
-polygons_ls = vector(mode = "list", length = n_params)
-names(polygons_ls) = params
-
-for (currentParam in params)
+species = infoSpecies[1, speciesName_sci]
+for (species in infoSpecies[, speciesName_sci])
 {
-	polygons_ls[[currentParam]] = vector(mode = "list", length = n_runs)
-	names(polygons_ls[[currentParam]]) = paste0("run_", 1:n_runs)
-}
+	path = paste0("./", species, "/")
 
-## Reading scaling
-clim_scaling_ls = vector(mode = "list", length = n_runs)
-dbh_scaling_ls = vector(mode = "list", length = n_runs)
-ph_scaling_ls = vector(mode = "list", length = n_runs)
-ba_scaling_ls = vector(mode = "list", length = n_runs)
+	if (infoSpecies[species, n_indiv] < threshold_indiv)
+		next
 
-for (currentRun in seq_len(n_runs))
-{
-	clim_scaling_ls[[currentRun]] = readRDS(paste0(path, currentRun, "_climate_normalisation.rds"))
-	dbh_scaling_ls[[currentRun]] = readRDS(paste0(path, currentRun, "_dbh_normalisation.rds"))
-	ph_scaling_ls[[currentRun]] = readRDS(paste0(path, currentRun, "_ph_normalisation.rds"))
-	ba_scaling_ls[[currentRun]] = readRDS(paste0(path, currentRun, "_ba_normalisation.rds"))
-}
-
-clim_scaling = rbindlist(clim_scaling_ls, idcol = "run")
-dbh_scaling = rbindlist(dbh_scaling_ls, idcol = "run")
-ph_scaling = rbindlist(ph_scaling_ls, idcol = "run")
-ba_scaling = rbindlist(ba_scaling_ls, idcol = "run")
-
-scaling = rbindlist(list(clim_scaling, dbh_scaling, ph_scaling, ba_scaling))
-setkey(scaling, run, variable)
-
-#### Compute overlap posteriors
-## Load results and extract posteriors
-print("Starting loading results")
-for (i in 1:n_runs)
-{
-	# Load model
-	info_lastRun = getLastRun(path = path, extension = "_main.rds$", run = i)
-	lastRun = info_lastRun[["file"]]
-	results = readRDS(paste0(path, lastRun))
-
-	currentRun = paste0("run_", i)
-
-	mu_predictors = scaling[.(i, c("pr", "tas", "ph", "standBasalArea_interp")), mu]
-	names(mu_predictors) = c("pr", "tas", "ph", "basalArea")
-	
-	sd_predictors = scaling[.(i, c("pr", "tas", "ph", "standBasalArea_interp")), sd]
-	names(sd_predictors) = c("pr", "tas", "ph", "basalArea")
-
-	# Extract draws
-	# --- Transformation of draws
-	newPosteriors = rescalePosterior(model = results, sd_dbh = scaling[.(i, "dbh"), sd], mu_predictors = mu_predictors,
-		sd_predictors = sd_predictors)
-
-	for (currentParam in params)
+	if (file.exists(paste0(path, "overlap_states.rds")))
 	{
-		if ((currentParam == "sigmaProc") || (stri_detect(str = currentParam, regex = "etaObs")))
-		{
-			currentDensity = density(results$draws(currentParam), n = 512, bw = "sj")
-		} else {
-			currentDensity = density(newPosteriors[, , currentParam], n = 512, bw = "sj")
-		}
-		x = currentDensity$x
-		y = currentDensity$y
-
-		temporary = cbind(id = 1, part = 1, x, y)
-		polygons_ls[[currentParam]][[currentRun]] = vect(temporary, type = "polygons")
+		print(paste0("Species <", species, "> already done"))
+		next
 	}
-	
-	print(paste("Run", i, "done"))
+
+	results_ls = vector(mode = "list", length = n_runs)
+	draws_ls = vector(mode = "list", length = n_runs)
+	hiddenStates_ls = vector(mode = "list", length = n_runs)
+
+	treeData_ls = vector(mode = "list", length = n_runs)
+
+	sd_dbh = readRDS(paste0(path, "1_stanData.rds"))$sd_dbh # Same regardless of the run (see growth_subsample)
+	indices_ls = vector(mode = "list", length = n_runs)
+
+	oldw = getOption("warn")
+	options(warn = -1)
+	for (run in seq_len(n_runs))
+	{
+		info_lastRun = getLastRun(path = path, extension = "_main.rds$", run = run)
+		lastRun = info_lastRun[["file"]]
+		results_ls[[run]] = readRDS(paste0(path, lastRun))
+		draws_ls[[run]] = results_ls[[run]]$draws("latent_growth")
+
+		treeData_ls[[run]] = readRDS(paste0(path, run, "_treeData.rds"))
+		indices_ls[[run]] = readRDS(paste0(path, run, "_indices.rds"))[["indices"]][, .(plot_id, tree_id, year,
+			index_latent_growth, nbYearsGrowth)]
+	}
+	options(warn = oldw)
+
+	treeData_dt = rbindlist(treeData_ls, idcol = "run")
+	indices_dt = rbindlist(indices_ls, idcol = "run")
+
+	treeData_dt[, occ_indiv := .N, by = .(plot_id, tree_id, year)]
+	treeData = unique(treeData_dt[occ_indiv == n_runs, .(plot_id, tree_id, year, run)])
+
+	test = data.table::merge.data.table(x = treeData, y = indices_dt, by = c("plot_id", "tree_id", "year", "run"))
+	setkey(test, plot_id, tree_id, run, year) # Year is not that useful, but ensure that it is ordered
+
+	if (test[, .N] == 0)
+	{
+		warning(paste0("No common individuals within ", n_runs, " runs for species <", species, ">"))
+		next
+	}
+
+	setkey(test, plot_id, tree_id, run, year) # Year is not that useful, but ensure that it is ordered
+
+	ls_plots = unique(test[, plot_id])
+
+	overlap = numeric(length = sum(unique(test[, .(plot_id, tree_id, nbYearsGrowth)])[, nbYearsGrowth]))
+	n_overlap = length(overlap)
+	count = 1
+
+	for (plot in ls_plots)
+	{
+		for (tree in unique(test[.(plot), tree_id]))
+		{
+			nb_states = unique(test[.(plot, tree), nbYearsGrowth])
+			if (length(nb_states) != 1)
+				stop("Non-unique number of state for a given combination plot/tree")
+
+			for (currentState in seq_len(nb_states))
+			{
+				for (rr in seq_len(n_runs))
+				{
+					index = test[.(plot, tree, rr), ][1, index_latent_growth] + currentState - 1
+
+					hiddenStates_ls[[rr]] = draws_ls[[rr]][, , index]
+				}
+				overlap[count] = lazyPosteriorGrowth(draws = hiddenStates_ls, printPlot = FALSE)
+
+				count = count + 1
+			}
+		}
+		print(paste0(round((count - 1)*100/n_overlap, 2), "% done"))
+	}
+
+	saveRDS(overlap, paste0(path, "overlap_states.rds"))
 }
-
-## Overlaps for all the combinations
-overlap_ls = vector(mode = "list", length(params))
-names(overlap_ls) = params
-
-for (currentParam in params)
-	overlap_ls[[currentParam]] = overlap_fct(polygons_ls[[currentParam]], n_runs)
-
-overlap_dt = rbindlist(overlap_ls, idcol = "parameter")
-
-setkey(overlap_dt, parameter, combination)
-
-saveRDS(overlap_dt, paste0(path, "overlap_dt_rescale.rds"))
