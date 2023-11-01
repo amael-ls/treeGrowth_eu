@@ -136,6 +136,9 @@ if (!(species %in% infoSpecies[, speciesName_sci]))
 if (infoSpecies[species, n_indiv] < threshold_indiv)
 	stop("No need to compute overlap, there is only one run")
 
+if (file.exists(paste0(path, "overlap_dt_rescale.rds")))
+	stop(paste0("Species <", species, "> already done"))
+
 nb_nfi = infoSpecies[species, n_nfi]
 
 ## Parameters
@@ -157,20 +160,59 @@ for (currentParam in params)
 	names(polygons_ls[[currentParam]]) = paste0("run_", 1:n_runs)
 }
 
+## Reading scaling
+clim_scaling_ls = vector(mode = "list", length = n_runs)
+dbh_scaling_ls = vector(mode = "list", length = n_runs)
+ph_scaling_ls = vector(mode = "list", length = n_runs)
+ba_scaling_ls = vector(mode = "list", length = n_runs)
+
+for (currentRun in seq_len(n_runs))
+{
+	clim_scaling_ls[[currentRun]] = readRDS(paste0(path, currentRun, "_climate_normalisation.rds"))
+	dbh_scaling_ls[[currentRun]] = readRDS(paste0(path, currentRun, "_dbh_normalisation.rds"))
+	ph_scaling_ls[[currentRun]] = readRDS(paste0(path, currentRun, "_ph_normalisation.rds"))
+	ba_scaling_ls[[currentRun]] = readRDS(paste0(path, currentRun, "_ba_normalisation.rds"))
+}
+
+clim_scaling = rbindlist(clim_scaling_ls, idcol = "run")
+dbh_scaling = rbindlist(dbh_scaling_ls, idcol = "run")
+ph_scaling = rbindlist(ph_scaling_ls, idcol = "run")
+ba_scaling = rbindlist(ba_scaling_ls, idcol = "run")
+
+scaling = rbindlist(list(clim_scaling, dbh_scaling, ph_scaling, ba_scaling))
+setkey(scaling, run, variable)
+
 #### Compute overlap posteriors
 ## Load results and extract posteriors
 print("Starting loading results")
 for (i in 1:n_runs)
 {
+	# Load model
 	info_lastRun = getLastRun(path = path, extension = "_main.rds$", run = i)
 	lastRun = info_lastRun[["file"]]
 	results = readRDS(paste0(path, lastRun))
 
 	currentRun = paste0("run_", i)
 
+	mu_predictors = scaling[.(i, c("pr", "tas", "ph", "standBasalArea_interp")), mu]
+	names(mu_predictors) = c("pr", "tas", "ph", "basalArea")
+	
+	sd_predictors = scaling[.(i, c("pr", "tas", "ph", "standBasalArea_interp")), sd]
+	names(sd_predictors) = c("pr", "tas", "ph", "basalArea")
+
+	# Extract draws
+	# --- Transformation of draws
+	newPosteriors = rescalePosterior(model = results, sd_dbh = scaling[.(i, "dbh"), sd], mu_predictors = mu_predictors,
+		sd_predictors = sd_predictors)
+
 	for (currentParam in params)
 	{
-		currentDensity = density(results$draws(currentParam), n = 2048)
+		if ((currentParam == "sigmaProc") || (stri_detect(str = currentParam, regex = "etaObs")))
+		{
+			currentDensity = density(results$draws(currentParam), n = 512, bw = "sj")
+		} else {
+			currentDensity = density(newPosteriors[, , currentParam], n = 512, bw = "sj")
+		}
 		x = currentDensity$x
 		y = currentDensity$y
 
@@ -190,6 +232,6 @@ for (currentParam in params)
 
 overlap_dt = rbindlist(overlap_ls, idcol = "parameter")
 
-saveRDS(overlap_dt, paste0(path, "overlap_dt.rds"))
+setkey(overlap_dt, parameter, combination)
 
-print(paste(species, "done"))
+saveRDS(overlap_dt, paste0(path, "overlap_dt_rescale.rds"))
