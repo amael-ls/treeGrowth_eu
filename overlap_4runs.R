@@ -9,8 +9,6 @@ library(data.table)
 library(stringi)
 library(terra)
 
-#! ERROR IN THE COMPARISON! SHOULD I FIRST RESCALE THE PARAMETERS?? I THINK SO
-
 #### Tool functions
 ## Function to compute all the combinations of overlaps for one parameter
 overlap_fct = function(polygons_ls, n_runs)
@@ -32,10 +30,8 @@ overlap_fct = function(polygons_ls, n_runs)
 	{
 		combinations_ls = combn(x = 1:n_runs, m = nbElements, simplify = TRUE)
 		results_dt = data.table(combination = character(ncol(combinations_ls)), overlap = numeric(ncol(combinations_ls)))
-
-		count = 1
 		
-		for (j in seq_len(ncol(combinations_ls))) # Loop among the combinations with 'nbElements' runs
+		for (j in seq_len(results_dt[, .N])) # Loop among the combinations with 'nbElements' runs
 		{
 			selected_runs = paste0("run_", combinations_ls[, j])
 			currentCombination = paste(combinations_ls[, j], collapse = "_")
@@ -46,21 +42,66 @@ overlap_fct = function(polygons_ls, n_runs)
 			for (currentRun in selected_runs[2:length(selected_runs)]) # Loop among the selected runs
 			{
 				union_polygon = terra::union(union_polygon, polygons_ls[[currentRun]])
+				union_polygon = terra::aggregate(union_polygon)
 				inter_polygon = terra::intersect(inter_polygon, polygons_ls[[currentRun]])
 			}
-			union_polygon = terra::aggregate(union_polygon)
-			results_dt[count, combination := currentCombination]
-			suppressWarnings(results_dt[count, overlap := terra::expanse(inter_polygon)/terra::expanse(union_polygon)])
-			count = count + 1
+			results_dt[j, combination := currentCombination]
+			area = suppressWarnings(ifelse(is.polygons(inter_polygon), terra::expanse(inter_polygon), 0))
+			suppressWarnings(results_dt[j, overlap := area/terra::expanse(union_polygon)])
 		}
 		overlap_ls[[paste0(nbElements, "_elements")]] = results_dt
 	}
-
 
 	overlap_dt = rbindlist(overlap_ls, idcol = "elements")
 	overlap_dt[, elements := stri_sub(str = elements, to = stri_locate_first(str = elements, regex = "_")[, "start"] - 1)]
 	
 	return(overlap_dt)
+}
+
+## Function to plot growth posteriors for all runs and compute their overlaps
+lazyPosteriorGrowth = function(draws, printPlot = FALSE)
+{
+	n_runs = length(draws)
+
+	# Get posterior
+	density_from_draws = vector(mode = "list", length = n_runs)
+	x = vector(mode = "list", length = n_runs)
+	y = vector(mode = "list", length = n_runs)
+	polygons_ls = vector(mode = "list", length = n_runs)
+	names(polygons_ls) = paste0("run_", 1:n_runs)
+
+	for (run in seq_len(n_runs))
+	{
+		density_from_draws[[run]] = density(sd_dbh*draws[[run]], n = 512)
+		x[[run]] = density_from_draws[[run]]$x
+		y[[run]] = density_from_draws[[run]]$y
+
+		temporary = cbind(id = 1, part = 1, x[[run]], y[[run]])
+		polygons_ls[[run]] = vect(temporary, type = "polygons")
+	}
+	min_x = min(sapply(x, min))
+	max_x = max(sapply(x, max))
+	max_y = max(sapply(y, max))
+
+	min_x = ifelse(min_x < 0, 1.1*min_x, 0.9*min_x) # To extend 10% from min_x
+	max_x = ifelse(max_x < 0, 0.9*max_x, 1.1*max_x) # To extend 10% from max_x
+	
+	# Plot posterior and compute overlap
+	if (printPlot)
+	{
+		colours = MetBrewer::met.brewer("Hokusai3", n_runs)
+		colours_str = grDevices::colorRampPalette(colours)(n_runs)
+		colours_str_pol = paste0(colours_str, "66")
+		plot(0, type = "n", xlim = c(min_x, max_x), ylim = c(0, max_y), ylab = "frequence", main = "", xlab = "")
+		for (i in seq_len(n_runs))
+		{
+			lines(x = density_from_draws[[i]]$x, y = density_from_draws[[i]]$y, col = colours_str[i], lwd = 2)
+			polygon(density_from_draws[[i]], col = colours_str_pol[i])
+		}
+	}
+
+	overlap = overlap_fct(polygons_ls = polygons_ls, n_runs = n_runs)[elements == n_runs, overlap]
+	return (overlap)
 }
 
 ## Other functions
