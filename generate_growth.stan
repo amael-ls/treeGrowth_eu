@@ -1,6 +1,4 @@
 
-// This stand-alone script generates annual growth with the SSM approach for a given time-series of environmental conditions and an initial diameter
-
 functions {
 	// Function for growth. This returns the expected log(growth) in mm, for 1 year, i.e. the parameter meanlog of lognormal distribution
 	real growth(real dbh0, array[] real x_r, real averageGrowth, real dbh_slope, real dbh_slope2,
@@ -38,18 +36,23 @@ data {
 	// Old data required for the parameters
 	int<lower = 1> n_indiv; // Total number of individuals (all NFIs together)
 	int<lower = 1> n_obs; // Total number of tree observations (all NFIs together)
-	int<lower = n_obs - n_indiv, upper = n_obs - n_indiv> n_growth; // Number of measured growth = n_obs - n_indiv
+	int n_growth; // Number of measured growth = n_obs - n_indiv
 	int<lower = 1> n_inventories; // Number of forest inventories involving different measurement errors in the data
 	real<lower = 0> sd_dbh; // To standardise the lower and upper bounds of dbh
 
 	// New data
 	int<lower = 1> n_climate_new; // Dimension of the new climate vector
-	int<lower = n_climate_new - 1, upper = n_climate_new - 1> n_years; // Number of growing years, it can only be n_climate_new - 1
-	int<lower = 1> n_indiv_new; // Number of new individuals (which corresponds to the number of initial diameters provided)
+	int<lower = 1> n_dbh_new; // Dimension of the dbh vector
 
-	array [n_indiv_new] real dbh0; // Initial dbh (which is not dbh_init from growth.stan)
+	real lower_bound;
+	real upper_bound;
 
-	array [n_indiv_new, 4*n_climate_new] real x_r; // Contains in this order: pr, tas, ph, basal area, each of size n_climate_new, and already standardised
+	array [4*n_climate_new] real x_r; // Contains in this order: pr, ts, ph, basal area, each of size n_climate_new, and already standardised
+}
+
+transformed data {
+	real normalised_lower_bound = lower_bound/sd_dbh;
+	real normalised_upper_bound = upper_bound/sd_dbh;
 }
 
 parameters {
@@ -87,31 +90,30 @@ parameters {
 }
 
 generated quantities {
-	array [n_indiv_new, n_years] real simulatedGrowth_avg;
-	array [n_indiv_new, n_climate_new] real current_dbh;
-	
+	array [n_climate_new, n_dbh_new] real simulatedGrowth;
+	array [n_climate_new, n_dbh_new] real simulatedGrowth_avg;
 	{
 		// Common variables, any variable defined here will not be part of the output
+		real delta_dbh = 0;
+		if (n_dbh_new > 1)
+			delta_dbh = (normalised_upper_bound - normalised_lower_bound)/(n_dbh_new - 1);
+		
 		array [4] int index;
 		real meanlog = 0;
 
-		// Initialise diameters
-		for (j in 1:n_indiv_new)
-			current_dbh[j, 1] = dbh0[j]/sd_dbh;
-
 		// Generate growth for different climate and dbh combinations
-		for (i in 1:n_years)
+		for (i in 1:n_climate_new)
 		{
 			// Extract the i^th value of precipitation, temperature, pH, and basal area, respectively
 			index = {i, i + n_climate_new, i + 2*n_climate_new, i + 3*n_climate_new};
 
-			for (j in 1:n_indiv_new)
+			for (j in 1:n_dbh_new)
 			{
-				meanlog = growth(current_dbh[j, i], x_r[j, index], averageGrowth, dbh_slope, dbh_slope2,
-				pr_slope, pr_slope2 , tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
-			
-				simulatedGrowth_avg[j, i] = exp(meanlog + sigmaProc^2/2.0);
-				current_dbh[j, i + 1] = current_dbh[j, i] + simulatedGrowth_avg[j, i];
+				meanlog = growth(normalised_lower_bound + (j - 1)*delta_dbh, x_r[index], averageGrowth, dbh_slope, dbh_slope2,
+						pr_slope, pr_slope2 , tas_slope, tas_slope2, ph_slope, ph_slope2, competition_slope);
+				
+				simulatedGrowth[i, j] = lognormal_rng(meanlog, sigmaProc);
+				simulatedGrowth_avg[i, j] = exp(meanlog + sigmaProc^2/2.0);
 			}
 		}
 	}
