@@ -30,7 +30,7 @@
 	Like C++, BUGS, and R, Stan uses 0 to encode false, and 1 to encode true. https://mc-stan.org/docs/functions-reference/logical-functions.html
 */
 functions {
-	// Function for growth. This returns the expected growth in mm, for 1 year.
+	// Function for growth. This returns the expected log(growth) in mm, for 1 year, i.e., meanlog parameter of lognormal distribution
 	real avg_growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope,
 		real dbh_slope2, real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real ph_slope, real ph_slope2,
 		real competition_slope)

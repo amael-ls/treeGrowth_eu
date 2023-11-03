@@ -27,7 +27,7 @@
 */
 
 functions {
-	// Function for growth. This returns the expected growth in mm, for 1 year.
+	// Function for growth. This returns the expected log(growth) in mm, for 1 year, i.e., meanlog parameter of lognormal distribution
 	real growth(real dbh0, real precip, real temperature, real ph, real standBasalArea, real averageGrowth, real dbh_slope, real dbh_slope2,
 		real pr_slope, real pr_slope2 , real tas_slope, real tas_slope2, real ph_slope, real ph_slope2, real competition_slope)
 	{
@@ -255,7 +255,7 @@ model {
 			Note that here, I use 2 * error/Δt. This is because the yearly growth error is twice the error on the dbh,
 			divided by the number of years between the two measurement (i.e., averageing the growth error). See Rüger et al 2011.
 		*/
-		for (i in start_nfi_avg_growth[k]:end_nfi_avg_growth[k])
+		for (i in start_nfi_avg_growth[k]:end_nfi_avg_growth[k]) //! IS THAT CORRECT FOR TREES MEASURED 3 TIMES??? WHAT IS deltaYear 5, 10?
 			target += log_mix(proba[k],
 				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*etaObs[k]/deltaYear[i]),
 				normal_lpdf(normalised_avg_yearly_growth_obs[i] | latent_avg_yearly_growth[i], 2*sigmaObs/deltaYear[i]));
