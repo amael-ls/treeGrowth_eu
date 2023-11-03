@@ -2216,12 +2216,11 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 		stanData_classic = readRDS(paste0(tree_path, run, "_stanData_classic.rds"))
 
 		# ------ Add the new environment (x_r)
-		stanData_ssm$x_r = matrix(c((precipitations - dataEnv_ls[["scaling_clim_ssm"]]["pr", mu])/dataEnv_ls[["scaling_clim_ssm"]]["pr", sd],
+		stanData_ssm$x_r = c((precipitations - dataEnv_ls[["scaling_clim_ssm"]]["pr", mu])/dataEnv_ls[["scaling_clim_ssm"]]["pr", sd],
 			(temperatures - dataEnv_ls[["scaling_clim_ssm"]]["tas", mu])/dataEnv_ls[["scaling_clim_ssm"]]["tas", sd],
 			(ph - dataEnv_ls[["scaling_ph_ssm"]]["ph", mu])/dataEnv_ls[["scaling_ph_ssm"]]["ph", sd],
 			(basalAreas - dataEnv_ls[["scaling_ba_ssm"]]["standBasalArea_interp", mu])/
-				dataEnv_ls[["scaling_ba_ssm"]]["standBasalArea_interp", sd]), nrow = 1, ncol = 4*(n_growingYears + 1))
-				# Matrix necessary to respect stan dimensions
+				dataEnv_ls[["scaling_ba_ssm"]]["standBasalArea_interp", sd])
 
 		precipitations = (precipitations - dataEnv_ls[["scaling_clim_classic"]]["pr_avg", mu])/dataEnv_ls[["scaling_clim_classic"]]["pr_avg", sd]
 		temperatures = (temperatures - dataEnv_ls[["scaling_clim_classic"]]["tas_avg", mu])/dataEnv_ls[["scaling_clim_classic"]]["tas_avg", sd]
@@ -2229,20 +2228,23 @@ plotGrowth = function(species, run, variables, ls_info, caption = TRUE, selected
 		basalAreas = (basalAreas - dataEnv_ls[["scaling_ba_classic"]]["standBasalArea_interp_avg", mu])/
 			dataEnv_ls[["scaling_ba_classic"]]["standBasalArea_interp_avg", sd]
 
-		stanData_classic$x_r = matrix(c(precipitations, temperatures, ph, basalAreas), nrow = 1, ncol = 4*(n_growingYears + 1))
+		stanData_classic$x_r = c(precipitations, temperatures, ph, basalAreas)
 		stanData_classic$x_r_avg = matrix(c(mean(precipitations), mean(temperatures), mean(ph), mean(basalAreas)), nrow = 1, ncol = 4)
+		# (Matrix necessary to respect stan dimensions)
 
 		# ------ Add the new dimensions
-		stanData_ssm$n_climate_new = length(temperatures)
-		stanData_ssm$n_years = n_growingYears
-		stanData_ssm$dbh0 = init_dbh
-		stanData_ssm$n_growth = stanData_ssm$n_children
+		stanData_ssm$n_latent_dbh_new = length(temperatures) # Climate 'aligned' with latent dbh
 		stanData_ssm$n_indiv_new = length(init_dbh)
+		stanData_ssm$dbh0 = init_dbh
+		stanData_ssm$n_growing_years_new = stanData_ssm$n_latent_dbh_new - stanData_ssm$n_indiv_new
+		stanData_ssm$nbYearsGrowth_new = stanData_ssm$n_growing_years_new
+		stanData_ssm$n_growth = stanData_ssm$n_children
 
-		stanData_classic$n_climate_new = length(temperatures)
-		stanData_classic$n_years = n_growingYears
-		stanData_classic$dbh0 = init_dbh
+		stanData_classic$n_latent_dbh_new = length(temperatures)
 		stanData_classic$n_indiv_new = length(init_dbh)
+		stanData_classic$dbh0 = init_dbh
+		stanData_classic$n_growing_years_new = stanData_classic$n_latent_dbh_new - stanData_classic$n_indiv_new
+		stanData_classic$nbYearsGrowth_new = stanData_classic$n_growing_years_new
 
 		# --- Generate quantities
 		# ------ Stan models to simulate growth
