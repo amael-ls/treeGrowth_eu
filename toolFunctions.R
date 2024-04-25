@@ -27,6 +27,7 @@
 #	- gaussStyle: Function to get the parameters in a "gaussian style", i.e., rewrite growth as exp[-1/(2σ^2) (x - μ)^2]
 #	- extractClimate: Function to extract climate for a given species
 #	- extentPosterior: Function to Plot posterior extent, one variable per panel with all the species/methods
+#	- avgAnnualClimate: Function to average annual climate for a given period and area
 #
 ## Comments
 # This R file contains tool functions only that help me to analyse the results and do some check-up. Note that some functions are quite
@@ -3348,13 +3349,13 @@ extentPosterior = function(ssm_list, classic_list, ls_params = c("dbh_slope2", "
 		if (!is.null(ext))
 		{
 			if (ext == ".pdf")
-				pdf(file = paste0("extent_", currentVar, ext), height = 6, width = 9.708204) # Golden ratio
+				pdf(file = paste0("extent_", currentVar, ext), height = 3.955418, width = 6.4) # Golden ratio
 
 			if (ext == ".tex")
-				tikz(file = paste0("extent_", currentVar, ext), height = 6, width = 9.708204) # Golden ratio
+				tikz(file = paste0("extent_", currentVar, ext), height = 3.955418, width = 6.4) # Golden ratio
 		}
 
-		par(mar = c(5, 5, 0.2, 0.2) + 0.1)
+		par(mar = c(5.1, 5.1, 5.1, 2.1))
 		plot(0, type = "n", xlim = c(0, x_max), ylim = bounds[.(currentVar), c(q05_bound, q95_bound)],
 			ylab = "", main = "", xlab = "Species", las = 1, xaxt = "n")
 
@@ -3388,14 +3389,21 @@ extentPosterior = function(ssm_list, classic_list, ls_params = c("dbh_slope2", "
 		}
 		if ((bounds[.(currentVar), q05_bound] < 0) && (bounds[.(currentVar), q95_bound] > 0))
 			abline(h = 0, lwd = 0.5, lty = "dashed", col = "#CD212A99")
-		axis(side = 1, at = x_pos_label, labels = ls_species_label)
+		
+		odd = seq(1, length(ls_species_label), by = 2)
+		even = seq(2, length(ls_species_label), by = 2)
+		
+		axis(side = 1, at = x_pos_label[odd], labels = ls_species_label[odd])
+		axis(side = 3, at = x_pos_label[even], labels = ls_species_label[even])
 
-		legend(x = "topright", legend = c("SSM", "Classic"), lty = 1, lwd = 3, box.lwd = 0, title = "Model", col = c("#E9851D", "#2E77AB"))
+		legend(x = "topleft",  legend = c("SSM", "Classic"), box.lwd = 0, fill = c("#E9851D", "#2E77AB"), horiz = TRUE,
+			xpd = TRUE, inset = c(0, -0.3))
 		if (!is.null(ext))
 			dev.off()
 	}
 }
 
+## Function to average annual climate for a given period and area
 avgAnnualClimate = function(startPeriod, endPeriod, variable, folder_path = "/bigdata/Predictors/climateChelsa/", ...)
 {
 	folder_path = paste0(folder_path, variable, "/")
