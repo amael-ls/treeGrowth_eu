@@ -3395,3 +3395,53 @@ extentPosterior = function(ssm_list, classic_list, ls_params = c("dbh_slope2", "
 			dev.off()
 	}
 }
+
+avgAnnualClimate = function(startPeriod, endPeriod, variable, folder_path = "/bigdata/Predictors/climateChelsa/", ...)
+{
+	folder_path = paste0(folder_path, variable, "/")
+	
+	if (!dir.exists(folder_path))
+		stop(paste0("Directory <", folder_path, "> does not exist"))
+
+	ls_files = list.files(path = folder_path, pattern = "^\\d{4}.tif$")
+	ind_start = which(stri_detect(str = ls_files, regex = startPeriod))
+	ind_end = which(stri_detect(str = ls_files, regex = endPeriod))
+	ls_files = ls_files[ind_start:ind_end]
+
+	ls_rasters = rast(paste0(folder_path, ls_files))
+
+	providedArgs = list(...)
+	ls_names = names(providedArgs)
+
+	if ("crop" %in% ls_names)
+	{
+		crop = providedArgs[["crop"]]
+		
+		if (!is.logical(crop))
+		{
+			warning("crop must be a logical, either TRUE or FALSE. It was not and has been set to FALSE by default")
+			crop = FALSE
+		}
+
+		if ((crop) && ("area" %in% ls_names))
+		{
+			area = providedArgs[["area"]]
+			if (is(area, "SpatVector"))
+			{
+				ls_rasters = mask(x = ls_rasters, mask = area)
+			} else {
+				warning("Area must be a SpatVector, which is not the case. Crop set to FALSE by default")
+				crop = FALSE
+			}
+		} else if ((crop) && !("area" %in% ls_names)) {
+			warning("crop set to TRUE, but no area was provided. Crop set to FALSE by default")
+		}
+	}
+
+	val_ind = stri_detect(str = ls_names, regex = "val[[:digit:]]")
+	xlab_ind = (ls_names == "xlab")
+
+	ls_rasters = mean(ls_rasters)
+
+	return(ls_rasters)
+}
