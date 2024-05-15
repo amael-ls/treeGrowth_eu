@@ -3291,9 +3291,9 @@ extractClimate = function(...)
 }
 
 ## Plot posterior extent, one variable per panel with all the species/methods
-extentPosterior = function(ssm_list, classic_list, ls_params = c("dbh_slope2", "pr_slope2", "tas_slope2", "ph_slope2"),
-	ls_titles = c(dbh_slope2 = "Diameter", pr_slope2 = "Precipitation", tas_slope2 = "Temperature", ph_slope2 = "pH"),
-	ext = NULL)
+extentPosterior = function(ssm_list, classic_list, ls_params = c("dbh_slope2", "pr_slope2", "tas_slope2", "ph_slope2", "competition_slope"),
+	ls_titles = c(dbh_slope2 = "Diameter", pr_slope2 = "Precipitation", tas_slope2 = "Temperature", ph_slope2 = "pH",
+	competition_slope = "Basal area"), ext = NULL)
 {
 	# Check data
 	if (length(ssm_list) != length(classic_list))
