@@ -37,6 +37,13 @@
 #
 #	Note that I stupidly reprogrammed the function waic in an older version and found exactly the same results! This version uses the package loo
 #
+## The PSIS-LOO's abnormaly high values:
+#	For some individual time series in Picea abies and Pinus sylvestris, I noted abnormaly high Pareto values. Here are, I think, the reasons:
+#		- Picea abies: The concerned trees have a dbh larger than 1300 mm, while in the data used in the model, 99% of the dbh are below 647 mm
+#		- Pinus sylvestris: The concerned trees all experienced extreme precip (> 2500 mm/year), while in the data 95% is below 1200 mm/year
+#	This warnings are therefore not that important. Note that they also concern similar trees, in the sense that all the concerned trees for SSM
+#		are also concerned trees for Classic (the opposite not being true)
+#
 ## The theory of sensitivity analysis is described simply in Puy.2021:
 #	sensobol: an R package to compute variance-based sensitivity indices
 #	DOI: 10.48550/arxiv.2101.10103
@@ -236,8 +243,9 @@ sensitivityAnalysis_data = function(model, dbh_lim, sd_dbh, clim_dt, n_param, li
 			ph_slope2 = params_values[, , "ph_slope2"][current_ind])
 
 		# --- Sobol indices
-		ind[[j]] = setDT(sobolmartinez(model = growth_fct_meanlog_mat, X1 = X1, X2 = X2, nboot = 0, conf = 0.95,
-			params_vec = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)$S, keep.rownames = TRUE)
+		output_sa = sobolmartinez(model = growth_fct_meanlog_mat, X1 = X1, X2 = X2, nboot = 0, conf = 0.95,
+			params_vec = params_vec, sd_dbh = sd_dbh, standardised_variables = TRUE)
+		ind[[j]] = setDT(output_sa$S, keep.rownames = TRUE)
 
 		if (any(ind[[j]][, "original"] < 0))
 			warning(paste("There are negatives Si, with min value:", round(min(ind[[j]][, "original"], 7)), "for index j =", j))
@@ -367,10 +375,12 @@ loglik_classic = model$generate_quantities(classic$draws(), data = stanData_clas
 r_eff_ssm = loo::relative_eff(loglik_ssm$draws("log_lik"), cores = 8)
 loo_ssm = loo::loo(x = loglik_ssm$draws("log_lik"), r_eff = r_eff_ssm, cores = 8)
 waic_ssm = loo::waic(x = loglik_ssm$draws("log_lik"), cores = 8)
+saveRDS(loo_ssm, paste0(tree_path, "loo_ssm.rds"))
 
 r_eff_classic = loo::relative_eff(loglik_classic$draws("log_lik"), cores = 8)
 loo_classic = loo::loo(x = loglik_classic$draws("log_lik"), r_eff = r_eff_classic, cores = 8)
 waic_classic = loo::waic(x = loglik_classic$draws("log_lik"), cores = 8)
+saveRDS(loo_classic, paste0(tree_path, "loo_classic.rds"))
 
 loo::loo_compare(list(loo_ssm, loo_classic))
 loo::loo_compare(list(waic_ssm, waic_classic))
@@ -447,3 +457,39 @@ saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_data_", lim_inf, "_", lim
 
 print(sa_ssm_data$sa[, sum(original), by = run][, range(V1)])
 print(sa_classic_data$sa[, sum(original), by = run][, range(V1)])
+
+####! CRASH TEST ZONE
+f = function(dbh, pr, tas, ph, params)
+{
+	results = params["averageGrowth"] +
+		params["dbh_slope"] * dbh + params["dbh_slope2"] * dbh^2 +
+		params["pr_slope"] * pr + params["pr_slope2"] * pr^2 +
+		params["tas_slope"] * tas + params["tas_slope2"] * tas^2 +
+		params["ph_slope"] * ph + params["ph_slope2"] * ph^2
+	return(exp(results))
+}
+
+f_transform = function(dbh, pr, tas, ph, params)
+{
+	results = params[["normalising"]] * exp(toTry[["intercept"]]) *
+		ifelse(params[["original"]]["dbh_slope2"] < 0, dnorm(dbh, params[["mu"]]["dbh"], params[["sigma"]]["dbh"]),
+			exp(toTry[["original"]]["dbh_slope"]*dbh + toTry[["original"]]["dbh_slope2"]*dbh^2)) *
+		ifelse(params[["original"]]["pr_slope2"] < 0, dnorm(pr, params[["mu"]]["pr"], params[["sigma"]]["pr"]),
+			exp(toTry[["original"]]["pr_slope"]*pr + toTry[["original"]]["pr_slope2"]*pr^2)) *
+		ifelse(params[["original"]]["tas_slope2"] < 0, dnorm(tas, params[["mu"]]["tas"], params[["sigma"]]["tas"]),
+			exp(toTry[["original"]]["tas_slope"]*tas + toTry[["original"]]["tas_slope2"]*tas^2)) *
+		ifelse(params[["original"]]["ph_slope2"] < 0, dnorm(ph, params[["mu"]]["ph"], params[["sigma"]]["ph"]),
+			exp(toTry[["original"]]["ph_slope"]*ph + toTry[["original"]]["ph_slope2"]*ph^2))
+	return(results)
+}
+
+testParams = c(averageGrowth = 2.3,
+	dbh_slope = 1.4, dbh_slope2 = 0.25,
+	pr_slope = 0.24, pr_slope2 = -1.2,
+	tas_slope = 0.8, tas_slope2 = 0.05,
+	ph_slope = -1.23, ph_slope2 = 0.87)
+
+toTry = gaussStyle(params = testParams)
+
+f(0.8, 1.2, -0.87, 0.56, testParams)
+f_transform(0.8, 1.2, -0.87, 0.56, toTry)
