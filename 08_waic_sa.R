@@ -118,7 +118,8 @@ growth_fct_meanlog_mat = function(X, params_vec, sd_dbh, standardised_variables)
 }
 
 ## Function to compute sensitivity of growth with respect to uncertainty in the data only
-sensitivityAnalysis_data = function(model, dbh_lim, sd_dbh, clim_dt, n_param, lim_inf, lim_sup, env0 = NULL, N = 2^14, seed = NULL)
+sensitivityAnalysis_data = function(model, dbh_lim, sd_dbh, clim_dt, n_param, lim_inf, lim_sup, env0 = NULL, N = 2^14, seed = NULL,
+	cobweb = TRUE)
 {
 	## Check dbh_lim and env0
 	if (!is.null(env0))
@@ -261,7 +262,20 @@ sensitivityAnalysis_data = function(model, dbh_lim, sd_dbh, clim_dt, n_param, li
 
 	setnames(ind, old = "rn", new = "parameters")
 
-	return(list(sa = ind, n_param = n_param))
+	## Prepare cobweb graph with the last sampled parameters (hopefully not a weird sample!)
+	cobweb_dt = NA
+	simGrowth_qt = NA
+	if (cobweb)
+	{
+		cobweb_dt = data.table(output_sa$X)
+		cobweb_dt[, growth := output_sa$y]
+		cols = colnames(cobweb_dt)
+		cobweb_dt[, (cols) := lapply(X = .SD, FUN = function(x) {return ((x - min(x))/(max(x) - min(x)))}), .SDcols = cols]
+		simGrowth_qt = list(growth = quantile(output_sa$y, probs = c(0, 0.2, 0.5, 0.8, 1)),
+			growth_scaled = quantile(cobweb_dt[, growth], probs = c(0, 0.2, 0.5, 0.8, 1)))
+	}
+
+	return(list(sa = ind, n_param = n_param, cobweb_dt = cobweb_dt, simGrowth_qt = simGrowth_qt))
 }
 
 #? ----------------------------------------------------------------------------------------
@@ -428,8 +442,7 @@ if (sa_opt == "q025q975")
 {
 	lim_inf = "q025"
 	lim_sup = "q975"
-} else if (sa_opt == "min_max")
-{
+} else if (sa_opt == "min_max") {
 	lim_inf = "min"
 	lim_sup = "max"
 } else {
@@ -439,8 +452,8 @@ if (sa_opt == "q025q975")
 		warning("lim_inf and lim_sup are set to default values: q05 and q95, respectively")
 }
 
-dbh_lim = c(info_ssm[c(lim_inf, lim_sup), dbh])/stanData_ssm$sd_dbh
 sd_dbh = stanData_ssm$sd_dbh
+dbh_lim = c(info_ssm[c(lim_inf, lim_sup), dbh])/sd_dbh
 n_param = 500
 
 ## SSM
@@ -451,45 +464,28 @@ saveRDS(sa_ssm_data, paste0(tree_path, "sa_ssm_data_", lim_inf, "_", lim_sup, "_
 
 ## Classic
 sa_classic_data = sensitivityAnalysis_data(model = classic, dbh_lim = dbh_lim, sd_dbh = sd_dbh, n_param = n_param, lim_inf = lim_inf,
-	lim_sup = lim_sup, N = 2^19, clim_dt = info_classic, seed = 123)
+	lim_sup = lim_sup, N = 2^19, clim_dt = info_classic, seed = 123) #! sd_dbh is the same between ssm and classic
 
 saveRDS(sa_classic_data, paste0(tree_path, "sa_classic_data_", lim_inf, "_", lim_sup, "_nParams=", n_param, ".rds"))
 
 print(sa_ssm_data$sa[, sum(original), by = run][, range(V1)])
 print(sa_classic_data$sa[, sum(original), by = run][, range(V1)])
 
-####! CRASH TEST ZONE
-f = function(dbh, pr, tas, ph, params)
-{
-	results = params["averageGrowth"] +
-		params["dbh_slope"] * dbh + params["dbh_slope2"] * dbh^2 +
-		params["pr_slope"] * pr + params["pr_slope2"] * pr^2 +
-		params["tas_slope"] * tas + params["tas_slope2"] * tas^2 +
-		params["ph_slope"] * ph + params["ph_slope2"] * ph^2
-	return(exp(results))
-}
+#### Cobweb graph
+set.seed(123)
 
-f_transform = function(dbh, pr, tas, ph, params)
-{
-	results = params[["normalising"]] * exp(toTry[["intercept"]]) *
-		ifelse(params[["original"]]["dbh_slope2"] < 0, dnorm(dbh, params[["mu"]]["dbh"], params[["sigma"]]["dbh"]),
-			exp(toTry[["original"]]["dbh_slope"]*dbh + toTry[["original"]]["dbh_slope2"]*dbh^2)) *
-		ifelse(params[["original"]]["pr_slope2"] < 0, dnorm(pr, params[["mu"]]["pr"], params[["sigma"]]["pr"]),
-			exp(toTry[["original"]]["pr_slope"]*pr + toTry[["original"]]["pr_slope2"]*pr^2)) *
-		ifelse(params[["original"]]["tas_slope2"] < 0, dnorm(tas, params[["mu"]]["tas"], params[["sigma"]]["tas"]),
-			exp(toTry[["original"]]["tas_slope"]*tas + toTry[["original"]]["tas_slope2"]*tas^2)) *
-		ifelse(params[["original"]]["ph_slope2"] < 0, dnorm(ph, params[["mu"]]["ph"], params[["sigma"]]["ph"]),
-			exp(toTry[["original"]]["ph_slope"]*ph + toTry[["original"]]["ph_slope2"]*ph^2))
-	return(results)
-}
+cobweb_dt = sa_ssm_data$cobweb_dt
+simGrowth_qt = sa_ssm_data$simGrowth_qt
 
-testParams = c(averageGrowth = 2.3,
-	dbh_slope = 1.4, dbh_slope2 = 0.25,
-	pr_slope = 0.24, pr_slope2 = -1.2,
-	tas_slope = 0.8, tas_slope2 = 0.05,
-	ph_slope = -1.23, ph_slope2 = 0.87)
+cobweb_dt_sub = cobweb_dt[sample(x = seq_len(.N), size = 1e3, replace = FALSE)]
 
-toTry = gaussStyle(params = testParams)
-
-f(0.8, 1.2, -0.87, 0.56, testParams)
-f_transform(0.8, 1.2, -0.87, 0.56, toTry)
+pdf(paste0(tree_path, species, "_cobweb.pdf"), height = 4.285714, width = 6) # ratio 5/7
+par(mar = c(2.5, 2.5, 1, 1))
+cobweb_dt_sub[, colour := ifelse(growth < simGrowth_qt[["growth_scaled"]]["20%"], "#FAB25599", "#04040477")]
+cobweb_dt_sub[growth > simGrowth_qt[["growth_scaled"]]["80%"], colour := "#0F7BA299"]
+plot(cobweb_dt_sub[1, c(dbh, pr, tas, ph, ba, growth)], type = "l", ylim = c(0, 1), col = cobweb_dt_sub[1, colour],
+	las = 1, xaxt = "n", xlab = "", ylab = "")
+for (i in 2:cobweb_dt_sub[, .N])
+	lines(cobweb_dt_sub[i, c(dbh, pr, tas, ph, ba, growth)], col = cobweb_dt_sub[i, colour])
+axis(side = 1, at = 1:6, labels = colnames(cobweb_dt))
+dev.off()
