@@ -269,6 +269,8 @@ sensitivityAnalysis_data = function(model, dbh_lim, sd_dbh, clim_dt, n_param, li
 	{
 		cobweb_dt = data.table(output_sa$X)
 		cobweb_dt[, growth := output_sa$y]
+		setnames(x = cobweb_dt, old = c("dbh", "pr", "tas", "ph", "ba", "growth"), new = c("dbh", "precip", "temp", "ph", "ba", "growth"))
+		setcolorder(x = cobweb_dt, neworder = c("precip", "temp", "dbh", "ba", "ph", "growth")) # Same order as Sobol indices all-in-one plot
 		cols = colnames(cobweb_dt)
 		cobweb_dt[, (cols) := lapply(X = .SD, FUN = function(x) {return ((x - min(x))/(max(x) - min(x)))}), .SDcols = cols]
 		simGrowth_qt = list(growth = quantile(output_sa$y, probs = c(0, 0.2, 0.5, 0.8, 1)),
@@ -483,9 +485,9 @@ pdf(paste0(tree_path, species, "_cobweb.pdf"), height = 4.285714, width = 6) # r
 par(mar = c(2.5, 2.5, 1, 1))
 cobweb_dt_sub[, colour := ifelse(growth < simGrowth_qt[["growth_scaled"]]["20%"], "#FAB25599", "#04040477")]
 cobweb_dt_sub[growth > simGrowth_qt[["growth_scaled"]]["80%"], colour := "#0F7BA299"]
-plot(cobweb_dt_sub[1, c(dbh, pr, tas, ph, ba, growth)], type = "l", ylim = c(0, 1), col = cobweb_dt_sub[1, colour],
+plot(cobweb_dt_sub[1, c(precip, temp, dbh, ba, ph, growth)], type = "l", ylim = c(0, 1), col = cobweb_dt_sub[1, colour],
 	las = 1, xaxt = "n", xlab = "", ylab = "")
 for (i in 2:cobweb_dt_sub[, .N])
-	lines(cobweb_dt_sub[i, c(dbh, pr, tas, ph, ba, growth)], col = cobweb_dt_sub[i, colour])
+	lines(cobweb_dt_sub[i, c(precip, temp, dbh, ba, ph, growth)], col = cobweb_dt_sub[i, colour])
 axis(side = 1, at = 1:6, labels = colnames(cobweb_dt))
 dev.off()
