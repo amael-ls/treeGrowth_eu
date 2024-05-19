@@ -3083,7 +3083,7 @@ printParams = function(ls_species, params_names, run = 1)
 }
 
 ## Function to get the parameters in a "gaussian style", i.e., rewrite growth as exp[-1/(2σ^2) (x - μ)^2]
-gaussStyle = function(params)
+gaussStyle = function(params) #! NOT SURE OF THAT FUNCTION... NOT USED ANYWAY FOR THE ARTICLE
 {
 	intercept = params["averageGrowth"]
 
@@ -3138,14 +3138,15 @@ gaussStyle = function(params)
 		normalising = normalising * sqrt(-pi/ph_slope2)
 	}
 
-	# New intercept (formula tested analytically)
-	intercept = intercept -
-		ifelse(dbh_slope2 < 0, dbh_slope^2/(4*dbh_slope2), 0) -
-		ifelse(pr_slope2 < 0, pr_slope^2/(4*pr_slope2), 0) -
-		ifelse(tas_slope2 < 0, tas_slope^2/(4*tas_slope2), 0) -
-		ifelse(ph_slope2 < 0, ph_slope^2/(4*ph_slope2), 0)
+	# # New intercept (formula tested analytically)
+	# intercept = intercept -
+	# 	ifelse(dbh_slope2 < 0, dbh_slope^2/(4*dbh_slope2), 0) -
+	# 	ifelse(pr_slope2 < 0, pr_slope^2/(4*pr_slope2), 0) -
+	# 	ifelse(tas_slope2 < 0, tas_slope^2/(4*tas_slope2), 0) -
+	# 	ifelse(ph_slope2 < 0, ph_slope^2/(4*ph_slope2), 0)
 
-	return (list(mu = mu, sigma = sigma, intercept = intercept, normalising = normalising, original = params))
+	return (list(mu = mu, sigma = sigma, intercept = intercept, competition_slope = competition_slope,
+		normalising = normalising, original = params))
 }
 
 ## Extract climate for a given species
@@ -3355,11 +3356,11 @@ extentPosterior = function(ssm_list, classic_list, ls_params = c("dbh_slope2", "
 				tikz(file = paste0("extent_", currentVar, ext), height = 3.955418, width = 6.4) # Golden ratio
 		}
 
-		par(mar = c(5.1, 5.1, 5.1, 2.1))
+		par(mar = c(4.1, 5.1, 4.1, 2.1))
 		plot(0, type = "n", xlim = c(0, x_max), ylim = bounds[.(currentVar), c(q05_bound, q95_bound)],
 			ylab = "", main = "", xlab = "Species", las = 1, xaxt = "n")
 
-		title(ylab = paste(ls_titles[currentVar], "coefficient"), line = 4)
+		title(ylab = paste(ls_titles[currentVar], "quadratic coefficient"), line = 4) #! This is then modified by hand in the output file for BA
 
 		x_orig = 0.5
 		x_pos_label = numeric(length(ls_species))
@@ -3388,7 +3389,7 @@ extentPosterior = function(ssm_list, classic_list, ls_params = c("dbh_slope2", "
 			x_orig = x_orig + 2.5
 		}
 		if ((bounds[.(currentVar), q05_bound] < 0) && (bounds[.(currentVar), q95_bound] > 0))
-			abline(h = 0, lwd = 0.5, lty = "dashed", col = "#CD212A99")
+			abline(h = 0, lwd = 0.5, lty = "dashed", col = "#CD212A")
 		
 		odd = seq(1, length(ls_species_label), by = 2)
 		even = seq(2, length(ls_species_label), by = 2)
