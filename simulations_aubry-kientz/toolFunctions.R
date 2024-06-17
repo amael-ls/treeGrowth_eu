@@ -13,7 +13,7 @@
 ## Bayesplot is having troubles on my mac (Arial font not always found), so I create my own traces plot
 lazyTrace = function(draws, filename = NULL, ...)
 {
-	if (!is.array(draws) & !all(class(draws) %in% c("draws_array", "draws", "array")))
+	if (!is.array(draws) && !all(class(draws) %in% c("draws_array", "draws", "array")))
 		stop("The class of draws should be either array, or compatible with cmdstanr (draws_array, draws, array)")
 	
 	n_chains = dim(draws)[2]
@@ -58,7 +58,7 @@ lazyTrace = function(draws, filename = NULL, ...)
 	{
 		if (all(class(draws) %in% c("draws_array", "draws", "array")))
 			lines(1:n_iter, scaling*draws[, chain,], type = "l", col = colours_str[chain])
-		if (is.array(draws) & !all(class(draws) %in% c("draws_array", "draws", "array")))
+		if (is.array(draws) && !all(class(draws) %in% c("draws_array", "draws", "array")))
 			lines(1:n_iter, scaling*draws[, chain], type = "l", col = colours_str[chain])
 	}
 
@@ -99,9 +99,9 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 	# isFALSE will not work here, hence !isTRUE
 	if (!is.null(fun))
 	{
-		if (!isTRUE(all.equal(fun, dnorm)) &
-			!isTRUE(all.equal(fun, dlnorm)) &
-			!isTRUE(all.equal(fun, dgamma)) &
+		if (!isTRUE(all.equal(fun, dnorm)) &&
+			!isTRUE(all.equal(fun, dlnorm)) &&
+			!isTRUE(all.equal(fun, dgamma)) &&
 			!isTRUE(all.equal(fun, dbeta)))
 		{
 			stop("This function only accepts dnorm, dlnorm, dgamma, or dbeta as priors")
@@ -141,7 +141,7 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 	# Get parameters for prior
 	if (isTRUE(all.equal(fun, dnorm)))
 	{
-		if ((!all(c("mean", "sd") %in% names(providedArgs))) & (!all(c("arg1", "arg2") %in% names(providedArgs))))
+		if ((!all(c("mean", "sd") %in% names(providedArgs))) && (!all(c("arg1", "arg2") %in% names(providedArgs))))
 			stop("You must provide mean and sd for dnorm")
 		
 		if (all(c("mean", "sd") %in% names(providedArgs)))
@@ -156,7 +156,7 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 
 	if (isTRUE(all.equal(fun, dlnorm)))
 	{
-		if ((!all(c("mean", "sd") %in% names(providedArgs))) & (!all(c("arg1", "arg2") %in% names(providedArgs))) & 
+		if ((!all(c("mean", "sd") %in% names(providedArgs))) && (!all(c("arg1", "arg2") %in% names(providedArgs))) &&
 			(!all(c("meanlog", "sdlog") %in% names(providedArgs))))
 			stop("You must provide mean and sd or meanlog and sdlog for dlnorm")
 		
@@ -179,8 +179,8 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 
 	if (isTRUE(all.equal(fun, dgamma)))
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape", "rate") %in% names(providedArgs)))
-			& (!all(c("arg1", "arg2") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) && (!all(c("shape", "rate") %in% names(providedArgs)))
+			&& (!all(c("arg1", "arg2") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape and rate for dgamma")
 		
 		if (all(c("mean", "var") %in% names(providedArgs)))
@@ -208,8 +208,8 @@ lazyPosterior = function(draws, fun = dnorm, expand_bounds = FALSE, filename = N
 
 	if (isTRUE(all.equal(fun, dbeta)))
 	{
-		if ((!all(c("mean", "var") %in% names(providedArgs))) & (!all(c("shape1", "shape2") %in% names(providedArgs)))
-			& (!all(c("arg1", "arg2") %in% names(providedArgs))))
+		if ((!all(c("mean", "var") %in% names(providedArgs))) && (!all(c("shape1", "shape2") %in% names(providedArgs)))
+			&& (!all(c("arg1", "arg2") %in% names(providedArgs))))
 			stop("You must provide either mean and var or shape1 and shape2 for dbeta")
 
 		if (scaling != 1)
