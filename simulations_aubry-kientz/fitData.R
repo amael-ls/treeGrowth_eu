@@ -16,13 +16,16 @@ source("./toolFunctions.R")
 
 #### Load data
 ## General data (list)
-data = readRDS("./dummyData.rds")
+delta_t = 12 # Choose in accordance with the generated data sets from createData
+n_indiv = 400
+n_plot = 50
+
+data = readRDS(paste0("dummyData_plot=", n_plot, "_indiv=", n_indiv, "_deltaT=", delta_t, ".rds"))
 
 ## Saving options
 savingPath = "./"
 
-basename = paste0("indiv=", data[["infos"]]["n_indiv"], "_plot=", data[["infos"]]["n_plot"],
-	"_measurements=", data[["infos"]]["n_measurements"], "_deltaT=", data[["infos"]]["delta_t"])
+basename = paste0("indiv=", data[["infos"]]["n_indiv"], "_plot=", data[["infos"]]["n_plot"], "_deltaT=", data[["infos"]]["delta_t"])
 
 #### Fit data
 ## Common variables
@@ -64,40 +67,56 @@ stanData = list(
 )
 
 ## Compile model
-model = cmdstan_model("./growth.stan")
+model = cmdstan_model("./growth.stan", cpp_options = list(stan_opencl = TRUE))
 
 ## Run model
 start_time = Sys.time()
 
 ## Run model
 results = model$sample(data = stanData, parallel_chains = n_chains, refresh = 50, chains = n_chains,
-	iter_warmup = 750, iter_sampling = 1500, save_warmup = TRUE,
-	max_treedepth = 12, adapt_delta = 0.9)
+	iter_warmup = 750, iter_sampling = 1000, save_warmup = TRUE,
+	max_treedepth = 10, adapt_delta = 0.8, opencl_ids = c(0, 0))
 
 end_time = Sys.time()
+
+print(paste0("Running time: ", round(end_time - start_time, 2)))
 
 results$cmdstan_diagnose()
 
 #### Plots
 ## Lazy trace plots
-lazyTrace(draws = results$draws("beta0"), val1 = data[["parameters"]]["beta0"], main = paste("beta0 =", data[["parameters"]]["beta0"]))
-lazyTrace(draws = results$draws("beta1"), val1 = data[["parameters"]]["beta1"], main = paste("beta1 =", data[["parameters"]]["beta1"]))
-lazyTrace(draws = results$draws("beta2"), val1 = data[["parameters"]]["beta2"], main = paste("beta2 =", data[["parameters"]]["beta2"]))
-lazyTrace(draws = results$draws("beta3"), val1 = data[["parameters"]]["beta3"], main = paste("beta3 =", data[["parameters"]]["beta3"]))
-lazyTrace(draws = results$draws("beta4"), val1 = data[["parameters"]]["beta4"], main = paste("beta4 =", data[["parameters"]]["beta4"]))
-lazyTrace(draws = results$draws("sigmaProc"), val1 = data[["parameters"]]["sigmaProc"], main = "sigmaProc")
-lazyTrace(draws = results$draws("latent_dbh_parents[1]"),
-	val1 = data[["treeData"]][1, dbh1]/data[["scaling"]]["sd_dbh_orig"])
+# lazyTrace(draws = results$draws("beta0"), val1 = data[["parameters"]]["beta0"], main = paste("beta0 =", data[["parameters"]]["beta0"]))
+# lazyTrace(draws = results$draws("beta1"), val1 = data[["parameters"]]["beta1"], main = paste("beta1 =", data[["parameters"]]["beta1"]))
+# lazyTrace(draws = results$draws("beta2"), val1 = data[["parameters"]]["beta2"], main = paste("beta2 =", data[["parameters"]]["beta2"]))
+# lazyTrace(draws = results$draws("beta3"), val1 = data[["parameters"]]["beta3"], main = paste("beta3 =", data[["parameters"]]["beta3"]))
+# lazyTrace(draws = results$draws("beta4"), val1 = data[["parameters"]]["beta4"], main = paste("beta4 =", data[["parameters"]]["beta4"]))
+# lazyTrace(draws = results$draws("sigmaProc"), val1 = data[["parameters"]]["sigmaProc"], main = "sigmaProc")
+# lazyTrace(draws = results$draws("latent_dbh_parents[1]"),
+# 	val1 = data[["treeData"]][1, dbh1]/data[["scaling"]]["sd_dbh_orig"],
+# 	val2 = data[["treeData"]][1, obs_dbh1]/data[["scaling"]]["sd_dbh_orig"],
+# 	label1 = "real",
+# 	label2 = "obs")
 
-results$save_output_files(dir = savingPath, basename = paste0(basename, "_diagnose"), timestamp = FALSE, random = TRUE)
+basename = paste0("sigmaObs=0.1_", basename)
+results$save_output_files(dir = savingPath, basename = paste0(basename, "_diagnose"), timestamp = FALSE, random = FALSE)
 results$save_object(file = paste0(basename, "_results.rds"))
 
-indiv = 1
+# indiv = 1
 
-for (i in 1:(data[["infos"]]["delta_t"] - 1))
-{
-	current_dbh = paste0("dbh", i)
-	next_dbh = paste0("dbh", i + 1)
-	lazyPosterior(draws = data[["scaling"]]["sd_dbh_orig"]*results$draws(paste0("latent_growth[", indiv, ",", i, "]")), fun = NULL,
-		val1 = data[["treeData"]][indiv, ..next_dbh] - data[["treeData"]][indiv, ..current_dbh])
-}
+# for (i in seq_len(data[["infos"]]["n_annual_growth_per_indiv"] - 1))
+# {
+# 	current_dbh = paste0("dbh", i)
+# 	next_dbh = paste0("dbh", i + 1)
+# 	lazyPosterior(draws = data[["scaling"]]["sd_dbh_orig"]*results$draws(paste0("latent_growth[", indiv, ",", i, "]")), fun = NULL,
+# 		val1 = data[["treeData"]][indiv, ..next_dbh] - data[["treeData"]][indiv, ..current_dbh])
+# }
+
+# indiv = 100
+
+# for (i in seq_along(data[["infos"]]["delta_t"] - 1))
+# {
+# 	current_dbh = paste0("dbh", i)
+# 	next_dbh = paste0("dbh", i + 1)
+# 	lazyPosterior(draws = data[["scaling"]]["sd_dbh_orig"]*results$draws(paste0("latent_growth[", indiv, ",", i, "]")), fun = NULL,
+# 		val1 = data[["treeData"]][indiv, ..next_dbh] - data[["treeData"]][indiv, ..current_dbh])
+# }

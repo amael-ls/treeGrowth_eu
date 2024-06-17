@@ -4,6 +4,7 @@
 # The creation of these data is based on Quercus robur data. I noticed that the diameters distribution of the data is bimodal, with a
 # 	clear separation between the two modes around 300 mm. Therefore, I decided to sample two gamma distributions with means and variances
 #	taken from the Quercus data with dbh above or below 300 mm.
+# You need to run this program with n_measurements = 2, 3, 4, 5, 7, and 13, respectively
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -12,6 +13,7 @@ graphics.off()
 options(max.print = 500)
 
 library(data.table)
+library(tikzDevice)
 library(stringi)
 
 #### Tool function
@@ -29,18 +31,27 @@ constrained_sum_sample_pos = function(n, total)
 	return(divTot - divZero)
 }
 
+is.wholenumber = function(x, tol = .Machine$double.eps^0.5)
+	abs(x - round(x)) < tol
+
 #### Define variables
 ## Common variables
-set.seed(1969-08-18) # Woodstock seed
+set.seed(1969 - 08 - 18) # Woodstock seed
 
-n_indiv = 2000
-n_plot = round(n_indiv/2.5) # German data have in average 2.5 individuals per plot
-n_measurements = 2 # Number of measurements per individual
-delta_t = 5 # Number of growing years between two measurements, e.g., 2000 --> 2003, 3 growing years 2000-2001, 2001-2002, 2002-2003
+n_indiv = 400
+n_plot = 50 # round(n_indiv/5) # 20 individuals per plot in average
+n_measurements = 2 # Number of dbh measurements per individual. I chose among (2:5, 7, 13), to generate 1, 2, 3, 4, 6 and 12 growth observations
+length_time_series = 12 # For how many years
+delta_t = length_time_series/(n_measurements - 1) # Frequence of measurements
+
+print(paste("delta_t =", delta_t))
+
+if (!is.wholenumber(delta_t))
+	stop("delta_t is not an integer... It would make more sense it is, as NFI data are measured with an integer frequency")
 
 print(paste("In average there are", round(n_indiv/n_plot, 2), "individuals per plot"))
 
-n_annual_growth_per_indiv = (n_measurements - 1)*delta_t
+n_annual_growth_per_indiv = (n_measurements - 1)*delta_t # Should be length_time_series by definition
 
 ## Parameters (for the scaled data, so no rescaling to do)
 # Intercept
@@ -51,12 +62,12 @@ beta1 = 0.42
 beta2 = -0.06 # Quadratic term
 
 # Temperature slope
-beta3 = 0.06
+beta3 = 0.076
 beta4 = -0.01 # Quadratic term
 
 # Variance
 sigmaProc = 0.42
-unscaled_sigmaObs = 2
+unscaled_sigmaObs = 0.1
 
 #### Create data
 ## Initial diameters
@@ -65,7 +76,13 @@ treeData = data.table(dbh1 = numeric(n_indiv), big_dbh = sample(x = c(FALSE, TRU
 treeData[(big_dbh), dbh1 := rgamma(n = .N, shape = 545^2/26435, rate = 545/26435)]
 treeData[!(big_dbh), dbh1 := rgamma(n = .N, shape = 196^2/3678, rate = 196/3678)]
 
-# hist(treeData$dbh1, breaks = seq(min(treeData$dbh1) - 3, max(treeData$dbh1) + 3, 3))
+if (!file.exists("./histogram_dbh.tex"))
+{
+	tikz("./histogram_dbh.tex", height = 3, width = 3)
+	hist(treeData$dbh1, breaks = seq(min(treeData$dbh1) - 30, max(treeData$dbh1) + 30, 30), xlab = "Diameter", ylab = "Frequency",
+		main = "", las = 1)
+	dev.off()
+}
 
 treeData[, big_dbh := NULL]
 sd_dbh_orig = treeData[, sd(dbh1)]
@@ -73,13 +90,15 @@ sd_dbh_orig = treeData[, sd(dbh1)]
 sigmaObs = unscaled_sigmaObs/sd_dbh_orig
 
 ## Temperature
-temperature_avg = rnorm(n = n_annual_growth_per_indiv, mean = 9.7, sd = 0.3)
-temperature_sd = rgamma(n = n_annual_growth_per_indiv, shape = 0.82^2/0.0015, rate = 0.82/0.0015)
+temperature_avg = rnorm(n = n_plot, mean = 9, sd = 1) # Average temperature of each plot
+print(paste("Range temperature avg:", paste(round(range(temperature_avg), 2), collapse = " - ")))
+temperature_sd = rgamma(n = n_plot, shape = 0.5^2/0.015, rate = 0.5/0.015) # sd for year to year variation for each plot
+print(paste("Range temperature sd:", paste(round(range(temperature_sd), 3), collapse = " - ")))
 
-temperature = matrix(data = NA, nrow = n_plot, ncol = n_annual_growth_per_indiv)
+temperature = matrix(data = NA, nrow = n_plot, ncol = n_annual_growth_per_indiv) # n_plot series of temperature, of length n_annual_growth_indiv
 
 for (year in 1:n_annual_growth_per_indiv)
-	temperature[, year] = rnorm(n = n_plot, mean = temperature_avg[year], sd = temperature_sd[year])
+	temperature[, year] = rnorm(n = n_plot, mean = temperature_avg, sd = temperature_sd)
 
 mu_temp = mean(temperature)
 sd_temp = sd(temperature)
@@ -95,7 +114,13 @@ treeData[, tree_id := seq_len(.N), by = plot_id]
 
 all.equal(treeData[, .N, by = plot_id][, N], nb_trees_per_plot)
 
-# hist(treeData[, .N, by = plot_id][, N])
+if (!file.exists("./histogram_nbPerPlot.tex"))
+{
+	tikz("./histogram_nbPerPlot.tex", height = 3, width = 3)
+	hist(nb_trees_per_plot, breaks = seq(0, max(nb_trees_per_plot), 1), xlab = "Number of indiviudals per plot",
+		ylab = "Frequency", main = "", las = 1)
+	dev.off()
+}
 
 ## Merge treeData and temperatures
 treeData = treeData[temperature, on = "plot_id"]
@@ -152,6 +177,8 @@ setcolorder(treeData, c("plot_id", "tree_id", paste0("dbh", 1:(n_annual_growth_p
 	paste0("obs_growth", seq_along(dbh_recorded[-length(dbh_recorded)])),
 	paste0("temperature", 1:n_annual_growth_per_indiv)))
 
+dataFilename = paste0("dummyData_plot=", n_plot, "_indiv=", n_indiv, "_deltaT=", delta_t, ".rds")
+
 saveRDS(list(
 		treeData = treeData,
 		parameters = c(beta0 = beta0, beta1 = beta1, beta2 = beta2, beta3 = beta3, beta4 = beta4, sigmaProc = sigmaProc),
@@ -159,4 +186,6 @@ saveRDS(list(
 		infos = c(n_indiv = n_indiv, n_plot = n_plot, n_measurements = n_measurements, delta_t = delta_t,
 			n_annual_growth_per_indiv = n_annual_growth_per_indiv),
 		sigmaObs = sigmaObs
-	), "dummyData.rds")
+	), dataFilename)
+
+print(paste0("Data saved under the name <", dataFilename, ">"))

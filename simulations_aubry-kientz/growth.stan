@@ -94,7 +94,7 @@ parameters {
 	
 	// Errors (observation and process)
 	// --- Process error, which is the sdlog parameter of a lognormal distrib /!\
-	real<lower = 0, upper = 2> sigmaProc;
+	real<lower = 0> sigmaProc;
 	
 	// Latent states
 	// --- Parent (i.e., primary) dbh
@@ -122,8 +122,7 @@ model {
 	target += normal_lpdf(beta4 | 0, 20);
 
 	// --- Errors
-	// target += lognormal_lpdf(sigmaProc | 0.2468601 - log(sd_dbh), 0.16);
-	target += uniform_lpdf(sigmaProc | 0, 2);
+	target += lognormal_lpdf(sigmaProc | -0.8, 0.1); // target += uniform_lpdf(sigmaProc | 0, 2);
 
 	// Model
 	for (i in 1:n_indiv) // Loop over all the individuals
@@ -134,7 +133,8 @@ model {
 		obs_counter = 1;
 		
 		// Prior on initial hidden state: remember that latent_dbh_parents is in mm and standardised.
-		target += gamma_lpdf(latent_dbh_parents[i] | dbh_init[i]^2/5.0, sd_dbh*dbh_init[i]/5.0);
+		// target += gamma_lpdf(latent_dbh_parents[i] | dbh_init[i]^2/5, sd_dbh*dbh_init[i]/5);
+		target += normal_lpdf(latent_dbh_parents[i] | dbh_init[i]/sd_dbh, sigmaObs); //! sigmaObs is already scaled (from the provided data)
 
 		// Markov process
 		for (j in 1:n_latent_growth) // Loop over growing years
@@ -149,7 +149,6 @@ model {
 			temporary += latent_growth[i, j];
 
 			// Only the relevant (i.e., children) diameters at breast height are recorded
-			// print("j = ", j);
 			if (j % delta_t == 0)
 			{
 				// print("(from if) j = ", j);
