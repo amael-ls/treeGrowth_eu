@@ -119,11 +119,9 @@ temperature = as.data.table(temperature)
 setnames(temperature, paste0("temperature", 1:n_annual_growth_per_indiv))
 temperature[, plot_id := 1:n_plot]
 
-# Get the columns that match the pattern
-temperatur_cols = grep("temperature", names(temperature), value = TRUE)
-
-# Apply the function to each row of the selected columns
-temperature[, avg := apply(.SD, 1, mean), .SDcols = temperatur_cols]
+## Compute the plot average temperature
+temperature_cols = grep("temperature", names(temperature), value = TRUE)
+temperature[, avg := apply(.SD, 1, mean), .SDcols = temperature_cols]
 
 ## Assign trees to plots
 nb_trees_per_plot = constrained_sum_sample_pos(n = n_plot, total = n_indiv)
