@@ -111,7 +111,6 @@ if (correlated)
 		nrow = n_plot, ncol = n_annual_growth_per_indiv)
 }
 
-
 mu_temp = mean(temperature)
 sd_temp = sd(temperature)
 
@@ -197,7 +196,9 @@ if (correlated)
 {
 	dataFilename = paste0("dummyData_plot=", n_plot, "_indiv=", n_indiv, "_deltaT=", delta_t, ".rds")
 } else {
-	dataFilename = paste0("dummyData_plot=", n_plot, "_indiv=", n_indiv, "_deltaT=", delta_t, "_nonCorrelated.rds")
+	if (!dir.exists("./uncorrelated"))
+		dir.create("./uncorrelated")
+	dataFilename = paste0("./uncorrelated/dummyData_plot=", n_plot, "_indiv=", n_indiv, "_deltaT=", delta_t, "_nonCorrelated.rds")
 }
 
 saveRDS(list(
