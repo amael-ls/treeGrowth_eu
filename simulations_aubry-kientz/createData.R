@@ -5,6 +5,9 @@
 # 	clear separation between the two modes around 300 mm. Therefore, I decided to sample two gamma distributions with means and variances
 #	taken from the Quercus data with dbh above or below 300 mm.
 # You need to run this program with n_measurements = 2, 3, 4, 5, 7, and 13, respectively
+#
+# 19th June 2024: I added a parameter for correlated climate data within plot or not. So far, it was correlated. Now, I want to see what happens
+#	with non correlated plots and less climate diverstity
 
 #### Clear memory and load packages
 rm(list = ls())
@@ -97,8 +100,17 @@ print(paste("Range temperature sd:", paste(round(range(temperature_sd), 3), coll
 
 temperature = matrix(data = NA, nrow = n_plot, ncol = n_annual_growth_per_indiv) # n_plot series of temperature, of length n_annual_growth_indiv
 
-for (year in 1:n_annual_growth_per_indiv)
-	temperature[, year] = rnorm(n = n_plot, mean = temperature_avg, sd = temperature_sd)
+correlated = FALSE
+
+if (correlated)
+{
+	for (year in 1:n_annual_growth_per_indiv)
+		temperature[, year] = rnorm(n = n_plot, mean = temperature_avg, sd = temperature_sd)
+} else {
+	temperature = matrix(data = rnorm(n = n_plot*n_annual_growth_per_indiv, mean = mean(temperature_avg), sd = max(temperature_sd)),
+		nrow = n_plot, ncol = n_annual_growth_per_indiv)
+}
+
 
 mu_temp = mean(temperature)
 sd_temp = sd(temperature)
@@ -107,6 +119,12 @@ temperature = as.data.table(temperature)
 setnames(temperature, paste0("temperature", 1:n_annual_growth_per_indiv))
 temperature[, plot_id := 1:n_plot]
 
+# Get the columns that match the pattern
+temperatur_cols = grep("temperature", names(temperature), value = TRUE)
+
+# Apply the function to each row of the selected columns
+temperature[, avg := apply(.SD, 1, mean), .SDcols = temperatur_cols]
+
 ## Assign trees to plots
 nb_trees_per_plot = constrained_sum_sample_pos(n = n_plot, total = n_indiv)
 treeData[, plot_id := rep(1:n_plot, times = nb_trees_per_plot)]
@@ -114,7 +132,7 @@ treeData[, tree_id := seq_len(.N), by = plot_id]
 
 all.equal(treeData[, .N, by = plot_id][, N], nb_trees_per_plot)
 
-if (!file.exists("./histogram_nbPerPlot.tex"))
+if (correlated && !file.exists("./histogram_nbPerPlot.tex"))
 {
 	tikz("./histogram_nbPerPlot.tex", height = 3, width = 3)
 	hist(nb_trees_per_plot, breaks = seq(0, max(nb_trees_per_plot), 1), xlab = "Number of indiviudals per plot",
@@ -177,7 +195,12 @@ setcolorder(treeData, c("plot_id", "tree_id", paste0("dbh", 1:(n_annual_growth_p
 	paste0("obs_growth", seq_along(dbh_recorded[-length(dbh_recorded)])),
 	paste0("temperature", 1:n_annual_growth_per_indiv)))
 
-dataFilename = paste0("dummyData_plot=", n_plot, "_indiv=", n_indiv, "_deltaT=", delta_t, ".rds")
+if (correlated)
+{
+	dataFilename = paste0("dummyData_plot=", n_plot, "_indiv=", n_indiv, "_deltaT=", delta_t, ".rds")
+} else {
+	dataFilename = paste0("dummyData_plot=", n_plot, "_indiv=", n_indiv, "_deltaT=", delta_t, "_nonCorrelated.rds")
+}
 
 saveRDS(list(
 		treeData = treeData,
