@@ -1,0 +1,416 @@
+---
+title: "Downloading data"
+subtitle: "Different process depending on the country"
+date: "`r Sys.Date()`"
+format:
+    pdf: default
+    html: 
+        self-contained: true
+        grid: 
+            margin-width: 350px
+execute: 
+    echo: fenced
+reference-location: margin
+citation-location: margin
+---
+
+## Introduction
+
+Depending on the target country, there are different ways of downloading the data. For Germany, there is a RESTful API, that I am going to explain and then use. For France? For Sweden?
+
+## Germany
+
+Information can be found at the [Thünen institute's github](https://thuenen-forest-ecosystems.github.io/TFM-Documentation/api/getting-started.html). The endpoint of the API is (accessed the 2026.10.29) `https://ci.thuenen.de/rest/v1/`.
+
+The API requires an API key to be passed in the header of each request. The API key is a JSON Web Token (JWT) and is used to authenticate the user. The API key is passed in the `apikey` header.
+
+Credentials can be found on [Github](https://github.com/Thuenen-Forest-Ecosystems/TFM-Documentation/blob/9be1fb16a529cec4d1687f21b3f0040d442bb194/.vitepress/theme/config.js) too, and display the following keys in a json format:
+
+```{js}
+/// Export credentials
+
+export const config = {
+    PUBLIC_SUPABASE_BUCKET: "tfm",
+    PUBLIC_SUPABASE_URL: "https://ci.thuenen.de",
+    PUBLIC_SUPABASE_EDGE: "https://ci.thuenen.de/functions/v1/",
+    PUBLIC_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU",
+    PUBLIC_POWERSYNC_URL: "https://ci.thuenen.de/sync/",
+}
+```
+
+
+The second header required is the `Accept-Profile` header. This header is used to specify the schema that the response should be formatted in. The available schemas are `lookup` or `inventory_archive`.
+
+Finally, there are optional headers. `Accept` header specifies the output format, either `csv` or `json` (default). For this, use either `text/csv` or `application/json`. The `Content-Range` allows to return a limited amount of rows, for instance:
+```{js}
+    Range-Unit: items
+    Content-Range: 0-14/*
+```
+
+Note that I tried to use the Accept header with `text/csv` but that failed...
+
+```{r}
+#### Clear space and load packages
+rm(list = ls())
+options(max.print = 500)
+
+library(data.table)
+library(jsonlite)
+library(stringi)
+library(httr2)
+
+#### Common variables to all request
+endpoint = "https://ci.thuenen.de/rest/v1/"
+apikey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU"
+```
+
+## TESTING ZONE
+
+```{r}
+coords = request(endpoint) |>
+  req_url_path_append("plot") |>
+  req_url_query(limit = 2) |>
+  req_headers(
+    apikey = apikey,
+    Accept = "application/json",
+    `Accept-Profile` = "inventory_archive" 
+  ) |>
+  req_perform() |>
+  resp_body_json(simplifyVector = TRUE) |>
+  setDT()
+
+coords = request(endpoint) |>
+  req_url_path_append("plot_coordinates") |> # would work with plot
+  req_url_query(limit = 2) |>
+  req_headers(
+  apikey = apikey,
+  Accept = "application/json",
+  `Accept-Profile` = "inventory_archive"
+  ) |>
+  req_perform() |>
+  resp_body_json(simplifyVector = TRUE)
+```
+
+### Query species list, from `lookup` schema
+
+```{r}
+#### Species list
+## list clusters
+clusters_ls = request(endpoint) |>
+    req_headers(
+        apikey = apikey,
+        Accept = "application/json",
+        `Accept-Profile` = "lookup" 
+    ) |>
+    req_perform() |>
+    resp_body_json()
+
+names(clusters_ls)
+
+ls_endpoints = clusters_ls[["paths"]]
+sort(names(ls_endpoints))
+
+species_tab_cluster = unlist(ls_endpoints[["/lookup_tree_species"]][["get"]][["tags"]])
+
+species_info = request(endpoint) |>
+    req_headers(
+        apikey = apikey,
+        Accept = "application/json",
+        `Accept-Profile` = "lookup"
+    ) |>
+    req_url_path_append(species_tab_cluster) |>
+    req_perform() |>
+    resp_body_json()
+
+n_species = length(species_info)
+species_dt = data.table(nfi_code = integer(n_species), genus = NA_character_, species = NA_character_)
+
+for (i in seq_len(n_species))
+{
+    if (is.null(species_info[[i]][["genus"]]) || is.null(species_info[[i]][["species"]]))
+    {
+        species_dt[i, c("nfi_code", "genus", "species") := .(species_info[[i]][["code"]], NA_character_, NA_character_)]
+
+        if (species_info[[i]][["name_de"]] == "Lücke")
+            warning(paste("Missing data for species code", i))
+        
+        if (species_info[[i]][["name_de"]] == "Blöße")
+            warning(paste("Missing data due to clear cut, species code", i))
+        next
+    }
+    species_dt[i, c("nfi_code", "genus", "species") := .(species_info[[i]][["code"]], species_info[[i]][["genus"]], species_info[[i]][["species"]])]
+}
+```
+
+### Query tree data
+
+The data can be found in the `inventory_archive` schema, which contains the following tables:
+
+- inventory_archive
+  - cluster 
+    - plot
+      - edges
+      - deadwood
+      - regeneration
+      - structure_lt4m
+      - structure_gt4m
+      - subplot_position
+      - tree
+
+This is a more complex query, and help can be found on [Thünen institute's github](https://thuenen-forest-ecosystems.github.io/TFM-Documentation/api/inventory_loop.html) in order to combine API calls to get larger amounts of data.
+
+#### Step 1: Retrieve list of cluster names
+
+This time, I do it on the `inventory_archive` schema. I first extract all the paths and keep the interesting ones.
+
+```{r}
+#### List clusters
+## Get all clusters
+clusters_ls = request(endpoint) |>
+    req_headers(
+        apikey = apikey,
+        Accept = "application/json",
+        `Accept-Profile` = "inventory_archive" 
+    ) |>
+    req_perform() |>
+    resp_body_json()
+
+names(clusters_ls)
+
+ls_endpoints = clusters_ls[["paths"]]
+sort(names(ls_endpoints))
+
+cluster_dt = data.table(endpoint = names(ls_endpoints), extract = FALSE, key = "endpoint")
+cluster_dt[c("/tree", "/plot"), extract := TRUE]
+
+## Subset to interesting clusters
+cluster_dt = cluster_dt[(extract)]
+```
+
+#### Step 2: Run extraction for the clusters of interest
+
+Now, I query data with the provided paths. Note that the tables `tree_coordinates` and `plot_coordinates` were returned empty. I suspect that it contains real coordinates, and that a special key is needed to access these tables. This is why I chose `tree` and `plot`.
+
+```{r}
+full_req = vector(mode = "list", length = cluster_dt[, .N])
+names(full_req) = cluster_dt[, endpoint]
+
+for (current_endP in cluster_dt[, endpoint])
+{
+    full_req[[current_endP]] = request(endpoint) |>
+    req_headers(
+        apikey = apikey,
+        Accept = "application/json",
+        `Accept-Profile` = "inventory_archive"
+    ) |>
+    req_url_path_append(current_endP) |>
+    req_perform() |>
+    resp_body_json()
+}
+```
+
+#### Step 3: Format the extracted data
+
+For the `plot` table, I want to keep the following fields:
+
+- plot_id
+- tree_number
+- tree_status
+- tree_species
+- dbh
+- dbh_height
+- tree_height
+- stem_height
+- tree_age
+- stem_breakage
+- stem_form
+
+For the `tree` table, I want to keep the following fields:
+
+- plot_id
+- tree_number
+- tree_status
+- tree_species
+- dbh
+- dbh_height
+- tree_height
+- stem_height
+- tree_age
+- stem_breakage
+- stem_form
+
+```{r}
+full_req[["/plot"]][[1]]
+
+
+# [1] "/"                                    
+#  [2] "/lookup_accessibility"                
+#  [3] "/lookup_bark_condition"               
+#  [4] "/lookup_basal_area_factor"            
+#  [5] "/lookup_biogeographische_region"      
+#  [6] "/lookup_biosphaere"                   
+#  [7] "/lookup_biotope"                      
+#  [8] "/lookup_browsing"                     
+#  [9] "/lookup_cluster_situation"            
+# [10] "/lookup_cluster_status"               
+# [11] "/lookup_cover_percentage"             
+# [12] "/lookup_damage_peel"                  
+# [13] "/lookup_dead_wood_type"               
+# [14] "/lookup_decomposition"                
+# [15] "/lookup_district"                     
+# [16] "/lookup_edge_stand_difference"        
+# [17] "/lookup_edge_status"                  
+# [18] "/lookup_edge_type"                    
+# [19] "/lookup_edge_type_deprecated"         
+# [20] "/lookup_elevation_level"              
+# [21] "/lookup_exploration_instruction"      
+# [22] "/lookup_ffh"                          
+# [23] "/lookup_ffh_forest_type"              
+# [24] "/lookup_forest_community"             
+# [25] "/lookup_forest_office"                
+# [26] "/lookup_forest_status"                
+# [27] "/lookup_gnss_quality"                 
+# [28] "/lookup_grid_density"                 
+# [29] "/lookup_growth_district"              
+# [30] "/lookup_growth_region"                
+# [31] "/lookup_harvest_condition"            
+# [32] "/lookup_harvest_method"               
+# [33] "/lookup_harvest_reason"               
+# [34] "/lookup_harvest_restriction"          
+# [35] "/lookup_interval"                     
+# [36] "/lookup_land_use"                     
+# [37] "/lookup_layer"                        
+# [38] "/lookup_management_type"              
+# [39] "/lookup_marker_profile"               
+# [40] "/lookup_marker_status"                
+# [41] "/lookup_municipality"                 
+# [42] "/lookup_national_park"                
+# [43] "/lookup_natur_park"                   
+# [44] "/lookup_natur_schutzgebiet"           
+# [45] "/lookup_object_type"                  
+# [46] "/lookup_property_size_class"          
+# [47] "/lookup_property_type"                
+# [48] "/lookup_pruning"                      
+# [49] "/lookup_sampling_stratum"             
+# [50] "/lookup_stand_development_phase"      
+# [51] "/lookup_stand_layer"                  
+# [52] "/lookup_stand_structure"              
+# [53] "/lookup_state"                        
+# [54] "/lookup_stem_breakage"                
+# [55] "/lookup_stem_form"                    
+# [56] "/lookup_support_point_type"           
+# [57] "/lookup_template"                     
+# [58] "/lookup_terrain"                      
+# [59] "/lookup_terrain_form"                 
+# [60] "/lookup_tree_size_class"              
+# [61] "/lookup_tree_species"                 
+# [62] "/lookup_tree_species_group"           
+# [63] "/lookup_tree_status"                  
+# [64] "/lookup_trees_greater_4meter_mirrored"
+# [65] "/lookup_trees_less_4meter_origin"     
+# [66] "/lookup_vogel_schutzgebiet"           
+# [67] "/lookup_workflow_status"      
+
+
+
+
+```
+
+```{r}
+# This example in plain R (best run in RStudio) shows conceptually
+# how to:
+# - get a list of clusters and
+# - retrieve the json tree of the data belonging to the clusters in
+#   the list from different related tables (plots, trees, ...)
+# - show the retrieved json tree as expandable view
+
+# Install necessary packages if not already installed
+if (!require(httr)) install.packages("httr", dependencies = TRUE)
+if (!require(jsonlite)) install.packages("jsonlite", dependencies = TRUE)
+if (!require(listviewer)) install.packages("listviewer", dependencies = TRUE)
+
+# Load necessary packages
+library(httr)
+library(jsonlite)
+library(listviewer)
+
+# Define the number of items, endpoints and any necessary headers
+# Number of clusters to fetch (10 might be enough for the example)
+samples <- 10
+# API base url
+base_url <- "https://ci.thuenen.de/rest/v1/"
+# API call for the list of clusters
+list_endpoint <- paste0("cluster?select=cluster_name&cluster_name=lt.", samples)
+# stub for API call for details
+detail_endpoint <- "cluster?cluster_name=eq."
+# headers for Auth and database scheme to use
+headers <- c(
+  "apikey" = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU",
+  "Accept-Profile" = "inventory_archive"
+)
+
+# Here starts the magic...
+# Helper function to call the first endpoint and get the list of cluster
+get_list <- function() {
+  response <- GET(paste0(base_url, list_endpoint), add_headers(headers))
+  if (status_code(response) == 200) {
+    return(content(response, as = "parsed", type = "application/json"))
+  } else {
+    stop("Failed to retrieve the list of items")
+  }
+}
+
+# Helper function to call the second endpoint and get details for a specific cluster
+get_details <- function(item_id) {
+  response <- GET(
+    paste0(base_url, "cluster"),
+    query = list(
+      cluster_name = paste0("eq.", item_id),
+      select = "*,plot(*,tree(*),deadwood(*),regeneration(*),structure_lt4m(*),edges(*))"
+    ),
+    add_headers(headers)
+  )
+  if (status_code(response) == 200) {
+    return(content(response, as = "parsed", type = "application/json"))
+  } else {
+    stop(paste(
+      "Failed to retrieve details for item:", item_id,
+      "- HTTP", status_code(response), "-", content(response, as = "text")
+    ))
+  }
+}
+
+# MAIN
+# Note start time
+start_time <- Sys.time()
+
+# Get the list of items
+items_list <- get_list()
+
+# measuring times just to test performance
+start_time_details <- Sys.time()
+print(paste("Downloadzeit Traktliste:", round(start_time_details - start_time, 2), "sec."))
+
+# Initialize an empty list to store the details
+details_list <- list()
+
+# Iterate over the clusters list and collect details
+for (item in items_list) {
+  item_id <- item$cluster_name # Assuming the ID field is 'id' in your JSON response
+  item_details <- get_details(item_id)
+  # Append the details to the list
+  details_list <- append(details_list, item_details)
+}
+
+# measuring times just to test performance
+start_time_view <- Sys.time()
+print(paste("Downloadzeit Details:", round(start_time_view - start_time_details, 2), "sec."))
+
+# Show the result as expandable view
+listviewer::jsonedit(details_list)
+
+# measuring times just to test performance
+end_time <- Sys.time()
+print(paste("View generiert in:", round(end_time - start_time_view, 2), "sec."))
+# Have fun!
+```
