@@ -64,33 +64,6 @@ endpoint = "https://ci.thuenen.de/rest/v1/"
 apikey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU"
 ```
 
-## TESTING ZONE
-
-```{r}
-coords = request(endpoint) |>
-  req_url_path_append("plot") |>
-  req_url_query(limit = 2) |>
-  req_headers(
-    apikey = apikey,
-    Accept = "application/json",
-    `Accept-Profile` = "inventory_archive" 
-  ) |>
-  req_perform() |>
-  resp_body_json(simplifyVector = TRUE) |>
-  setDT()
-
-coords = request(endpoint) |>
-  req_url_path_append("plot_coordinates") |> # would work with plot
-  req_url_query(limit = 2) |>
-  req_headers(
-  apikey = apikey,
-  Accept = "application/json",
-  `Accept-Profile` = "inventory_archive"
-  ) |>
-  req_perform() |>
-  resp_body_json(simplifyVector = TRUE)
-```
-
 ### Query species list, from `lookup` schema
 
 ```{r}
@@ -147,7 +120,7 @@ for (i in seq_len(n_species))
 The data can be found in the `inventory_archive` schema, which contains the following tables:
 
 - inventory_archive
-  - cluster 
+  - cluster
     - plot
       - edges
       - deadwood
@@ -181,7 +154,7 @@ ls_endpoints = clusters_ls[["paths"]]
 sort(names(ls_endpoints))
 
 cluster_dt = data.table(endpoint = names(ls_endpoints), extract = FALSE, key = "endpoint")
-cluster_dt[c("/tree", "/plot"), extract := TRUE]
+cluster_dt[c("/tree", "/plot", "/cluster"), extract := TRUE]
 
 ## Subset to interesting clusters
 cluster_dt = cluster_dt[(extract)]
@@ -198,6 +171,7 @@ names(full_req) = cluster_dt[, endpoint]
 for (current_endP in cluster_dt[, endpoint])
 {
     full_req[[current_endP]] = request(endpoint) |>
+    req_url_query(limit = 2) |>
     req_headers(
         apikey = apikey,
         Accept = "application/json",
@@ -205,11 +179,17 @@ for (current_endP in cluster_dt[, endpoint])
     ) |>
     req_url_path_append(current_endP) |>
     req_perform() |>
-    resp_body_json()
+    resp_body_json(simplifyVector = TRUE) |>
+    setDT()
 }
 ```
 
 #### Step 3: Format the extracted data
+
+For the `cluster` table, I want to keep the following fields:
+
+- id
+- inspire_grid_cell
 
 For the `plot` table, I want to keep the following fields:
 
@@ -315,6 +295,10 @@ full_req[["/plot"]][[1]]
 
 
 ```
+
+### Coordinates
+
+According to Sebastian Schnell (Thübingen institute) who promptly replied to my e-mail (hahaha hilarious!!!), the offset coordinates are linked to the 1 km INSPIRE grid via the column `inspire_grid_cell` in the cluster table. They do not provide the grid itself but it can be downloaded on the [Bundesamt für Kartographie und Geodäsie's website](https://gdz.bkg.bund.de/index.php/default/inspire/sonstige-inspire-themen/geographische-gitter-fur-deutschland-in-lambert-projektion-geogitter-inspire.html).
 
 ```{r}
 # This example in plain R (best run in RStudio) shows conceptually
