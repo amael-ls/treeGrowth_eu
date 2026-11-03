@@ -30,11 +30,11 @@ Credentials can be found on [Github](https://github.com/Thuenen-Forest-Ecosystem
 /// Export credentials
 
 export const config = {
-    PUBLIC_SUPABASE_BUCKET: "tfm",
-    PUBLIC_SUPABASE_URL: "https://ci.thuenen.de",
-    PUBLIC_SUPABASE_EDGE: "https://ci.thuenen.de/functions/v1/",
-    PUBLIC_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU",
-    PUBLIC_POWERSYNC_URL: "https://ci.thuenen.de/sync/",
+	PUBLIC_SUPABASE_BUCKET: "tfm",
+	PUBLIC_SUPABASE_URL: "https://ci.thuenen.de",
+	PUBLIC_SUPABASE_EDGE: "https://ci.thuenen.de/functions/v1/",
+	PUBLIC_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU",
+	PUBLIC_POWERSYNC_URL: "https://ci.thuenen.de/sync/",
 }
 ```
 
@@ -43,8 +43,8 @@ The second header required is the `Accept-Profile` header. This header is used t
 
 Finally, there are optional headers. `Accept` header specifies the output format, either `csv` or `json` (default). For this, use either `text/csv` or `application/json`. The `Content-Range` allows to return a limited amount of rows, for instance:
 ```{js}
-    Range-Unit: items
-    Content-Range: 0-14/*
+	Range-Unit: items
+	Content-Range: 0-14/*
 ```
 
 Note that I tried to use the Accept header with `text/csv` but that failed...
@@ -70,13 +70,13 @@ apikey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1c
 #### Species list
 ## list clusters
 clusters_ls = request(endpoint) |>
-    req_headers(
-        apikey = apikey,
-        Accept = "application/json",
-        `Accept-Profile` = "lookup" 
-    ) |>
-    req_perform() |>
-    resp_body_json()
+	req_headers(
+		apikey = apikey,
+		Accept = "application/json",
+		`Accept-Profile` = "lookup" 
+	) |>
+	req_perform() |>
+	resp_body_json()
 
 names(clusters_ls)
 
@@ -86,32 +86,32 @@ sort(names(ls_endpoints))
 species_tab_cluster = unlist(ls_endpoints[["/lookup_tree_species"]][["get"]][["tags"]])
 
 species_info = request(endpoint) |>
-    req_headers(
-        apikey = apikey,
-        Accept = "application/json",
-        `Accept-Profile` = "lookup"
-    ) |>
-    req_url_path_append(species_tab_cluster) |>
-    req_perform() |>
-    resp_body_json()
+	req_headers(
+		apikey = apikey,
+		Accept = "application/json",
+		`Accept-Profile` = "lookup"
+	) |>
+	req_url_path_append(species_tab_cluster) |>
+	req_perform() |>
+	resp_body_json()
 
 n_species = length(species_info)
 species_dt = data.table(nfi_code = integer(n_species), genus = NA_character_, species = NA_character_)
 
 for (i in seq_len(n_species))
 {
-    if (is.null(species_info[[i]][["genus"]]) || is.null(species_info[[i]][["species"]]))
-    {
-        species_dt[i, c("nfi_code", "genus", "species") := .(species_info[[i]][["code"]], NA_character_, NA_character_)]
+	if (is.null(species_info[[i]][["genus"]]) || is.null(species_info[[i]][["species"]]))
+	{
+		species_dt[i, c("nfi_code", "genus", "species") := .(species_info[[i]][["code"]], NA_character_, NA_character_)]
 
-        if (species_info[[i]][["name_de"]] == "Lücke")
-            warning(paste("Missing data for species code", i))
-        
-        if (species_info[[i]][["name_de"]] == "Blöße")
-            warning(paste("Missing data due to clear cut, species code", i))
-        next
-    }
-    species_dt[i, c("nfi_code", "genus", "species") := .(species_info[[i]][["code"]], species_info[[i]][["genus"]], species_info[[i]][["species"]])]
+		if (species_info[[i]][["name_de"]] == "Lücke")
+			warning(paste("Missing data for species code", i))
+		
+		if (species_info[[i]][["name_de"]] == "Blöße")
+			warning(paste("Missing data due to clear cut, species code", i))
+		next
+	}
+	species_dt[i, c("nfi_code", "genus", "species") := .(species_info[[i]][["code"]], species_info[[i]][["genus"]], species_info[[i]][["species"]])]
 }
 ```
 
@@ -120,15 +120,15 @@ for (i in seq_len(n_species))
 The data can be found in the `inventory_archive` schema, which contains the following tables:
 
 - inventory_archive
-  - cluster
-    - plot
-      - edges
-      - deadwood
-      - regeneration
-      - structure_lt4m
-      - structure_gt4m
-      - subplot_position
-      - tree
+	- cluster
+	- plot
+	- edges
+	- deadwood
+	- regeneration
+	- structure_lt4m
+	- structure_gt4m
+	- subplot_position
+	- tree
 
 This is a more complex query, and help can be found on [Thünen institute's github](https://thuenen-forest-ecosystems.github.io/TFM-Documentation/api/inventory_loop.html) in order to combine API calls to get larger amounts of data.
 
@@ -140,13 +140,13 @@ This time, I do it on the `inventory_archive` schema. I first extract all the pa
 #### List clusters
 ## Get all clusters
 clusters_ls = request(endpoint) |>
-    req_headers(
-        apikey = apikey,
-        Accept = "application/json",
-        `Accept-Profile` = "inventory_archive" 
-    ) |>
-    req_perform() |>
-    resp_body_json()
+	req_headers(
+		apikey = apikey,
+		Accept = "application/json",
+		`Accept-Profile` = "inventory_archive" 
+	) |>
+	req_perform() |>
+	resp_body_json()
 
 names(clusters_ls)
 
@@ -170,17 +170,17 @@ names(full_req) = cluster_dt[, endpoint]
 
 for (current_endP in cluster_dt[, endpoint])
 {
-    full_req[[current_endP]] = request(endpoint) |>
-    req_url_query(limit = 2) |>
-    req_headers(
-        apikey = apikey,
-        Accept = "application/json",
-        `Accept-Profile` = "inventory_archive"
-    ) |>
-    req_url_path_append(current_endP) |>
-    req_perform() |>
-    resp_body_json(simplifyVector = TRUE) |>
-    setDT()
+	full_req[[current_endP]] = request(endpoint) |>
+	req_url_query(limit = 2) |>
+	req_headers(
+		apikey = apikey,
+		Accept = "application/json",
+		`Accept-Profile` = "inventory_archive"
+	) |>
+	req_url_path_append(current_endP) |>
+	req_perform() |>
+	resp_body_json(simplifyVector = TRUE) |>
+	setDT()
 }
 ```
 
@@ -220,80 +220,15 @@ For the `tree` table, I want to keep the following fields:
 - stem_form
 
 ```{r}
-full_req[["/plot"]][[1]]
+cols = c("id", "inspire_grid_cell")
+coords_info = full_req[["/cluster"]][, ..cols]
 
+cols = c("cluster_id", "id", "interval_name", "acquisition_date", "management_type",
+  "stand_age", "stand_structure", "terrain_slope")
+plot_dt = full_req[["/plot"]][, ..cols]
 
-# [1] "/"                                    
-#  [2] "/lookup_accessibility"                
-#  [3] "/lookup_bark_condition"               
-#  [4] "/lookup_basal_area_factor"            
-#  [5] "/lookup_biogeographische_region"      
-#  [6] "/lookup_biosphaere"                   
-#  [7] "/lookup_biotope"                      
-#  [8] "/lookup_browsing"                     
-#  [9] "/lookup_cluster_situation"            
-# [10] "/lookup_cluster_status"               
-# [11] "/lookup_cover_percentage"             
-# [12] "/lookup_damage_peel"                  
-# [13] "/lookup_dead_wood_type"               
-# [14] "/lookup_decomposition"                
-# [15] "/lookup_district"                     
-# [16] "/lookup_edge_stand_difference"        
-# [17] "/lookup_edge_status"                  
-# [18] "/lookup_edge_type"                    
-# [19] "/lookup_edge_type_deprecated"         
-# [20] "/lookup_elevation_level"              
-# [21] "/lookup_exploration_instruction"      
-# [22] "/lookup_ffh"                          
-# [23] "/lookup_ffh_forest_type"              
-# [24] "/lookup_forest_community"             
-# [25] "/lookup_forest_office"                
-# [26] "/lookup_forest_status"                
-# [27] "/lookup_gnss_quality"                 
-# [28] "/lookup_grid_density"                 
-# [29] "/lookup_growth_district"              
-# [30] "/lookup_growth_region"                
-# [31] "/lookup_harvest_condition"            
-# [32] "/lookup_harvest_method"               
-# [33] "/lookup_harvest_reason"               
-# [34] "/lookup_harvest_restriction"          
-# [35] "/lookup_interval"                     
-# [36] "/lookup_land_use"                     
-# [37] "/lookup_layer"                        
-# [38] "/lookup_management_type"              
-# [39] "/lookup_marker_profile"               
-# [40] "/lookup_marker_status"                
-# [41] "/lookup_municipality"                 
-# [42] "/lookup_national_park"                
-# [43] "/lookup_natur_park"                   
-# [44] "/lookup_natur_schutzgebiet"           
-# [45] "/lookup_object_type"                  
-# [46] "/lookup_property_size_class"          
-# [47] "/lookup_property_type"                
-# [48] "/lookup_pruning"                      
-# [49] "/lookup_sampling_stratum"             
-# [50] "/lookup_stand_development_phase"      
-# [51] "/lookup_stand_layer"                  
-# [52] "/lookup_stand_structure"              
-# [53] "/lookup_state"                        
-# [54] "/lookup_stem_breakage"                
-# [55] "/lookup_stem_form"                    
-# [56] "/lookup_support_point_type"           
-# [57] "/lookup_template"                     
-# [58] "/lookup_terrain"                      
-# [59] "/lookup_terrain_form"                 
-# [60] "/lookup_tree_size_class"              
-# [61] "/lookup_tree_species"                 
-# [62] "/lookup_tree_species_group"           
-# [63] "/lookup_tree_status"                  
-# [64] "/lookup_trees_greater_4meter_mirrored"
-# [65] "/lookup_trees_less_4meter_origin"     
-# [66] "/lookup_vogel_schutzgebiet"           
-# [67] "/lookup_workflow_status"      
-
-
-
-
+cols = c("plot_id", "tree_number", "tree_species", "dbh", "dbh_height", "tree_height")
+tree_dt = full_req[["/tree"]][, ..cols]
 ```
 
 ### Coordinates
