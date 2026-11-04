@@ -38,10 +38,10 @@ export const config = {
 }
 ```
 
-
 The second header required is the `Accept-Profile` header. This header is used to specify the schema that the response should be formatted in. The available schemas are `lookup` or `inventory_archive`.
 
 Finally, there are optional headers. `Accept` header specifies the output format, either `csv` or `json` (default). For this, use either `text/csv` or `application/json`. The `Content-Range` allows to return a limited amount of rows, for instance:
+
 ```{js}
 	Range-Unit: items
 	Content-Range: 0-14/*
@@ -64,6 +64,13 @@ endpoint = "https://ci.thuenen.de/rest/v1/"
 apikey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU"
 ```
 
+Now, few comments on how the data are collected (see @Vidal2016, chapter 21, p. 405):
+
+1. There are squares of 2, 2.83 or 4 km side (depending on the level of sampling density) in each länder. This grid is fixed. I refer to these large squares as 'grid cells'.
+2. They place a cluster of 4 points in each grid cell, displayed on a square of 150 m side. In other words, the distance between two adjacent plots is 150 m, and $2 \sqrt{150}$ m distance for the diagonal.
+3. Only 'possible forest' points are visited (orthophotos interpreted, 'definitively non-forest' are ruled-out), so at most four plots per grid cell. A point consist of a 10 m radius circle (for trees smaller than 4 m) and a radius of 25 m for terrain characteristics and forest edges. Trees larger than 4 m are sampled using a relascope sampling method. According to Lukas Heiland (old discussion) it looks like a fork (angle), and trees that are larger than this angle are counted and measured. Therefore, large trees are measured on a radius larger than small trees. There are other circles (5 m for deadwood, concentric), not necessarily at the center of the point (1 m and 2 m circles for regeneration).
+4. They measure their stuff on each circle and for each tree counted in via the relascope.
+
 ### Query species list, from `lookup` schema
 
 ```{r}
@@ -80,18 +87,18 @@ clusters_ls = request(endpoint) |>
 
 names(clusters_ls)
 
-ls_endpoints = clusters_ls[["paths"]]
-sort(names(ls_endpoints))
+ls_paths = clusters_ls[["paths"]]
+sort(names(ls_paths))
 
-species_tab_cluster = unlist(ls_endpoints[["/lookup_tree_species"]][["get"]][["tags"]])
+species_tab_cluster = unlist(ls_paths[["/lookup_tree_species"]][["get"]][["tags"]])
 
 species_info = request(endpoint) |>
+	req_url_path_append(species_tab_cluster) |>
 	req_headers(
 		apikey = apikey,
 		Accept = "application/json",
 		`Accept-Profile` = "lookup"
 	) |>
-	req_url_path_append(species_tab_cluster) |>
 	req_perform() |>
 	resp_body_json()
 
@@ -150,14 +157,38 @@ clusters_ls = request(endpoint) |>
 
 names(clusters_ls)
 
-ls_endpoints = clusters_ls[["paths"]]
-sort(names(ls_endpoints))
+ls_paths = clusters_ls[["paths"]]
+sort(names(ls_paths))
 
-cluster_dt = data.table(endpoint = names(ls_endpoints), extract = FALSE, key = "endpoint")
+cluster_dt = data.table(path = names(ls_paths), extract = FALSE, key = "path")
 cluster_dt[c("/tree", "/plot", "/cluster"), extract := TRUE]
 
 ## Subset to interesting clusters
 cluster_dt = cluster_dt[(extract)]
+```
+
+Then, I get the number of rows for each table.
+```{r}
+#### Get dimensions
+n_rows = data.table(path = cluster_dt[, path], n = NA_integer_, key = "path")
+
+for (current_path in cluster_dt[, path])
+{
+	temp = request(endpoint) |>
+	req_url_path_append(current_path) |>
+	req_url_query(limit = 0) |> # Avoid downloading any data
+	req_headers(
+		apikey = apikey,
+		Accept = "application/json",
+		`Accept-Profile` = "inventory_archive",
+		Prefer = "count=exact"
+	) |>
+	req_perform()
+
+	str = resp_header(temp, "content-range")
+	lim = stri_sub(str, from = stri_locate_first(str, regex = "/")[, "end"] + 1)
+	n_rows[current_path, n := as.integer(lim)]
+}
 ```
 
 #### Step 2: Run extraction for the clusters of interest
@@ -165,22 +196,54 @@ cluster_dt = cluster_dt[(extract)]
 Now, I query data with the provided paths. Note that the tables `tree_coordinates` and `plot_coordinates` were returned empty. I suspect that it contains real coordinates, and that a special key is needed to access these tables. This is why I chose `tree` and `plot`.
 
 ```{r}
-full_req = vector(mode = "list", length = cluster_dt[, .N])
-names(full_req) = cluster_dt[, endpoint]
-
-for (current_endP in cluster_dt[, endpoint])
+if (!file.exists("../data/request_germany.rds"))
 {
-	full_req[[current_endP]] = request(endpoint) |>
-	req_url_query(limit = 2) |>
-	req_headers(
-		apikey = apikey,
-		Accept = "application/json",
-		`Accept-Profile` = "inventory_archive"
-	) |>
-	req_url_path_append(current_endP) |>
-	req_perform() |>
-	resp_body_json(simplifyVector = TRUE) |>
-	setDT()
+	full_req = vector(mode = "list", length = cluster_dt[, .N])
+	names(full_req) = cluster_dt[, path]
+
+	page_size = 15000 # API limit is 2e4 (tried the 3rd November 2026)
+
+	current_path = "/cluster"
+	for (current_path in cluster_dt[, path])
+	{
+		lim = n_rows[current_path, n]
+		n_pages = ceiling(lim/page_size) 
+		offset = 0
+
+		p_counter = 1
+
+		full_req[[current_path]] = vector(mode = "list", length = n_pages)
+
+		while (p_counter <= n_pages)
+		{
+			full_req[[current_path]][[p_counter]] = request(endpoint) |>
+				req_url_path_append(current_path) |>
+				req_url_query(
+					limit = page_size,
+					offset = offset
+				) |>
+				req_headers(
+					apikey = apikey,
+					Accept = "application/json",
+					`Accept-Profile` = "inventory_archive"
+				) |>
+				req_throttle(capacity = 30, fill_time_s = 60, realm = current_path) |> # 30 request per minute max
+				req_perform() |>
+				resp_body_json(simplifyVector = TRUE) |>
+				setDT()
+
+			print(paste0(round(p_counter/n_pages * 100, 2), "% done for <", current_path, ">"))
+			
+			offset = p_counter*page_size
+			p_counter = p_counter + 1
+		}
+
+		full_req[[current_path]] = rbindlist(l = full_req[[current_path]], fill = TRUE, idcol = "page")
+	}
+
+	saveRDS(full_req, "../data/request_germany.rds")
+} else {
+	full_req = readRDS("../data/request_germany.rds")
 }
 ```
 
@@ -234,102 +297,3 @@ tree_dt = full_req[["/tree"]][, ..cols]
 ### Coordinates
 
 According to Sebastian Schnell (Thübingen institute) who promptly replied to my e-mail (hahaha hilarious!!!), the offset coordinates are linked to the 1 km INSPIRE grid via the column `inspire_grid_cell` in the cluster table. They do not provide the grid itself but it can be downloaded on the [Bundesamt für Kartographie und Geodäsie's website](https://gdz.bkg.bund.de/index.php/default/inspire/sonstige-inspire-themen/geographische-gitter-fur-deutschland-in-lambert-projektion-geogitter-inspire.html).
-
-```{r}
-# This example in plain R (best run in RStudio) shows conceptually
-# how to:
-# - get a list of clusters and
-# - retrieve the json tree of the data belonging to the clusters in
-#   the list from different related tables (plots, trees, ...)
-# - show the retrieved json tree as expandable view
-
-# Install necessary packages if not already installed
-if (!require(httr)) install.packages("httr", dependencies = TRUE)
-if (!require(jsonlite)) install.packages("jsonlite", dependencies = TRUE)
-if (!require(listviewer)) install.packages("listviewer", dependencies = TRUE)
-
-# Load necessary packages
-library(httr)
-library(jsonlite)
-library(listviewer)
-
-# Define the number of items, endpoints and any necessary headers
-# Number of clusters to fetch (10 might be enough for the example)
-samples <- 10
-# API base url
-base_url <- "https://ci.thuenen.de/rest/v1/"
-# API call for the list of clusters
-list_endpoint <- paste0("cluster?select=cluster_name&cluster_name=lt.", samples)
-# stub for API call for details
-detail_endpoint <- "cluster?cluster_name=eq."
-# headers for Auth and database scheme to use
-headers <- c(
-  "apikey" = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU",
-  "Accept-Profile" = "inventory_archive"
-)
-
-# Here starts the magic...
-# Helper function to call the first endpoint and get the list of cluster
-get_list <- function() {
-  response <- GET(paste0(base_url, list_endpoint), add_headers(headers))
-  if (status_code(response) == 200) {
-    return(content(response, as = "parsed", type = "application/json"))
-  } else {
-    stop("Failed to retrieve the list of items")
-  }
-}
-
-# Helper function to call the second endpoint and get details for a specific cluster
-get_details <- function(item_id) {
-  response <- GET(
-    paste0(base_url, "cluster"),
-    query = list(
-      cluster_name = paste0("eq.", item_id),
-      select = "*,plot(*,tree(*),deadwood(*),regeneration(*),structure_lt4m(*),edges(*))"
-    ),
-    add_headers(headers)
-  )
-  if (status_code(response) == 200) {
-    return(content(response, as = "parsed", type = "application/json"))
-  } else {
-    stop(paste(
-      "Failed to retrieve details for item:", item_id,
-      "- HTTP", status_code(response), "-", content(response, as = "text")
-    ))
-  }
-}
-
-# MAIN
-# Note start time
-start_time <- Sys.time()
-
-# Get the list of items
-items_list <- get_list()
-
-# measuring times just to test performance
-start_time_details <- Sys.time()
-print(paste("Downloadzeit Traktliste:", round(start_time_details - start_time, 2), "sec."))
-
-# Initialize an empty list to store the details
-details_list <- list()
-
-# Iterate over the clusters list and collect details
-for (item in items_list) {
-  item_id <- item$cluster_name # Assuming the ID field is 'id' in your JSON response
-  item_details <- get_details(item_id)
-  # Append the details to the list
-  details_list <- append(details_list, item_details)
-}
-
-# measuring times just to test performance
-start_time_view <- Sys.time()
-print(paste("Downloadzeit Details:", round(start_time_view - start_time_details, 2), "sec."))
-
-# Show the result as expandable view
-listviewer::jsonedit(details_list)
-
-# measuring times just to test performance
-end_time <- Sys.time()
-print(paste("View generiert in:", round(end_time - start_time_view, 2), "sec."))
-# Have fun!
-```
