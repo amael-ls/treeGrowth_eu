@@ -75,8 +75,8 @@ Now, few comments on how the data are collected (see @Vidal2016, chapter 21, p. 
 
 ```{r}
 #### Species list
-## list clusters
-clusters_ls = request(endpoint) |>
+## list tables in data base
+table_ls = request(endpoint) |>
 	req_headers(
 		apikey = apikey,
 		Accept = "application/json",
@@ -85,9 +85,9 @@ clusters_ls = request(endpoint) |>
 	req_perform() |>
 	resp_body_json()
 
-names(clusters_ls)
+names(table_ls)
 
-ls_paths = clusters_ls[["paths"]]
+ls_paths = table_ls[["paths"]]
 sort(names(ls_paths))
 
 species_tab_cluster = unlist(ls_paths[["/lookup_tree_species"]][["get"]][["tags"]])
@@ -144,9 +144,9 @@ This is a more complex query, and help can be found on [Thünen institute's gith
 This time, I do it on the `inventory_archive` schema. I first extract all the paths and keep the interesting ones.
 
 ```{r}
-#### List clusters
+#### List tables in data base
 ## Get all clusters
-clusters_ls = request(endpoint) |>
+table_ls = request(endpoint) |>
 	req_headers(
 		apikey = apikey,
 		Accept = "application/json",
@@ -155,24 +155,24 @@ clusters_ls = request(endpoint) |>
 	req_perform() |>
 	resp_body_json()
 
-names(clusters_ls)
+names(table_ls)
 
-ls_paths = clusters_ls[["paths"]]
+ls_paths = table_ls[["paths"]]
 sort(names(ls_paths))
 
-cluster_dt = data.table(path = names(ls_paths), extract = FALSE, key = "path")
-cluster_dt[c("/tree", "/plot", "/cluster"), extract := TRUE]
+table_dt = data.table(path = names(ls_paths), extract = FALSE, key = "path")
+table_dt[c("/tree", "/plot", "/cluster"), extract := TRUE]
 
 ## Subset to interesting clusters
-cluster_dt = cluster_dt[(extract)]
+table_dt = table_dt[(extract)]
 ```
 
 Then, I get the number of rows for each table.
 ```{r}
 #### Get dimensions
-n_rows = data.table(path = cluster_dt[, path], n = NA_integer_, key = "path")
+n_rows = data.table(path = table_dt[, path], n = NA_integer_, key = "path")
 
-for (current_path in cluster_dt[, path])
+for (current_path in table_dt[, path])
 {
 	temp = request(endpoint) |>
 	req_url_path_append(current_path) |>
@@ -198,13 +198,12 @@ Now, I query data with the provided paths. Note that the tables `tree_coordinate
 ```{r}
 if (!file.exists("../data/request_germany.rds"))
 {
-	full_req = vector(mode = "list", length = cluster_dt[, .N])
-	names(full_req) = cluster_dt[, path]
+	full_req = vector(mode = "list", length = table_dt[, .N])
+	names(full_req) = table_dt[, path]
 
 	page_size = 15000 # API limit is 2e4 (tried the 3rd November 2026)
 
-	current_path = "/cluster"
-	for (current_path in cluster_dt[, path])
+	for (current_path in table_dt[, path])
 	{
 		lim = n_rows[current_path, n]
 		n_pages = ceiling(lim/page_size) 
@@ -284,10 +283,10 @@ For the `tree` table, I want to keep the following fields:
 
 ```{r}
 cols = c("id", "inspire_grid_cell")
-coords_info = full_req[["/cluster"]][, ..cols]
+cluster_dt = full_req[["/cluster"]][, ..cols]
 
 cols = c("cluster_id", "id", "interval_name", "acquisition_date", "management_type",
-  "stand_age", "stand_structure", "terrain_slope")
+	"stand_age", "stand_structure", "terrain_slope")
 plot_dt = full_req[["/plot"]][, ..cols]
 
 cols = c("plot_id", "tree_number", "tree_species", "dbh", "dbh_height", "tree_height")
