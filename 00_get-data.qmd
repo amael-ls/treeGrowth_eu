@@ -58,6 +58,7 @@ library(data.table)
 library(jsonlite)
 library(stringi)
 library(httr2)
+library(terra)
 
 #### Common variables to all request
 endpoint = "https://ci.thuenen.de/rest/v1/"
@@ -71,11 +72,11 @@ Now, few comments on how the data are collected (see @Vidal2016, chapter 21, p. 
 3. Only 'possible forest' points are visited (orthophotos interpreted, 'definitively non-forest' are ruled-out), so at most four plots per grid cell. A point consist of a 10 m radius circle (for trees smaller than 4 m) and a radius of 25 m for terrain characteristics and forest edges. Trees larger than 4 m are sampled using a relascope sampling method. According to Lukas Heiland (old discussion) it looks like a fork (angle), and trees that are larger than this angle are counted and measured. Therefore, large trees are measured on a radius larger than small trees. There are other circles (5 m for deadwood, concentric), not necessarily at the center of the point (1 m and 2 m circles for regeneration).
 4. They measure their stuff on each circle and for each tree counted in via the relascope.
 
-### Query species list, from `lookup` schema
+### Query code meanings from `lookup` schema {#sec-lookup}
 
 ```{r}
-#### Species list
-## list tables in data base
+#### list tables in data base
+## All tables
 table_ls = request(endpoint) |>
 	req_headers(
 		apikey = apikey,
@@ -87,13 +88,17 @@ table_ls = request(endpoint) |>
 
 names(table_ls)
 
-ls_paths = table_ls[["paths"]]
-sort(names(ls_paths))
+ls_paths_lookup = table_ls[["paths"]]
+sort(names(ls_paths_lookup))
+```
 
-species_tab_cluster = unlist(ls_paths[["/lookup_tree_species"]][["get"]][["tags"]])
+#### species list
+```{r}
+#### Species list
+species_tab = unlist(ls_paths_lookup[["/lookup_tree_species"]][["get"]][["tags"]])
 
 species_info = request(endpoint) |>
-	req_url_path_append(species_tab_cluster) |>
+	req_url_path_append(species_tab) |>
 	req_headers(
 		apikey = apikey,
 		Accept = "application/json",
@@ -120,6 +125,111 @@ for (i in seq_len(n_species))
 	}
 	species_dt[i, c("nfi_code", "genus", "species") := .(species_info[[i]][["code"]], species_info[[i]][["genus"]], species_info[[i]][["species"]])]
 }
+```
+
+#### Tree status
+
+```{r}
+#### Tree status
+## General status
+tree_status_tab = unlist(ls_paths_lookup[["/lookup_tree_status"]][["get"]][["tags"]])
+
+status_info = request(endpoint) |>
+	req_url_path_append(tree_status_tab) |>
+	req_headers(
+		apikey = apikey,
+		Accept = "application/json",
+		`Accept-Profile` = "lookup"
+	) |>
+	req_perform() |>
+	resp_body_json(simplifyVector = TRUE) |>
+	setDT()
+
+status_info = status_info[, .(code, name_en)] |>
+	setkey(code)
+
+## Simplify the status
+# Sampled trees
+status_info[.(c(0, 1)), status_simplif := "sampled"]
+
+# Removed trees
+status_info[.(c(2, 3, 12)), status_simplif := "removed"]
+
+# Dead/fallen trees
+status_info[.(c(4, 5)), status_simplif := "dead_fallen"]
+
+# Invalid trees (for many reasons)
+status_info[.(c(6, 7, 8)), status_simplif := "invalid"]
+
+# Lost trees (without any trace, no stump nada wallou)
+status_info[.(9), status_simplif := "not_found"]
+
+# Not sampled trees
+status_info[.(c(10, 11, 1111)), status_simplif := "not_sampled"]
+
+# Failed trees
+status_info[.(c(2002, 2007, 2008, 2012, 2017, 2022)), status_simplif := "failed"]
+
+#### Specification for dead trees
+dead_tab = unlist(ls_paths_lookup[["/lookup_dead_wood_type"]][["get"]][["tags"]])
+
+dead_info = request(endpoint) |>
+	req_url_path_append(dead_tab) |>
+	req_headers(
+		apikey = apikey,
+		Accept = "application/json",
+		`Accept-Profile` = "lookup"
+	) |>
+	req_perform() |>
+	resp_body_json(simplifyVector = TRUE) |>
+	setDT()
+
+#### Specification for stem form and breakage
+## Form
+current_tab = unlist(ls_paths_lookup[["/lookup_stem_breakage"]][["get"]][["tags"]])
+
+break_info = request(endpoint) |>
+	req_url_path_append(current_tab) |>
+	req_headers(
+		apikey = apikey,
+		Accept = "application/json",
+		`Accept-Profile` = "lookup"
+	) |>
+	req_perform() |>
+	resp_body_json(simplifyVector = TRUE) |>
+	setDT()
+
+break_info = break_info[, .(code, name_en)] |>
+	setkey(code)
+
+# Simplify the breakage definitions
+break_info[.(0), break_simplif := "not_broken"]
+break_info[.(1), break_simplif := "broken_top"]
+break_info[.(2), break_simplif := "broken_crown"]
+
+## Breakage
+current_tab = unlist(ls_paths_lookup[["/lookup_stem_form"]][["get"]][["tags"]])
+
+form_info = request(endpoint) |>
+	req_url_path_append(current_tab) |>
+	req_headers(
+		apikey = apikey,
+		Accept = "application/json",
+		`Accept-Profile` = "lookup"
+	) |>
+	req_perform() |>
+	resp_body_json(simplifyVector = TRUE) |>
+	setDT()
+
+form_info = form_info[, .(code, name_en)] |>
+	setkey(code)
+
+# Simplify the form definitions
+form_info[.(0), form_simplif := "forked_crown"]
+form_info[.(1), form_simplif := "straight"]
+form_info[.(2), form_simplif := "forked"]
+form_info[.(3), form_simplif := "twin"]
+form_info[.(c(4, 5, 6)), form_simplif := "dead_1987"]
 ```
 
 ### Query tree data
@@ -157,10 +267,10 @@ table_ls = request(endpoint) |>
 
 names(table_ls)
 
-ls_paths = table_ls[["paths"]]
-sort(names(ls_paths))
+ls_paths_inventory = table_ls[["paths"]]
+sort(names(ls_paths_inventory))
 
-table_dt = data.table(path = names(ls_paths), extract = FALSE, key = "path")
+table_dt = data.table(path = names(ls_paths_inventory), extract = FALSE, key = "path")
 table_dt[c("/tree", "/plot", "/cluster"), extract := TRUE]
 
 ## Subset to interesting clusters
@@ -244,28 +354,29 @@ if (!file.exists("../data/request_germany.rds"))
 } else {
 	full_req = readRDS("../data/request_germany.rds")
 }
+
+qq = full_req[["/plot"]]
+sort(colnames(qq))
 ```
 
-#### Step 3: Format the extracted data
+#### Step 3: Format the extracted data and merge
 
 For the `cluster` table, I want to keep the following fields:
 
-- id
+- id: The id of the cluster!
 - inspire_grid_cell
 
 For the `plot` table, I want to keep the following fields:
 
-- plot_id
-- tree_number
-- tree_status
-- tree_species
-- dbh
-- dbh_height
-- tree_height
-- stem_height
-- tree_age
-- stem_breakage
-- stem_form
+- cluster_id
+- plot_name
+- id: The id of the plot, NOT cluster! However, there are different ids for a single `plot_name`! I think the `id` changes with the cycle, and is a unique identifier, while `plot_name` is carrying through cycles.
+- interval_name
+- acquisition_date
+- management_type
+- stand_age
+- stand_structure
+- terrain_slope
 
 For the `tree` table, I want to keep the following fields:
 
@@ -282,17 +393,192 @@ For the `tree` table, I want to keep the following fields:
 - stem_form
 
 ```{r}
-cols = c("id", "inspire_grid_cell")
-cluster_dt = full_req[["/cluster"]][, ..cols]
+cols = c("id", "inspire_grid_cell", "is_training")
+cluster_dt = full_req[["/cluster"]][, ..cols] |>
+	setnames(old = "id", new = "cluster_id")
 
-cols = c("cluster_id", "id", "interval_name", "acquisition_date", "management_type",
+check_na = cluster_dt[is.na(inspire_grid_cell), all(is_training)] &&
+	cluster_dt[!is.na(inspire_grid_cell), !any(is_training)]
+
+if (check_na)
+{
+	print("NAs in cluster_dt are only for the clusters that were used for training")
+} else {
+	warning("I thought that NAs in cluster_dt were only used for 'training' type, but it is not the case")
+}
+
+cols = c("cluster_id", "plot_name", "id", "interval_name", "acquisition_date", "management_type",
 	"stand_age", "stand_structure", "terrain_slope")
-plot_dt = full_req[["/plot"]][, ..cols]
+plot_dt = full_req[["/plot"]][, ..cols] |>
+	setnames(old = "id", new = "plot_id") |>
+	merge.data.table(y = cluster_dt, by = "cluster_id")
 
-cols = c("plot_id", "tree_number", "tree_species", "dbh", "dbh_height", "tree_height")
-tree_dt = full_req[["/tree"]][, ..cols]
+cols = c("plot_id", "tree_number", "tree_species", "tree_status", "dbh", "dbh_height", "tree_height",
+	"stem_height", "tree_age", "stem_breakage", "stem_form", "damage_dead", "deadwood_used")
+tree_dt = full_req[["/tree"]][, ..cols] |>
+	merge.data.table(plot_dt, by = "plot_id")
 ```
 
-### Coordinates
+### Get coordinates
 
 According to Sebastian Schnell (Thübingen institute) who promptly replied to my e-mail (hahaha hilarious!!!), the offset coordinates are linked to the 1 km INSPIRE grid via the column `inspire_grid_cell` in the cluster table. They do not provide the grid itself but it can be downloaded on the [Bundesamt für Kartographie und Geodäsie's website](https://gdz.bkg.bund.de/index.php/default/inspire/sonstige-inspire-themen/geographische-gitter-fur-deutschland-in-lambert-projektion-geogitter-inspire.html).
+
+Therefore, I only need to use the column `inspire_grid_cell` from `tree_dt` and then extract the coordinates from the geopackage file, using the `id`, which as the exact same format as `inspire_grid_cell`, such as 1kmN579E47. Then, I choose to associate the middle coordinate of the grid cell, `(x_mp, y_mp)` to the clusters, and therefore the plots.
+
+```{r}
+#### Add coordinates to tree_dt
+## Load Deutschland 1km resolution, EPSG 3035 from Bundesamt für Kartographie und Geodäsie
+deutschland = vect("../data/DE_Grid_ETRS89-LAEA_1km.gpkg/geogitter/DE_Grid_ETRS89-LAEA_1km.gpkg")
+info = as.data.table(crs(deutschland, describe = TRUE))
+info[, .(authority, code)]
+
+coords = as.data.table(deutschland)[, .(id, x_mp, y_mp)] |>
+	setnames(old = c("x_mp", "y_mp"), new = c("x_epsg_3035", "y_epsg_3035")) 
+
+## Merge
+tree_dt = merge.data.table(tree_dt, coords, by.x = "inspire_grid_cell", by.y = "id", all.x = TRUE)
+
+## Check missing data
+check_na = tree_dt[is.na(x_epsg_3035), all(is_training)] &&
+	tree_dt[!is.na(x_epsg_3035), !any(is_training)]
+
+if (check_na)
+{
+	print("All the NAs coordinates are for the training plots")
+} else {
+	warning("I thought that NAs were only for 'training' plots, but it is not the case")
+}
+
+## Remove missing coordinates
+tree_dt = tree_dt[!(is_training)]
+```
+
+### Add information
+
+Columns that have codes, such as `tree_species`, are explained in the `lookup` schema. I already gathered the necessary data in @sec-lookup and only need to merge them in what follows.
+
+#### Tree status
+
+The column `tree_status` contains codes that describe the status of the tree. The codes 0 and 1 potentially contains dead trees! I expect NAs in dbh when the tree is dead. All the other codes will be discarded later.
+
+```{r}
+tree_dt = merge.data.table(tree_dt, status_info[, .(code, status_simplif)],
+	by.x = "tree_status", by.y = "code", all.x = TRUE)
+```
+
+#### Species name
+
+```{r}
+#### Add species
+## Merge genus and species
+species_dt[, speciesName_sci := paste(genus, species)] |>
+	setkey(speciesName_sci)
+
+## Merge data tables
+tree_dt = merge.data.table(tree_dt, species_dt[, .(nfi_code, speciesName_sci, genus)],
+	by.x = "tree_species", by.y = "nfi_code", all.x = TRUE)
+
+## Check NAs
+check_na = "sampled" %notin% tree_dt[is.na(speciesName_sci), unique(status_simplif)]
+
+if (check_na)
+{
+	print("All the sampled trees have a species specified")
+	tree_dt = tree_dt[!is.na(speciesName_sci)]
+} else {
+	warning("Not all sampled trees have a specified species. Check these NAs!!")
+}
+```
+
+#### Breakage and form
+
+```{r}
+#### Add breakage and form information
+tree_dt = merge.data.table(tree_dt, form_info[, .(code, form_simplif)],
+	by.x = "stem_form", by.y = "code", all.x = TRUE)
+
+tree_dt = merge.data.table(tree_dt, break_info[, .(code, break_simplif)],
+	by.x = "stem_breakage", by.y = "code", all.x = TRUE)
+
+## Remove the forms that are 4, 5, or 6 as these are dead trees (1987 inventory west Germany)
+tree_dt = tree_dt[stem_form %notin% c(4, 5, 6)]
+
+## Check NAs in breakage
+check_na = ("sampled" %notin% tree_dt[is.na(break_simplif), table(status_simplif)]) &&
+	(tree_dt[is.na(break_simplif), .N] != 0)
+
+if (check_na | tree_dt[is.na(break_simplif), .N] == 0)
+{
+	print("None of the trees with missing break information were sampled")
+	tree_dt = tree_dt[!is.na(break_simplif)]
+} else {
+	warning("Some sampled trees have missing breakage information. Check these NAs!!")
+}
+```
+
+### Check diameters at breast height NAs
+
+There are `NAs` in the dbh. I found that sampled trees all have a dbh
+
+```{r}
+#### Check NAs in dbh
+check_na = ("sampled" %notin% tree_dt[is.na(dbh), unique(status_simplif)]) &&
+	(tree_dt[is.na(dbh), .N] != 0)
+
+if (check_na | tree_dt[is.na(dbh), .N] == 0)
+{
+	print("All the sampled trees have a dbh measured")
+	tree_dt = tree_dt[!is.na(dbh)]
+} else {
+	warning("Not all sampled trees have a measured dbh. Check these NAs!!")
+}
+```
+
+### Prepare coordinates for Jonathan
+
+Following Jonathan's advice, I focus on two species, *Fagus sylvatica* and *Picea abies*. I subset `tree_dt` to these to species and decided to:
+
+1. Keep non-broken trees only
+2. Keep only straight and crown-forked trees. I remove twins and forked, as they probably have different growing responses, and NAs for uncertainty
+3. Keep trees measured at least twice
+
+```{r}
+# lala = copy(tree_dt)
+# tree_dt = copy(lala)
+
+#### Subsetting...
+## ... at the species level
+tree_dt = tree_dt[speciesName_sci %in% c("Fagus sylvatica", "Picea abies")]
+
+## ...at the tree form level
+tree_dt[, .N, by = .(speciesName_sci, form_simplif)]
+tree_dt = tree_dt[form_simplif %in% c("straight", "forked_crown")]
+
+## ...at the health level
+tree_dt[, .N, by = .(speciesName_sci, break_simplif)]
+tree_dt = tree_dt[break_simplif %in% c("not_broken")]
+
+## ... at the measurement level
+tree_dt[, n_measure := .N, by = .(cluster_id, plot_name, tree_number)]
+
+cls = "2257b996-4fd1-42d7-9664-cc2adb2ed47b" # cluster_id
+
+setkey(tree_dt, cluster_id, plot_name)
+aa = tree_dt[cls, .(cluster_id, plot_name, interval_name, tree_number, dbh, genus, acquisition_date)] |>
+	setkey(cluster_id, plot_name, tree_number, acquisition_date)
+
+tree_dt = tree_dt[n_measure > 1]
+tree_dt[, n_measure := NULL]
+
+coords_jonathan = vect(unique(tree_dt[, .(x_epsg_3035, y_epsg_3035)]),
+	geom = c("x_epsg_3035", "y_epsg_3035"),
+	crs = paste(info[, authority], info[, code], sep = ":"))
+
+filename = "../data/coords_jonathan-deutschland.gpkg"
+if (!file.exists(filename))
+{
+	writeVector(coords_jonathan, filename, overwrite = FALSE, options = "ENCODING=UTF-8")
+} else{
+	coords_jonathan = vect(filename)
+}
+```
