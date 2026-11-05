@@ -354,9 +354,6 @@ if (!file.exists("../data/request_germany.rds"))
 } else {
 	full_req = readRDS("../data/request_germany.rds")
 }
-
-qq = full_req[["/plot"]]
-sort(colnames(qq))
 ```
 
 #### Step 3: Format the extracted data and merge
@@ -521,7 +518,8 @@ if (check_na | tree_dt[is.na(break_simplif), .N] == 0)
 There are `NAs` in the dbh. I found that sampled trees all have a dbh
 
 ```{r}
-#### Check NAs in dbh
+#### Check NAs...
+## ...in dbh
 check_na = ("sampled" %notin% tree_dt[is.na(dbh), unique(status_simplif)]) &&
 	(tree_dt[is.na(dbh), .N] != 0)
 
@@ -532,22 +530,35 @@ if (check_na | tree_dt[is.na(dbh), .N] == 0)
 } else {
 	warning("Not all sampled trees have a measured dbh. Check these NAs!!")
 }
+
+## ..in acquisition date
+tree_dt = tree_dt[!is.na(acquisition_date)]
 ```
 
 ### Prepare coordinates for Jonathan
 
-Following Jonathan's advice, I focus on two species, *Fagus sylvatica* and *Picea abies*. I subset `tree_dt` to these to species and decided to:
+Following Jonathan's advice, I focus on two species, *Fagus sylvatica* and *Picea abies*. I subset `tree_dt` to these to species and decided to keep:
 
-1. Keep non-broken trees only
-2. Keep only straight and crown-forked trees. I remove twins and forked, as they probably have different growing responses, and NAs for uncertainty
-3. Keep trees measured at least twice
+1. Non-broken trees only and not 'damaged dead'
+2. Only straight and crown-forked trees. I remove twins and forked, as they probably have different growing responses, and NAs for uncertainty
+3. Trees measured at least twice (after filtering for everyhting else!)
+4. Tree with diameter measured at breast height (130 cm)
+5. Trees that are consistent in terms of species
 
 ```{r}
 # lala = copy(tree_dt)
 # tree_dt = copy(lala)
 
 #### Subsetting...
-## ... at the species level
+## ...at the breast height level (only keep 1.3 m)
+tree_dt = tree_dt[dbh_height == 130]
+
+## ... at the species level (1 species per id, subset to Fag syl and Pic abi)
+tree_dt[, unique_id := paste(cluster_id, plot_name, tree_number, sep = "_")]
+tree_dt[, check_sp := length(unique(speciesName_sci)), by = unique_id]
+tree_dt = tree_dt[check_sp == 1]
+tree_dt[, check_sp := NULL]
+
 tree_dt = tree_dt[speciesName_sci %in% c("Fagus sylvatica", "Picea abies")]
 
 ## ...at the tree form level
@@ -558,17 +569,34 @@ tree_dt = tree_dt[form_simplif %in% c("straight", "forked_crown")]
 tree_dt[, .N, by = .(speciesName_sci, break_simplif)]
 tree_dt = tree_dt[break_simplif %in% c("not_broken")]
 
+tree_dt = tree_dt[!(damage_dead)]
+
 ## ... at the measurement level
 tree_dt[, n_measure := .N, by = .(cluster_id, plot_name, tree_number)]
 
-cls = "2257b996-4fd1-42d7-9664-cc2adb2ed47b" # cluster_id
-
-setkey(tree_dt, cluster_id, plot_name)
-aa = tree_dt[cls, .(cluster_id, plot_name, interval_name, tree_number, dbh, genus, acquisition_date)] |>
-	setkey(cluster_id, plot_name, tree_number, acquisition_date)
-
 tree_dt = tree_dt[n_measure > 1]
 tree_dt[, n_measure := NULL]
+
+# zozo = copy(tree_dt)
+# tree_dt = copy(zozo)
+```
+
+### Save the tree data
+
+Before saving, I compute growth and check if growth is positive? Given that trees are meaured every ten years, it is unlikely to get negative growth due to small tape error and size variation due to water content in the trunk. Therefore, negative growth will likely come from extreme error or extreme events (hole in the trunk, peeled bark, other stuff?). Given that I filtered to 'healthy trees', I think negative growth can therefore only come from 'extreme errors' (i.e., typo), and not from the 'routine error' (tape variation in position and extension).
+
+```{r}
+#### Check-up negative growth
+## Compute growth
+# Order trees by unique id and date for computation
+setkey(tree_dt, unique_id, acquisition_date)
+
+# Remove some columns, sort out. stem_height is almost NA 92% of the time...
+rm_cols = c("stem_breakage", "stem_form", "tree_species", "tree_status",
+	"inspire_grid_cell", "plot_id", "dbh_height", "damage_dead",
+	"deadwood_used", "is_training", "status_simplif", "stem_height")
+
+tree_dt[, (rm_cols) := NULL] |> setcolorder()
 
 coords_jonathan = vect(unique(tree_dt[, .(x_epsg_3035, y_epsg_3035)]),
 	geom = c("x_epsg_3035", "y_epsg_3035"),
@@ -577,7 +605,7 @@ coords_jonathan = vect(unique(tree_dt[, .(x_epsg_3035, y_epsg_3035)]),
 filename = "../data/coords_jonathan-deutschland.gpkg"
 if (!file.exists(filename))
 {
-	writeVector(coords_jonathan, filename, overwrite = FALSE, options = "ENCODING=UTF-8")
+	writeVector(coords_jonathan, filename, overwrite = TRUE, options = "ENCODING=UTF-8")
 } else{
 	coords_jonathan = vect(filename)
 }
