@@ -581,7 +581,7 @@ tree_dt[, n_measure := NULL]
 # tree_dt = copy(zozo)
 ```
 
-### Save the tree data
+### Save the German tree data set
 
 Before saving, I compute growth and check if growth is positive? Given that trees are meaured every ten years, it is unlikely to get negative growth due to small tape error and size variation due to water content in the trunk. Therefore, negative growth will likely come from extreme error or extreme events (hole in the trunk, peeled bark, other stuff?). Given that I filtered to 'healthy trees', I think negative growth can therefore only come from 'extreme errors' (i.e., typo), and not from the 'routine error' (tape variation in position and extension).
 
@@ -598,6 +598,22 @@ rm_cols = c("stem_breakage", "stem_form", "tree_species", "tree_status",
 
 tree_dt[, (rm_cols) := NULL] |> setcolorder()
 
+# Compute growth, assuming increasing order in time within individuals
+if (!isTRUE(all.equal(key(tree_dt), c("unique_id", "acquisition_date"))))
+	stop("tree_dt must be sorted by individual and time within individuals")
+
+tree_dt[, acquisition_date := as.Date(acquisition_date, format = "%Y-%m-%d")]
+
+tree_dt[, delta_dbh_mm := (dbh - data.table::shift(x = dbh, n = 1, type = "lag")), by = unique_id]
+tree_dt[, delta_t_year := difftime(acquisition_date,
+		data.table::shift(x = acquisition_date, n = 1, type = "lag"), unit = "days")/365.25,
+	by = unique_id]
+
+tree_dt[, delta_t_year := as.numeric(delta_t_year)]
+
+tree_dt[, annual_growth_mm := delta_dbh_mm/delta_t_year]
+
+## Extract coordinates of the final dataset
 coords_jonathan = vect(unique(tree_dt[, .(x_epsg_3035, y_epsg_3035)]),
 	geom = c("x_epsg_3035", "y_epsg_3035"),
 	crs = paste(info[, authority], info[, code], sep = ":"))
@@ -609,4 +625,9 @@ if (!file.exists(filename))
 } else{
 	coords_jonathan = vect(filename)
 }
+```
+
+### Few plots
+
+```{r}
 ```
