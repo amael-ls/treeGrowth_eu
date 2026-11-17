@@ -2,21 +2,42 @@
 title: "Downloading data"
 subtitle: "Different process depending on the country"
 date: "`r Sys.Date()`"
+knitr:
+    opts_chunk: 
+        dev: ragg_png
+        crop: null
+        out.width: "70%"
+        fig.width: 6
+        fig.asp: 0.618
+        fig.align: "center"
+pdf-engine: lualatex
+bibliography: /home/ALe-Squin/work/library/bib_file/references.bib
+lightbox:
+    match: auto
 format:
     pdf: default
     html: 
         self-contained: true
+        toc: true
+        number-sections: true
+        theme:
+            light: cerulean
+            dark: darkly
         grid: 
             margin-width: 350px
 execute: 
-    echo: fenced
+    error: true
+    warning: false
+    message: false
+    cache: true
+    freeze: auto
 reference-location: margin
 citation-location: margin
 ---
 
 ## Introduction
 
-Depending on the target country, there are different ways of downloading the data. For Germany, there is a RESTful API, that I am going to explain and then use. For France? For Sweden?
+Depending on the target country, there are different ways of downloading the data. For Germany, there is a RESTful API, that I am going to explain and then use. For France, I will use the internal package and also the external dataset where I can access the remeaured trees. Lastly, for Sweden I asked for an extraction by e-mail as their website only samples of their whole dataset. However, for Sweden, there is an interesting tree-ring dataset that is cross-dated! There is no such thing for France so far, although Jonathan might start a dataset on French NFI plots. We might also be able to crossdate some cores from the XyloDensMap project.
 
 ## Germany
 
@@ -27,7 +48,7 @@ The API requires an API key to be passed in the header of each request. The API 
 Credentials can be found on [Github](https://github.com/Thuenen-Forest-Ecosystems/TFM-Documentation/blob/9be1fb16a529cec4d1687f21b3f0040d442bb194/.vitepress/theme/config.js) too, and display the following keys in a json format:
 
 ```{js}
-/// Export credentials
+// Export credentials
 
 export const config = {
 	PUBLIC_SUPABASE_BUCKET: "tfm",
@@ -75,6 +96,7 @@ Now, few comments on how the data are collected (see @Vidal2016, chapter 21, p. 
 ### Query code meanings from `lookup` schema {#sec-lookup}
 
 ```{r}
+#| output: false
 #### list tables in data base
 ## All tables
 table_ls = request(endpoint) |>
@@ -254,6 +276,7 @@ This is a more complex query, and help can be found on [Thünen institute's gith
 This time, I do it on the `inventory_archive` schema. I first extract all the paths and keep the interesting ones.
 
 ```{r}
+#| output: false
 #### List tables in data base
 ## Get all clusters
 table_ls = request(endpoint) |>
@@ -625,9 +648,42 @@ if (!file.exists(filename))
 } else{
 	coords_jonathan = vect(filename)
 }
+
+filename = "../data/tree-de.rds"
+if (!file.exists(filename))
+{
+	saveRDS(tree_dt, filename)
+} else{
+	tree_dt = readRDS(filename)
+}
 ```
 
 ### Few plots
 
 ```{r}
+rg = tree_dt[, quantile(annual_growth_mm, na.rm = TRUE, prob = c(0.005, 0.995))]
+data_plot = tree_dt[(rg["0.5%"] < annual_growth_mm) & (annual_growth_mm < rg["99.5%"])]
+
+dens_fagSyl = density(data_plot[speciesName_sci == "Fagus sylvatica", annual_growth_mm])
+dens_picAbi = density(data_plot[speciesName_sci == "Picea abies", annual_growth_mm])
+
+colours = c(fagSyl = "#FAB255", picAbi = "#0F7BA2")
+
+x_rg = range(dens_fagSyl$x, dens_picAbi$x)
+y_rg = range(dens_fagSyl$y, dens_picAbi$y)
+
+plot(dens_fagSyl$x, dens_fagSyl$y, xlim = x_rg, ylim = y_rg, axes = FALSE,
+	xlab = "Annual growth (in mm/yr)", ylab = "Density",
+	col = colours["fagSyl"], lwd = 3, type = "l")
+
+polygon(c(dens_fagSyl$x, rev(dens_fagSyl$x)),
+	c(dens_fagSyl$y, rep(0, length(dens_fagSyl$y))), col = paste0(colours["fagSyl"], 66), lty = 0)
+
+lines(dens_picAbi$x, dens_picAbi$y, lwd = 3)
+
+polygon(c(dens_picAbi$x, rev(dens_picAbi$x)),
+	c(dens_picAbi$y, rep(0, length(dens_picAbi$y))), col = paste0(colours["picAbi"], 66), lty = 0)
+
+axis(1)
+axis(2, las = 1)
 ```
