@@ -4,7 +4,6 @@ subtitle: "Different process depending on the country"
 date: "`r Sys.Date()`"
 knitr:
     opts_chunk: 
-        dev: ragg_png
         crop: null
         out.width: "70%"
         fig.width: 6
@@ -78,8 +77,10 @@ options(max.print = 500)
 library(data.table)
 library(jsonlite)
 library(stringi)
+library(readxl)
 library(httr2)
 library(terra)
+library(gt)
 
 #### Common variables to all request
 endpoint = "https://ci.thuenen.de/rest/v1/"
@@ -103,7 +104,7 @@ table_ls = request(endpoint) |>
 	req_headers(
 		apikey = apikey,
 		Accept = "application/json",
-		`Accept-Profile` = "lookup" 
+		`Accept-Profile` = "lookup"
 	) |>
 	req_perform() |>
 	resp_body_json()
@@ -413,6 +414,7 @@ For the `tree` table, I want to keep the following fields:
 - stem_form
 
 ```{r}
+#| results: hold
 cols = c("id", "inspire_grid_cell", "is_training")
 cluster_dt = full_req[["/cluster"]][, ..cols] |>
 	setnames(old = "id", new = "cluster_id")
@@ -446,6 +448,7 @@ According to Sebastian Schnell (Thübingen institute) who promptly replied to my
 Therefore, I only need to use the column `inspire_grid_cell` from `tree_dt` and then extract the coordinates from the geopackage file, using the `id`, which as the exact same format as `inspire_grid_cell`, such as 1kmN579E47. Then, I choose to associate the middle coordinate of the grid cell, `(x_mp, y_mp)` to the clusters, and therefore the plots.
 
 ```{r}
+#| results: hold
 #### Add coordinates to tree_dt
 ## Load Deutschland 1km resolution, EPSG 3035 from Bundesamt für Kartographie und Geodäsie
 deutschland = vect("../data/DE_Grid_ETRS89-LAEA_1km.gpkg/geogitter/DE_Grid_ETRS89-LAEA_1km.gpkg")
@@ -541,6 +544,7 @@ if (check_na | tree_dt[is.na(break_simplif), .N] == 0)
 There are `NAs` in the dbh. I found that sampled trees all have a dbh
 
 ```{r}
+#| results: hold
 #### Check NAs...
 ## ...in dbh
 check_na = ("sampled" %notin% tree_dt[is.na(dbh), unique(status_simplif)]) &&
@@ -560,7 +564,7 @@ tree_dt = tree_dt[!is.na(acquisition_date)]
 
 ### Prepare coordinates for Jonathan
 
-Following Jonathan's advice, I focus on two species, *Fagus sylvatica* and *Picea abies*. I subset `tree_dt` to these to species and decided to keep:
+Following Jonathan's advice, I should focus on two species, *Fagus sylvatica* and *Picea abies*. However, in case of, I decided to prepare the dataset for 7 species: *Abies alba*, *Betula pendula*, *Fagus sylvatica*, *Picea abies*, *Pinus sylvestris*, *Quercus robur*, and *Quercus petraea*. Incidentally, these are the seven most common species in Germany! I know that it will be quite similar in France, and I guess that the Swedish NFI will have mostly *Betula pendula*, *Picea abies*, and *Pinus sylvestris* I subset `tree_dt` to these seven species and decided to keep:
 
 1. Non-broken trees only and not 'damaged dead'
 2. Only straight and crown-forked trees. I remove twins and forked, as they probably have different growing responses, and NAs for uncertainty
@@ -569,6 +573,7 @@ Following Jonathan's advice, I focus on two species, *Fagus sylvatica* and *Pice
 5. Trees that are consistent in terms of species
 
 ```{r}
+#| output: false
 # lala = copy(tree_dt)
 # tree_dt = copy(lala)
 
@@ -576,13 +581,15 @@ Following Jonathan's advice, I focus on two species, *Fagus sylvatica* and *Pice
 ## ...at the breast height level (only keep 1.3 m)
 tree_dt = tree_dt[dbh_height == 130]
 
-## ... at the species level (1 species per id, subset to Fag syl and Pic abi)
+## ... at the species level (1 species per id, subset to 7 species of interest)
 tree_dt[, unique_id := paste(cluster_id, plot_name, tree_number, sep = "_")]
 tree_dt[, check_sp := length(unique(speciesName_sci)), by = unique_id]
 tree_dt = tree_dt[check_sp == 1]
 tree_dt[, check_sp := NULL]
 
-tree_dt = tree_dt[speciesName_sci %in% c("Fagus sylvatica", "Picea abies")]
+keep_species = c("Abies alba", "Betula pendula", "Fagus sylvatica", "Picea abies", "Pinus sylvestris",
+	"Quercus robur", "Quercus petraea")
+tree_dt = tree_dt[speciesName_sci %in% keep_species]
 
 ## ...at the tree form level
 tree_dt[, .N, by = .(speciesName_sci, form_simplif)]
@@ -661,29 +668,186 @@ if (!file.exists(filename))
 ### Few plots
 
 ```{r}
+#| fig-cap: Species-specific densities of annual growth in mm/yr
+#| label: fig-densities_de
+#| fig-subcap: 
+#|   - Broadleaves
+#|   - Conifers
+#| layout-ncol: 2
+#### Species specific plots of density
 rg = tree_dt[, quantile(annual_growth_mm, na.rm = TRUE, prob = c(0.005, 0.995))]
 data_plot = tree_dt[(rg["0.5%"] < annual_growth_mm) & (annual_growth_mm < rg["99.5%"])]
 
-dens_fagSyl = density(data_plot[speciesName_sci == "Fagus sylvatica", annual_growth_mm])
-dens_picAbi = density(data_plot[speciesName_sci == "Picea abies", annual_growth_mm])
+densities_sp = data_plot[, {
+	d = density(annual_growth_mm)
+	.(x = d$x, y = d$y)
+}, by = speciesName_sci] |>
+	setkey(speciesName_sci)
 
-colours = c(fagSyl = "#FAB255", picAbi = "#0F7BA2")
+ls_colours = MetBrewer::met.brewer(name = "Archambault", n = 7, type = "discrete")[1:7]
+names(ls_colours) = keep_species
 
-x_rg = range(dens_fagSyl$x, dens_picAbi$x)
-y_rg = range(dens_fagSyl$y, dens_picAbi$y)
+x_rg = densities_sp[, range(x)]
+y_rg = densities_sp[, range(y)]
 
-plot(dens_fagSyl$x, dens_fagSyl$y, xlim = x_rg, ylim = y_rg, axes = FALSE,
-	xlab = "Annual growth (in mm/yr)", ylab = "Density",
-	col = colours["fagSyl"], lwd = 3, type = "l")
+## Broadleaves
+broadleaves = c("Betula pendula", "Fagus sylvatica", "Quercus robur", "Quercus petraea")
 
-polygon(c(dens_fagSyl$x, rev(dens_fagSyl$x)),
-	c(dens_fagSyl$y, rep(0, length(dens_fagSyl$y))), col = paste0(colours["fagSyl"], 66), lty = 0)
+plot(0, type = "n", xlim = x_rg, ylim = y_rg, axes = FALSE,
+	xlab = "Annual growth (in mm/yr)", ylab = "Density")
 
-lines(dens_picAbi$x, dens_picAbi$y, lwd = 3)
+for(sp in broadleaves)
+{
+	lines(densities_sp[.(sp), x], densities_sp[.(sp), y], lwd = 4, col = ls_colours[sp])
+	polygon(c(densities_sp[.(sp), x], rev(densities_sp[.(sp), x])),
+		c(densities_sp[.(sp), y], rep(0, length(densities_sp[.(sp), y]))),
+		col = paste0(ls_colours[sp], 66), lty = 0)
+}
 
-polygon(c(dens_picAbi$x, rev(dens_picAbi$x)),
-	c(dens_picAbi$y, rep(0, length(dens_picAbi$y))), col = paste0(colours["picAbi"], 66), lty = 0)
+legend("topright", legend = broadleaves, fill = ls_colours[broadleaves], bty = "n")
+axis(1)
+axis(2, las = 1)
 
+## Conifers
+conifers = c("Abies alba", "Picea abies", "Pinus sylvestris")
+
+plot(0, type = "n", xlim = x_rg, ylim = y_rg, axes = FALSE,
+	xlab = "Annual growth (in mm/yr)", ylab = "Density")
+
+for(sp in conifers) # Conifers
+{
+	lines(densities_sp[.(sp), x], densities_sp[.(sp), y], lwd = 4, col = ls_colours[sp])
+	polygon(c(densities_sp[.(sp), x], rev(densities_sp[.(sp), x])),
+		c(densities_sp[.(sp), y], rep(0, length(densities_sp[.(sp), y]))),
+		col = paste0(ls_colours[sp], 66), lty = 0)
+}
+
+legend("topright", legend = conifers, fill = ls_colours[conifers], bty = "n")
 axis(1)
 axis(2, las = 1)
 ```
+
+## Sweden
+
+The tree-level Swedish NFI data are not available for download (see the [microdata for download](https://www.slu.se/en/about-slu/organisation/departments/forest-resource-management/miljoanalys/nfi/our-data/)) and must be requested by e-mail.
+
+::: {.callout-tip}
+## E-mail from the 17th November 2026
+
+Dear Per Erik Vikberg and Bertil Westerlund,
+
+my name is Amaël Le Squin, and I work for the French National Forest Inventory. I currently have a research project spanning on three National Forest Inventories (Sweden, Germany, and France) and targeting six tree species (Abies alba, Fagus sylvatica, Picea abies, Pinus sylvestris, Quercus petraea, and Quercus robur).
+
+I would like to develop a state-space model for these species using individual-based NFI data. The aim of this model would be to ‘fill the gaps’ between two censuses, and to compare the predicted unobserved growth increments with tree-ring width data taken either on the same plots or plots not too far away. Therefore, I am interested in:
+
+1. the raw data at the tree-leve from the Swedish NFI:
+	- tree_id,
+	- plot_id,
+	- species,
+	- diameter at breast height,
+	- height,
+	- tree damage/status (alive, dead, …),
+	- plot coordinates (blurred are enough, I do not need exact coordinates), that I will use to extract tree-ring width from ITRDB,
+	- Some metadata on plots, such as slope, orientation, etc
+2. The tree ring dataset:
+	- I found online a tree ring dataset, that would be very valuable for my project as you could guess. Could you also send the complete dataset? I also have few questions on this dataset:
+		a. Do you have a variable indicating if the pith is reached?
+		b. I think you provide ‘double ring width’, can you confirm that if I divide all the data by two, then it is the radial ring width?
+
+If you have any documentation in English for the columns, could you also kindly provide them? I already have the book from Vidal et al. (2016, see below for citations), to have a global overview of the Swedish NFI protocol.
+
+Lastly on this topic, do you confirm that the information to cite the Swedish data are up to date on the NFI research support page?
+
+Finally, I have a subsidiary question (unrelated to the above-described project): we recently submitted a paper on above-ground tree volume (currently with editor), and I was wondering if you have any dataset that contains above-ground volumes or detailed volumes as Didion et al 2024 (see below for citation). We are planning to publish a similar dataset (with less trees) for France (see below for citation, restricted access during peer-reviewing). If you do, then I would be interested in testing my model on a subsample (or the whole) dataset. What I would need are three columns: Species, Bole volume, Above-ground volume and to know briefly how trees were sampled (France and Switzerland have biased datasets towards elongated trees, and are not representative of the forest). This dataset would not be published/used with our article. It is more a sanity check on my own.
+
+Many thanks for your help and please, do not hesitate to contact me if you have any further question. I am available by e-mail, Teams, or phone call at +33 (0)3 57 29 15 18.
+
+Sincerely,
+Amaël Le Squin
+
+#### Bibliography {.unnumbered}
+
+Anonymous, X. (2026). Code and data for Dynamic allometry for scaling bole volume to above-ground tree volume (Version 1.0.0). Zenodo. https://doi.org/10.5281/zenodo.22962193
+
+Didion, M., Herold, A., Thürig, E., Topuz, S., Vulovic, Z., Abegg, M., … Glatthorn, J. (2024). A dataset of 40’000 trees with section-wise measured stem diameter and branch volume from across Switzerland. Scientific Data, 11(1), 476. https://doi.org/10.1038/s41597-024-03336-7
+
+Vidal, C., Alberdi, I. A., Mateo, L. H., & Redmon, J. J. (Eds.). (2016). National Forest Inventories, Assessment of Wood Availability and Use. Springer Cham. https://doi.org/10.1007/978-3-319-44015-6
+
+:::
+
+For citing the data, check the [research support page](https://www.slu.se/en/about-slu/organisation/departments/forest-resource-management/miljoanalys/nfi/our-data/research-support/).
+
+Waiting for the data, I start programing on the tree-ring dataset.
+
+```{r}
+#### Load the Swedish NFI tree ring-width dataset
+## Set path
+data_path = "../data/"
+rw_name_se = paste0(data_path, "arsringsdata.xlsx")
+
+## Get sheet names
+excel_sheets(path = rw_name_se)
+
+## Metadata are in "Årsringsdata" sheet
+metadata = read_excel(rw_name_se, sheet = "Årsringsdata", range = "N21:O30") |>
+	setDT() |>
+	setnames(new = c("variable", "definition"))
+```
+
+The first sheet contains metadata on the columns' name:
+
+```{r}
+gt(metadata) |>
+	tab_header(title = "Column explanation in English") |>
+	tab_source_note(source_note = md("Source: [Microdata for download](https://www.slu.se/en/about-slu/organisation/departments/forest-resource-management/miljoanalys/nfi/our-data/), accessed the 17th November 2026")) |>
+	cols_label(
+		variable = "Variable",
+		definition = "Definition") |>
+	# opt_table_lines(extent = "none") |>
+	tab_style(
+		locations = cells_column_labels(columns = everything()),
+		style = list(
+			cell_text(color = "#0F7BA2", weight = "bold")
+		)
+	) |> tab_options(
+		table.border.top.style = "none",
+		table.border.bottom.style = "none", 
+		heading.border.bottom.style = "none",
+		column_labels.border.top.style = "none",
+		table_body.hlines.style = "none") |>
+	opt_interactive(use_highlight = TRUE, use_pagination = FALSE)
+```
+
+I now do the extraction on the second sheet, rename the columns accordingly to the metadata, and reshape them using `data.table::melt`.
+
+::: {.callout-warning}
+
+They reported double ring-width in order to compute increments in diameter, so I need to divide all the data by 2 to get the radial increment (cf my e-mail).
+
+:::
+
+```{r}
+## Get and reshape ring-width data with year (and not ordered from bark to pith)
+filename = paste0(data_path, "reshape_ring-width_sweden.rds")
+if (!file.exists(filename))
+{
+	rw_data = read_excel(rw_name_se, sheet = "efter årtal", skip = 2) |>
+		setDT() |>
+		setnames(old = c("TradInventeringID", "Inventeringsår", "Ägoslag", "Trädslag",
+			"Diameter", "Länsdelskod", "Länsdel", "Kommun"),
+		new = c("unique_id", "inventory_year", "landuse", "speciesName_se",
+			"dbh", "countyCode", "countyName", "municipality")) |>
+		data.table::melt(measure.vars = patterns("^[[:digit:]]{4}"),
+			variable.name = "year", value.name = "radial_incr", na.rm = TRUE, variable.factor = FALSE) |>
+		(\(x) {
+			x[, year := as.integer(year)]
+			x[, radial_incr := radial_incr/2]
+			data.table::setorder(x, unique_id, year)
+			return(x)
+		})() # Anonymous fct: converts year (char) to int, compute radial incr. and order by year within unique_id
+	saveRDS(rw_data, filename)
+} else {
+	rw_data = readRDS(filename)
+}
+```
+
