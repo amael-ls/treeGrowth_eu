@@ -857,6 +857,7 @@ if (!file.exists(filename))
 The species codes and English translations are in the metadata of `stamdata.xlsx`. I create a species data table, that I will feed to a an AI to obtain scientific names. I then double check with the package [taxize](https://docs.ropensci.org/taxize/index.html), which allows to look for scientific species' name from English vernacular names.
 
 ```{r}
+#| echo: false
 #### Load the Swedish NFI stem data
 ## Set path
 stem_name_se = paste0(data_path, "stamdata.xlsx")
@@ -890,7 +891,8 @@ sci_dt = data.table(
 		"species", "species", "genus", "genus", "species", "species",
 		"species", "species", "species", "species", "species", "species",
 		"species", NA, "species", "genus", "genus", "genus", "species",
-		"species", "species")
+		"species", "species"),
+	type = c(rep("conifer", 9), rep("broadleaf", 26))
 )
 
 ## Merge data sets
@@ -908,4 +910,48 @@ A few comments:
 7. Hassel is mapped to [*Corylus avellana*](https://sv.wikipedia.org/wiki/Hassel).
 8. 'Other conifers' and 'Other non-valuable hardwood' are set to conifers and broadleaves, respectively.
 
+```{r}
+#| echo: false
+#### Add speciesName_sci to rw_data
+rw_data = merge.data.table(x = rw_data, y = species_dt[, .(speciesName_se, speciesName_sci, type)], all.x = TRUE)
+
+rw_data[is.na(speciesName_sci), unique(speciesName_se)] # "Fr gran", gran means spruce, Fr = Främmande = foreign?
+if (rw_data[is.na(speciesName_sci), unique(speciesName_se)] == "Fr gran")
+	rw_data[is.na(speciesName_sci), c("speciesName_sci", "type") := .("Picea", "conifer")]
+
+rw_data[, range(radial_incr)] # 0.00 -- 19.75
+```
+
 ### Few graphics
+
+Densities of the radial increments for conifers and broadleaves. Note that although increments are non-negative, the density goes a bit below zero (see @fig-densities_rw-se)!
+
+```{r}
+#| fig-cap: Densities of boradleaves and conifers
+#| label: fig-densities_rw-se
+#### Plot densities of increments
+## Densities
+density_conif = density(rw_data[type == "conifer", radial_incr])
+density_broad = density(rw_data[type == "broadleaf", radial_incr])
+
+ls_colours = c(conifer = "#0F7BA2", broadleaf = "#FAB255")
+
+x_rg = range(c(density_conif$x, density_broad$x))
+y_rg = range(c(density_conif$y, density_broad$y))
+
+## Plot
+plot(density_conif$x, density_conif$y, xlim = x_rg, ylim = y_rg, axes = FALSE, col = ls_colours["conifer"],
+	xlab = "Annual increments (in mm)", ylab = "Density", type = "l")
+polygon(c(density_conif$x, rev(density_conif$x)),
+	c(density_conif$y, rep(0, length(density_conif$y))),
+	col = paste0(ls_colours["conifer"], 66), lty = 0)
+
+lines(density_broad$x, density_broad$y, lwd = 4, col = ls_colours["broadleaf"])
+polygon(c(density_broad$x, rev(density_broad$x)),
+	c(density_broad$y, rep(0, length(density_broad$y))),
+	col = paste0(ls_colours["broadleaf"], 66), lty = 0)
+
+legend("topright", legend = names(ls_colours), fill = ls_colours, bty = "n")
+axis(1)
+axis(2, las = 1)
+```
