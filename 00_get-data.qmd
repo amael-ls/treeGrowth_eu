@@ -77,14 +77,11 @@ options(max.print = 500)
 library(data.table)
 library(jsonlite)
 library(stringi)
+library(taxize)
 library(readxl)
 library(httr2)
 library(terra)
 library(gt)
-
-#### Common variables to all request
-endpoint = "https://ci.thuenen.de/rest/v1/"
-apikey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU"
 ```
 
 Now, few comments on how the data are collected (see @Vidal2016, chapter 21, p. 405):
@@ -93,6 +90,12 @@ Now, few comments on how the data are collected (see @Vidal2016, chapter 21, p. 
 2. They place a cluster of 4 points in each grid cell, displayed on a square of 150 m side. In other words, the distance between two adjacent plots is 150 m, and $2 \sqrt{150}$ m distance for the diagonal.
 3. Only 'possible forest' points are visited (orthophotos interpreted, 'definitively non-forest' are ruled-out), so at most four plots per grid cell. A point consist of a 10 m radius circle (for trees smaller than 4 m) and a radius of 25 m for terrain characteristics and forest edges. Trees larger than 4 m are sampled using a relascope sampling method. According to Lukas Heiland (old discussion) it looks like a fork (angle), and trees that are larger than this angle are counted and measured. Therefore, large trees are measured on a radius larger than small trees. There are other circles (5 m for deadwood, concentric), not necessarily at the center of the point (1 m and 2 m circles for regeneration).
 4. They measure their stuff on each circle and for each tree counted in via the relascope.
+
+```{r}
+#### Common variables to all request for Germany
+endpoint = "https://ci.thuenen.de/rest/v1/"
+apikey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU"
+```
 
 ### Query code meanings from `lookup` schema {#sec-lookup}
 
@@ -851,3 +854,58 @@ if (!file.exists(filename))
 }
 ```
 
+The species codes and English translations are in the metadata of `stamdata.xlsx`. I create a species data table, that I will feed to a an AI to obtain scientific names. I then double check with the package [taxize](https://docs.ropensci.org/taxize/index.html), which allows to look for scientific species' name from English vernacular names.
+
+```{r}
+#### Load the Swedish NFI stem data
+## Set path
+stem_name_se = paste0(data_path, "stamdata.xlsx")
+
+## Get sheet names
+excel_sheets(path = stem_name_se)
+
+## Species data table
+species_dt = read_excel(stem_name_se, sheet = "Info", range = "N16:Q51") |>
+	setDT() |>
+	setnames(new = c("sp_code", "speciesName_short_se", "speciesName_se", "speciesName_sci_en"))
+
+species_dt[, speciesName_short_se := NULL]
+
+## Manually set scientific names (done by AI, I checked and it looks ok)
+sci_dt = data.table(
+	sp_code = c(11, 12, 13, 14, 21, 22, 23, 24, 25, 30, 31, 32, 41, 51, 61, 71,
+		72, 73, 74, 75, 76, 81, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103),
+	speciesName_sci = c("Pinus sylvestris", "Pinus mugo", "Larix", "Pinus",
+		"Picea abies", "Picea", "Abies", "Conifers", "Picea",
+		"Betula", "Betula pendula", "Betula pubescens",
+		"Populus tremula", "Quercus", "Fagus sylvatica",
+		"Fraxinus excelsior", "Ulmus", "Tilia", "Acer platanoides",
+		"Carpinus betulus", "Prunus avium", "Pinus contorta",
+		"Alnus glutinosa", "Alnus incana", "Acer pseudoplatanus",
+		"Salix caprea", "Sorbus aucuparia", "Broadleaves", "Sorbus intermedia",
+		"Alnus", "Salix", "Populus", "Aesculus hippocastanum",
+		"Prunus padus", "Corylus avellana"),
+	rank = c("species", "species", "genus", "genus", "species", "genus", "genus",
+		NA, "genus", "genus", "species", "species", "species", "genus",
+		"species", "species", "genus", "genus", "species", "species",
+		"species", "species", "species", "species", "species", "species",
+		"species", NA, "species", "genus", "genus", "genus", "species",
+		"species", "species")
+)
+
+## Merge data sets
+species_dt = merge(species_dt, sci_dt, by = "sp_code", all.x = TRUE)
+```
+
+A few comments:
+
+1. Lönn (Maple) is mapped to *Acer platanoides* (I checked on the [Swedish Wikipedia](https://sv.wikipedia.org/wiki/L%C3%B6nn)). Sykomor seems to be *Acer pseudoplatanus* ([Swedish Wikipedia](https://sv.wikipedia.org/wiki/Tyskl%C3%B6nn) as the ). Indeed a vernacular synonym is Sykomorlönn, while the [Sykomor](https://sv.wikipedia.org/wiki/Sykomor) Swedish page of wikipedia leads to *Ficus sycomorus*, but I doubt they found any individual in the Swedish forests!
+2. Oxel (Whitebeam) is mapped to [*Sorbus intermedia*](https://sv.wikipedia.org/wiki/Oxel).
+3. Asp (Aspen) is mapped to [*Populus tremula*](https://sv.wikipedia.org/wiki/Asp_(tr%C3%A4d)).
+4. Ask (Ash) is mapped to [*Fraxinus excelsior*](https://sv.wikipedia.org/wiki/Ask_(tr%C3%A4d)).
+5. Rönn is mapped to [*Sorbus aucuparia*](https://sv.wikipedia.org/wiki/R%C3%B6nn).
+6. Kastanj is mapped to [*Aesculus hippocastanum*](https://en.wikipedia.org/wiki/Aesculus_hippocastanum) and should not be messed up with *Castanea sativa*!
+7. Hassel is mapped to [*Corylus avellana*](https://sv.wikipedia.org/wiki/Hassel).
+8. 'Other conifers' and 'Other non-valuable hardwood' are set to conifers and broadleaves, respectively.
+
+### Few graphics
