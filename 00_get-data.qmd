@@ -124,11 +124,20 @@ sort(names(ls_paths_lookup))
 ```
 
 #### species list
+
+
+::: {.callout-note}
+
+I am using [lambda functions](https://r-statistics.co/R-Anonymous-Functions.html) (also called anonymous functions), as it is useful to group some actions without keeping the function. Very useful when piping with `|>`.
+
+:::
+
+
 ```{r}
 #### Species list
 species_tab = unlist(ls_paths_lookup[["/lookup_tree_species"]][["get"]][["tags"]])
 
-species_dt = request(endpoint) |>
+species_dt_de = request(endpoint) |>
 	req_url_path_append(species_tab) |>
 	req_headers(
 		apikey = apikey,
@@ -144,7 +153,7 @@ species_dt = request(endpoint) |>
 		if (all(dt[is.na(genus), name_de] %in% c("Lücke", "Blöße")))
 			warning("There are NAs in genus, but this is only due to missing data <Lücke> and clear cut <Blöße>")
 		return(dt[, .(code, genus, species)])
-	})() # Anonymous function to select the three columns of interest (Hope they do not change the colnames!)
+	})() # Lambda function to select the three columns of interest (Hope they do not change the colnames!)
 ```
 
 #### Tree status
@@ -435,7 +444,7 @@ plot_dt = full_req[["/plot"]][, ..cols] |>
 
 cols = c("plot_id", "tree_number", "tree_species", "tree_status", "dbh", "dbh_height", "tree_height",
 	"stem_height", "tree_age", "stem_breakage", "stem_form", "damage_dead", "deadwood_used")
-tree_dt = full_req[["/tree"]][, ..cols] |>
+tree_dt_de = full_req[["/tree"]][, ..cols] |>
 	merge.data.table(plot_dt, by = "plot_id")
 ```
 
@@ -443,11 +452,11 @@ tree_dt = full_req[["/tree"]][, ..cols] |>
 
 According to Sebastian Schnell (Thübingen institute) who promptly replied to my e-mail (hahaha hilarious!!!), the offset coordinates are linked to the 1 km INSPIRE grid via the column `inspire_grid_cell` in the cluster table. They do not provide the grid itself but it can be downloaded on the [Bundesamt für Kartographie und Geodäsie's website](https://gdz.bkg.bund.de/index.php/default/inspire/sonstige-inspire-themen/geographische-gitter-fur-deutschland-in-lambert-projektion-geogitter-inspire.html).
 
-Therefore, I only need to use the column `inspire_grid_cell` from `tree_dt` and then extract the coordinates from the geopackage file, using the `id`, which as the exact same format as `inspire_grid_cell`, such as 1kmN579E47. Then, I choose to associate the middle coordinate of the grid cell, `(x_mp, y_mp)` to the clusters, and therefore the plots.
+Therefore, I only need to use the column `inspire_grid_cell` from `tree_dt_de` and then extract the coordinates from the geopackage file, using the `id`, which as the exact same format as `inspire_grid_cell`, such as 1kmN579E47. Then, I choose to associate the middle coordinate of the grid cell, `(x_mp, y_mp)` to the clusters, and therefore the plots.
 
 ```{r}
 #| results: hold
-#### Add coordinates to tree_dt
+#### Add coordinates to tree_dt_de
 ## Load Deutschland 1km resolution, EPSG 3035 from Bundesamt für Kartographie und Geodäsie
 deutschland = vect(paste0(data_path_orig, orig_folder,
 	"DE_Grid_ETRS89-LAEA_1km.gpkg/geogitter/DE_Grid_ETRS89-LAEA_1km.gpkg"))
@@ -458,11 +467,11 @@ coords = as.data.table(deutschland)[, .(id, x_mp, y_mp)] |>
 	setnames(old = c("x_mp", "y_mp"), new = c("x_epsg_3035", "y_epsg_3035")) 
 
 ## Merge
-tree_dt = merge.data.table(tree_dt, coords, by.x = "inspire_grid_cell", by.y = "id", all.x = TRUE)
+tree_dt_de = merge.data.table(tree_dt_de, coords, by.x = "inspire_grid_cell", by.y = "id", all.x = TRUE)
 
 ## Check missing data
-check_na = tree_dt[is.na(x_epsg_3035), all(is_training)] &&
-	tree_dt[!is.na(x_epsg_3035), !any(is_training)]
+check_na = tree_dt_de[is.na(x_epsg_3035), all(is_training)] &&
+	tree_dt_de[!is.na(x_epsg_3035), !any(is_training)]
 
 if (check_na)
 {
@@ -472,7 +481,7 @@ if (check_na)
 }
 
 ## Remove missing coordinates
-tree_dt = tree_dt[!(is_training)]
+tree_dt_de = tree_dt_de[!(is_training)]
 ```
 
 ### Add information
@@ -484,7 +493,7 @@ Columns that have codes, such as `tree_species`, are explained in the `lookup` s
 The column `tree_status` contains codes that describe the status of the tree. The codes 0 and 1 potentially contains dead trees! I expect NAs in dbh when the tree is dead. All the other codes will be discarded later.
 
 ```{r}
-tree_dt = merge.data.table(tree_dt, status_info[, .(code, status_simplif)],
+tree_dt_de = merge.data.table(tree_dt_de, status_info[, .(code, status_simplif)],
 	by.x = "tree_status", by.y = "code", all.x = TRUE)
 ```
 
@@ -493,20 +502,20 @@ tree_dt = merge.data.table(tree_dt, status_info[, .(code, status_simplif)],
 ```{r}
 #### Add species
 ## Merge genus and species
-species_dt[, speciesName_sci := paste(genus, species)] |>
+species_dt_de[, speciesName_sci := paste(genus, species)] |>
 	setkey(speciesName_sci)
 
 ## Merge data tables
-tree_dt = merge.data.table(tree_dt, species_dt[, .(code, speciesName_sci, genus)],
+tree_dt_de = merge.data.table(tree_dt_de, species_dt_de[, .(code, speciesName_sci, genus)],
 	by.x = "tree_species", by.y = "code", all.x = TRUE)
 
 ## Check NAs
-check_na = "sampled" %notin% tree_dt[is.na(speciesName_sci), unique(status_simplif)]
+check_na = "sampled" %notin% tree_dt_de[is.na(speciesName_sci), unique(status_simplif)]
 
 if (check_na)
 {
 	print("All the sampled trees have a species specified")
-	tree_dt = tree_dt[!is.na(speciesName_sci)]
+	tree_dt_de = tree_dt_de[!is.na(speciesName_sci)]
 } else {
 	warning("Not all sampled trees have a specified species. Check these NAs!!")
 }
@@ -516,23 +525,23 @@ if (check_na)
 
 ```{r}
 #### Add breakage and form information
-tree_dt = merge.data.table(tree_dt, form_info[, .(code, form_simplif)],
+tree_dt_de = merge.data.table(tree_dt_de, form_info[, .(code, form_simplif)],
 	by.x = "stem_form", by.y = "code", all.x = TRUE)
 
-tree_dt = merge.data.table(tree_dt, break_info[, .(code, break_simplif)],
+tree_dt_de = merge.data.table(tree_dt_de, break_info[, .(code, break_simplif)],
 	by.x = "stem_breakage", by.y = "code", all.x = TRUE)
 
 ## Remove the forms that are 4, 5, or 6 as these are dead trees (1987 inventory west Germany)
-tree_dt = tree_dt[stem_form %notin% c(4, 5, 6)]
+tree_dt_de = tree_dt_de[stem_form %notin% c(4, 5, 6)]
 
 ## Check NAs in breakage
-check_na = ("sampled" %notin% tree_dt[is.na(break_simplif), table(status_simplif)]) &&
-	(tree_dt[is.na(break_simplif), .N] != 0)
+check_na = ("sampled" %notin% tree_dt_de[is.na(break_simplif), table(status_simplif)]) &&
+	(tree_dt_de[is.na(break_simplif), .N] != 0)
 
-if (check_na | tree_dt[is.na(break_simplif), .N] == 0)
+if (check_na | tree_dt_de[is.na(break_simplif), .N] == 0)
 {
 	print("None of the trees with missing break information were sampled")
-	tree_dt = tree_dt[!is.na(break_simplif)]
+	tree_dt_de = tree_dt_de[!is.na(break_simplif)]
 } else {
 	warning("Some sampled trees have missing breakage information. Check these NAs!!")
 }
@@ -546,24 +555,24 @@ There are `NAs` in the dbh. I found that sampled trees all have a dbh
 #| results: hold
 #### Check NAs...
 ## ...in dbh
-check_na = ("sampled" %notin% tree_dt[is.na(dbh), unique(status_simplif)]) &&
-	(tree_dt[is.na(dbh), .N] != 0)
+check_na = ("sampled" %notin% tree_dt_de[is.na(dbh), unique(status_simplif)]) &&
+	(tree_dt_de[is.na(dbh), .N] != 0)
 
-if (check_na | tree_dt[is.na(dbh), .N] == 0)
+if (check_na | tree_dt_de[is.na(dbh), .N] == 0)
 {
 	print("All the sampled trees have a dbh measured")
-	tree_dt = tree_dt[!is.na(dbh)]
+	tree_dt_de = tree_dt_de[!is.na(dbh)]
 } else {
 	warning("Not all sampled trees have a measured dbh. Check these NAs!!")
 }
 
 ## ..in acquisition date
-tree_dt = tree_dt[!is.na(acquisition_date)]
+tree_dt_de = tree_dt_de[!is.na(acquisition_date)]
 ```
 
 ### Prepare coordinates for Jonathan
 
-Following Jonathan's advice, I should focus on two species, *Fagus sylvatica* and *Picea abies*. However, in case of, I decided to prepare the dataset for 7 species: *Abies alba*, *Betula pendula*, *Fagus sylvatica*, *Picea abies*, *Pinus sylvestris*, *Quercus robur*, and *Quercus petraea*. Incidentally, these are the seven most common species in Germany! I know that it will be quite similar in France, and I guess that the Swedish NFI will have mostly *Betula pendula*, *Picea abies*, and *Pinus sylvestris* I subset `tree_dt` to these seven species and decided to keep:
+Following Jonathan's advice, I should focus on two species, *Fagus sylvatica* and *Picea abies*. However, in case of, I decided to prepare the dataset for 7 species: *Abies alba*, *Betula pendula*, *Fagus sylvatica*, *Picea abies*, *Pinus sylvestris*, *Quercus robur*, and *Quercus petraea*. Incidentally, these are the seven most common species in Germany! I know that it will be quite similar in France, and I guess that the Swedish NFI will have mostly *Betula pendula*, *Picea abies*, and *Pinus sylvestris* I subset `tree_dt_de` to these seven species and decided to keep:
 
 1. Non-broken trees only and not 'damaged dead'
 2. Only straight and crown-forked trees. I remove twins and forked, as they probably have different growing responses, and NAs for uncertainty
@@ -573,41 +582,41 @@ Following Jonathan's advice, I should focus on two species, *Fagus sylvatica* an
 
 ```{r}
 #| output: false
-# lala = copy(tree_dt)
-# tree_dt = copy(lala)
+# lala = copy(tree_dt_de)
+# tree_dt_de = copy(lala)
 
 #### Subsetting...
 ## ...at the breast height level (only keep 1.3 m)
-tree_dt = tree_dt[dbh_height == 130]
+tree_dt_de = tree_dt_de[dbh_height == 130]
 
 ## ... at the species level (1 species per id, subset to 7 species of interest)
-tree_dt[, unique_id := paste(cluster_id, plot_name, tree_number, sep = "_")]
-tree_dt[, check_sp := length(unique(speciesName_sci)), by = unique_id]
-tree_dt = tree_dt[check_sp == 1]
-tree_dt[, check_sp := NULL]
+tree_dt_de[, unique_id := paste(cluster_id, plot_name, tree_number, sep = "_")]
+tree_dt_de[, check_sp := length(unique(speciesName_sci)), by = unique_id]
+tree_dt_de = tree_dt_de[check_sp == 1]
+tree_dt_de[, check_sp := NULL]
 
 keep_species = c("Abies alba", "Betula pendula", "Fagus sylvatica", "Picea abies", "Pinus sylvestris",
 	"Quercus robur", "Quercus petraea")
-tree_dt = tree_dt[speciesName_sci %in% keep_species]
+tree_dt_de = tree_dt_de[speciesName_sci %in% keep_species]
 
 ## ...at the tree form level
-tree_dt[, .N, by = .(speciesName_sci, form_simplif)]
-tree_dt = tree_dt[form_simplif %in% c("straight", "forked_crown")]
+tree_dt_de[, .N, by = .(speciesName_sci, form_simplif)]
+tree_dt_de = tree_dt_de[form_simplif %in% c("straight", "forked_crown")]
 
 ## ...at the health level
-tree_dt[, .N, by = .(speciesName_sci, break_simplif)]
-tree_dt = tree_dt[break_simplif %in% c("not_broken")]
+tree_dt_de[, .N, by = .(speciesName_sci, break_simplif)]
+tree_dt_de = tree_dt_de[break_simplif %in% c("not_broken")]
 
-tree_dt = tree_dt[!(damage_dead)]
+tree_dt_de = tree_dt_de[!(damage_dead)]
 
 ## ... at the measurement level
-tree_dt[, n_measure := .N, by = .(cluster_id, plot_name, tree_number)]
+tree_dt_de[, n_measure := .N, by = .(cluster_id, plot_name, tree_number)]
 
-tree_dt = tree_dt[n_measure > 1]
-tree_dt[, n_measure := NULL]
+tree_dt_de = tree_dt_de[n_measure > 1]
+tree_dt_de[, n_measure := NULL]
 
-# zozo = copy(tree_dt)
-# tree_dt = copy(zozo)
+# zozo = copy(tree_dt_de)
+# tree_dt_de = copy(zozo)
 ```
 
 ### Save the German tree data set
@@ -618,32 +627,32 @@ Before saving, I compute growth and check if growth is positive? Given that tree
 #### Check-up negative growth
 ## Compute growth
 # Order trees by unique id and date for computation
-setkey(tree_dt, unique_id, acquisition_date)
+setkey(tree_dt_de, unique_id, acquisition_date)
 
 # Remove some columns, sort out. stem_height is almost NA 92% of the time...
 rm_cols = c("stem_breakage", "stem_form", "tree_species", "tree_status",
 	"inspire_grid_cell", "plot_id", "dbh_height", "damage_dead",
 	"deadwood_used", "is_training", "status_simplif", "stem_height")
 
-tree_dt[, (rm_cols) := NULL] |> setcolorder()
+tree_dt_de[, (rm_cols) := NULL] |> setcolorder()
 
 # Compute growth, assuming increasing order in time within individuals
-if (!isTRUE(all.equal(key(tree_dt), c("unique_id", "acquisition_date"))))
-	stop("tree_dt must be sorted by individual and time within individuals")
+if (!isTRUE(all.equal(key(tree_dt_de), c("unique_id", "acquisition_date"))))
+	stop("tree_dt_de must be sorted by individual and time within individuals")
 
-tree_dt[, acquisition_date := as.Date(acquisition_date, format = "%Y-%m-%d")]
+tree_dt_de[, acquisition_date := as.Date(acquisition_date, format = "%Y-%m-%d")]
 
-tree_dt[, delta_dbh_mm := (dbh - data.table::shift(x = dbh, n = 1, type = "lag")), by = unique_id]
-tree_dt[, delta_t_year := difftime(acquisition_date,
+tree_dt_de[, delta_dbh_mm := (dbh - data.table::shift(x = dbh, n = 1, type = "lag")), by = unique_id]
+tree_dt_de[, delta_t_year := difftime(acquisition_date,
 		data.table::shift(x = acquisition_date, n = 1, type = "lag"), unit = "days")/365.25,
 	by = unique_id]
 
-tree_dt[, delta_t_year := as.numeric(delta_t_year)]
+tree_dt_de[, delta_t_year := as.numeric(delta_t_year)]
 
-tree_dt[, annual_growth_mm := delta_dbh_mm/delta_t_year]
+tree_dt_de[, annual_growth_mm := delta_dbh_mm/delta_t_year]
 
 ## Extract coordinates of the final dataset
-coords_jonathan = vect(unique(tree_dt[, .(x_epsg_3035, y_epsg_3035)]),
+coords_jonathan = vect(unique(tree_dt_de[, .(x_epsg_3035, y_epsg_3035)]),
 	geom = c("x_epsg_3035", "y_epsg_3035"),
 	crs = paste(info[, authority], info[, code], sep = ":"))
 
@@ -658,9 +667,9 @@ if (!file.exists(filename))
 filename = paste0(data_path_save, "tree-de.rds")
 if (!file.exists(filename))
 {
-	saveRDS(tree_dt, filename)
+	saveRDS(tree_dt_de, filename)
 } else{
-	tree_dt = readRDS(filename)
+	tree_dt_de = readRDS(filename)
 }
 ```
 
@@ -674,8 +683,8 @@ if (!file.exists(filename))
 #|   - Conifers
 #| layout-ncol: 2
 #### Species specific plots of density
-rg = tree_dt[, quantile(annual_growth_mm, na.rm = TRUE, prob = c(0.005, 0.995))]
-data_plot = tree_dt[(rg["0.5%"] < annual_growth_mm) & (annual_growth_mm < rg["99.5%"])]
+rg = tree_dt_de[, quantile(annual_growth_mm, na.rm = TRUE, prob = c(0.005, 0.995))]
+data_plot = tree_dt_de[(rg["0.5%"] < annual_growth_mm) & (annual_growth_mm < rg["99.5%"])]
 
 densities_sp = data_plot[, {
 	d = density(annual_growth_mm)
@@ -843,7 +852,7 @@ if (!file.exists(filename))
 			x[, radial_incr := radial_incr/2]
 			data.table::setorder(x, unique_id, year)
 			return(x)
-		})() # Anonymous fct: converts year (char) to int, compute radial incr. and order by year within unique_id
+		})() # Lambda fct: converts year (char) to int, compute radial incr. and order by year within unique_id
 	saveRDS(rw_data, filename)
 } else {
 	rw_data = readRDS(filename)
@@ -862,11 +871,11 @@ stem_name_se = paste0(data_path_orig, orig_folder, "stamdata.xlsx")
 excel_sheets(path = stem_name_se)
 
 ## Species data table
-species_dt = read_excel(stem_name_se, sheet = "Info", range = "N16:Q51") |>
+species_dt_se = read_excel(stem_name_se, sheet = "Info", range = "N16:Q51") |>
 	setDT() |>
 	setnames(new = c("sp_code", "speciesName_short_se", "speciesName_se", "speciesName_sci_en"))
 
-species_dt[, speciesName_short_se := NULL]
+species_dt_se[, speciesName_short_se := NULL]
 
 ## Manually set scientific names (done by AI, I checked and it looks ok)
 sci_dt = data.table(
@@ -892,7 +901,7 @@ sci_dt = data.table(
 )
 
 ## Merge data sets
-species_dt = merge(species_dt, sci_dt, by = "sp_code", all.x = TRUE)
+species_dt_se = merge(species_dt_se, sci_dt, by = "sp_code", all.x = TRUE)
 ```
 
 A few comments:
@@ -909,7 +918,7 @@ A few comments:
 ```{r}
 #| echo: false
 #### Add speciesName_sci to rw_data
-rw_data = merge.data.table(x = rw_data, y = species_dt[, .(speciesName_se, speciesName_sci, type)], all.x = TRUE)
+rw_data = merge.data.table(x = rw_data, y = species_dt_se[, .(speciesName_se, speciesName_sci, type)], all.x = TRUE)
 
 rw_data[is.na(speciesName_sci), unique(speciesName_se)] # "Fr gran", gran means spruce, Fr = Främmande = foreign?
 if (rw_data[is.na(speciesName_sci), unique(speciesName_se)] == "Fr gran")
@@ -957,14 +966,14 @@ axis(2, las = 1)
 The French data are available for direct download on the French NFI [webpage](https://inventaire-forestier.ign.fr/dataifn/). However, I decided to use curl to download the dataset, in order to keep a trace.
 
 ```{r}
-#### Download French NFI data
+#### Download & load French NFI data
 ## Common variables for Frenchs' requests
 orig_folder = "french_nfi/"
 
 ## URL used the 18 November 2026 (i.e., 2025 campaign released)
 url_fr_data = "https://inventaire-forestier.ign.fr/dataifn/data/export_dataifn_2005_2025.zip"
 
-## Get data
+## Download data
 filename = paste0(data_path_orig, "french_NFI.zip")
 
 if (file.exists(filename))
@@ -978,7 +987,31 @@ if (file.exists(filename))
 		stop("It seems that downloading or saving the file was a failure")
 }
 
+# if (!dir.exists(paste0(data_path_orig, orig_folder)))
 unzip(zipfile = dwl, exdir = paste0(data_path_orig, orig_folder), overwrite = TRUE)
+
+#### Get information
+## Columns' metadata
+col_def = fread(paste0(data_path_orig, orig_folder, "metadonnees.csv"), skip = 18, header = FALSE, sep = ";",
+	dec = ",", nrows = 162)[, V4 := NULL] |>
+	setnames(new = c("column_name", "short_descr", "description"))
+
+## Species
+# species_dt
+
+# ## Load data and keep columns of interest + renaming
+# tree_dt_fr = fread(paste0(data_path_orig, orig_folder, "ARBRE.csv")) |>
+# 	(\(dt) {
+# 		tree_dt = tree_dt[(VEGET == 0) & (VEGET5 == 0)] # Keep standing living trees only
+# 		tree_dt = tree_dt[(VEGET == 0) & (VEGET5 == 0)] # Keep standing living trees only
+# 	})() # Lambda fct to keek cols
+
+## Get coordinates
+coords = fread(paste0(data_path_orig, orig_folder, "PLACETTE.csv"))
 ```
 
 ### Reshape the data
+
+```{r}
+
+```
