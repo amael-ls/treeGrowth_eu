@@ -75,9 +75,7 @@ rm(list = ls())
 options(max.print = 500)
 
 library(data.table)
-library(jsonlite)
 library(stringi)
-library(taxize)
 library(readxl)
 library(httr2)
 library(terra)
@@ -92,9 +90,16 @@ Now, few comments on how the data are collected (see @Vidal2016, chapter 21, p. 
 4. They measure their stuff on each circle and for each tree counted in via the relascope.
 
 ```{r}
-#### Common variables to all request for Germany
+#### Common variables...
+# ...for all the NFIs' requests
+data_path_orig = "../original_data/"
+data_path_save = "../data/"
+
+# ... for German's requests
 endpoint = "https://ci.thuenen.de/rest/v1/"
 apikey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzQ1NzkxMjAwLCJleHAiOjE5MDM1NTc2MDB9.hXiYlA_168hHZ6fk3zPgABQUpEcqkYRMzu0A5W5PtYU"
+
+orig_folder = "german_nfi/"
 ```
 
 ### Query code meanings from `lookup` schema {#sec-lookup}
@@ -123,7 +128,7 @@ sort(names(ls_paths_lookup))
 #### Species list
 species_tab = unlist(ls_paths_lookup[["/lookup_tree_species"]][["get"]][["tags"]])
 
-species_info = request(endpoint) |>
+species_dt = request(endpoint) |>
 	req_url_path_append(species_tab) |>
 	req_headers(
 		apikey = apikey,
@@ -131,26 +136,15 @@ species_info = request(endpoint) |>
 		`Accept-Profile` = "lookup"
 	) |>
 	req_perform() |>
-	resp_body_json()
-
-n_species = length(species_info)
-species_dt = data.table(nfi_code = integer(n_species), genus = NA_character_, species = NA_character_)
-
-for (i in seq_len(n_species))
-{
-	if (is.null(species_info[[i]][["genus"]]) || is.null(species_info[[i]][["species"]]))
-	{
-		species_dt[i, c("nfi_code", "genus", "species") := .(species_info[[i]][["code"]], NA_character_, NA_character_)]
-
-		if (species_info[[i]][["name_de"]] == "Lücke")
-			warning(paste("Missing data for species code", i))
-		
-		if (species_info[[i]][["name_de"]] == "Blöße")
-			warning(paste("Missing data due to clear cut, species code", i))
-		next
-	}
-	species_dt[i, c("nfi_code", "genus", "species") := .(species_info[[i]][["code"]], species_info[[i]][["genus"]], species_info[[i]][["species"]])]
-}
+	resp_body_json(simplifyVector = TRUE) |>
+	setDT() |>
+	(\(dt) {
+		if (any(c("name_de", "code", "genus", "species") %notin% colnames(dt)))
+			stop("Required columns and assigned colnames mismatch!")
+		if (all(dt[is.na(genus), name_de] %in% c("Lücke", "Blöße")))
+			warning("There are NAs in genus, but this is only due to missing data <Lücke> and clear cut <Blöße>")
+		return(dt[, .(code, genus, species)])
+	})() # Anonymous function to select the three columns of interest (Hope they do not change the colnames!)
 ```
 
 #### Tree status
@@ -333,7 +327,8 @@ for (current_path in table_dt[, path])
 Now, I query data with the provided paths. Note that the tables `tree_coordinates` and `plot_coordinates` were returned empty. I suspect that it contains real coordinates, and that a special key is needed to access these tables. This is why I chose `tree` and `plot`.
 
 ```{r}
-if (!file.exists("../data/request_germany.rds"))
+filename = paste0(data_path_orig, orig_folder, "request_germany.rds")
+if (!file.exists(filename))
 {
 	full_req = vector(mode = "list", length = table_dt[, .N])
 	names(full_req) = table_dt[, path]
@@ -377,9 +372,9 @@ if (!file.exists("../data/request_germany.rds"))
 		full_req[[current_path]] = rbindlist(l = full_req[[current_path]], fill = TRUE, idcol = "page")
 	}
 
-	saveRDS(full_req, "../data/request_germany.rds")
+	saveRDS(full_req, filename)
 } else {
-	full_req = readRDS("../data/request_germany.rds")
+	full_req = readRDS(filename)
 }
 ```
 
@@ -454,7 +449,8 @@ Therefore, I only need to use the column `inspire_grid_cell` from `tree_dt` and 
 #| results: hold
 #### Add coordinates to tree_dt
 ## Load Deutschland 1km resolution, EPSG 3035 from Bundesamt für Kartographie und Geodäsie
-deutschland = vect("../data/DE_Grid_ETRS89-LAEA_1km.gpkg/geogitter/DE_Grid_ETRS89-LAEA_1km.gpkg")
+deutschland = vect(paste0(data_path_orig, orig_folder,
+	"DE_Grid_ETRS89-LAEA_1km.gpkg/geogitter/DE_Grid_ETRS89-LAEA_1km.gpkg"))
 info = as.data.table(crs(deutschland, describe = TRUE))
 info[, .(authority, code)]
 
@@ -501,8 +497,8 @@ species_dt[, speciesName_sci := paste(genus, species)] |>
 	setkey(speciesName_sci)
 
 ## Merge data tables
-tree_dt = merge.data.table(tree_dt, species_dt[, .(nfi_code, speciesName_sci, genus)],
-	by.x = "tree_species", by.y = "nfi_code", all.x = TRUE)
+tree_dt = merge.data.table(tree_dt, species_dt[, .(code, speciesName_sci, genus)],
+	by.x = "tree_species", by.y = "code", all.x = TRUE)
 
 ## Check NAs
 check_na = "sampled" %notin% tree_dt[is.na(speciesName_sci), unique(status_simplif)]
@@ -651,7 +647,7 @@ coords_jonathan = vect(unique(tree_dt[, .(x_epsg_3035, y_epsg_3035)]),
 	geom = c("x_epsg_3035", "y_epsg_3035"),
 	crs = paste(info[, authority], info[, code], sep = ":"))
 
-filename = "../data/coords_jonathan-deutschland.gpkg"
+filename = paste0(data_path_save, "coords_jonathan-deutschland.gpkg")
 if (!file.exists(filename))
 {
 	writeVector(coords_jonathan, filename, overwrite = TRUE, options = "ENCODING=UTF-8")
@@ -659,7 +655,7 @@ if (!file.exists(filename))
 	coords_jonathan = vect(filename)
 }
 
-filename = "../data/tree-de.rds"
+filename = paste0(data_path_save, "tree-de.rds")
 if (!file.exists(filename))
 {
 	saveRDS(tree_dt, filename)
@@ -784,11 +780,11 @@ Waiting for the data, I start programing on the tree-ring dataset.
 
 ```{r}
 #### Load the Swedish NFI tree ring-width dataset
-## Set path
-data_path = "../data/"
-rw_name_se = paste0(data_path, "arsringsdata.xlsx")
+## Common variables for Swedishs' requests
+orig_folder = "swedish_nfi/"
 
 ## Get sheet names
+rw_name_se = paste0(data_path_orig, orig_folder, "arsringsdata.xlsx")
 excel_sheets(path = rw_name_se)
 
 ## Metadata are in "Årsringsdata" sheet
@@ -831,7 +827,7 @@ They reported double ring-width in order to compute increments in diameter, so I
 
 ```{r}
 ## Get and reshape ring-width data with year (and not ordered from bark to pith)
-filename = paste0(data_path, "reshape_ring-width_sweden.rds")
+filename = paste0(data_path_save, "reshape_ring-width_sweden.rds")
 if (!file.exists(filename))
 {
 	rw_data = read_excel(rw_name_se, sheet = "efter årtal", skip = 2) |>
@@ -860,7 +856,7 @@ The species codes and English translations are in the metadata of `stamdata.xlsx
 #| echo: false
 #### Load the Swedish NFI stem data
 ## Set path
-stem_name_se = paste0(data_path, "stamdata.xlsx")
+stem_name_se = paste0(data_path_orig, orig_folder, "stamdata.xlsx")
 
 ## Get sheet names
 excel_sheets(path = stem_name_se)
@@ -955,3 +951,34 @@ legend("topright", legend = names(ls_colours), fill = ls_colours, bty = "n")
 axis(1)
 axis(2, las = 1)
 ```
+
+## France
+
+The French data are available for direct download on the French NFI [webpage](https://inventaire-forestier.ign.fr/dataifn/). However, I decided to use curl to download the dataset, in order to keep a trace.
+
+```{r}
+#### Download French NFI data
+## Common variables for Frenchs' requests
+orig_folder = "french_nfi/"
+
+## URL used the 18 November 2026 (i.e., 2025 campaign released)
+url_fr_data = "https://inventaire-forestier.ign.fr/dataifn/data/export_dataifn_2005_2025.zip"
+
+## Get data
+filename = paste0(data_path_orig, "french_NFI.zip")
+
+if (file.exists(filename))
+{
+	warning(paste0("The file <", filename, "> already exists and is reused rather then re-downloaded"))
+	dwl = filename
+} else {
+	dwl = curl::curl_download(url = url_fr_data, destfile = filename, quiet = TRUE,
+		mode = "wb", handle = curl::new_handle())
+	if (!file.exists(dwl))
+		stop("It seems that downloading or saving the file was a failure")
+}
+
+unzip(zipfile = dwl, exdir = paste0(data_path_orig, orig_folder), overwrite = TRUE)
+```
+
+### Reshape the data
