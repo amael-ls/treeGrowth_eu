@@ -149,7 +149,7 @@ species_dt_de = request(endpoint) |>
 	setDT() |>
 	(\(dt) {
 		if (any(c("name_de", "code", "genus", "species") %notin% colnames(dt)))
-			stop("Required columns and assigned colnames mismatch!")
+			stop("[lambda function:] Actual columns and hard-coded columns msimatch")
 		if (all(dt[is.na(genus), name_de] %in% c("Lücke", "Blöße")))
 			warning("There are NAs in genus, but this is only due to missing data <Lücke> and clear cut <Blöße>")
 		return(dt[, .(code, genus, species)])
@@ -987,8 +987,12 @@ if (file.exists(filename))
 		stop("It seems that downloading or saving the file was a failure")
 }
 
-# if (!dir.exists(paste0(data_path_orig, orig_folder)))
-unzip(zipfile = dwl, exdir = paste0(data_path_orig, orig_folder), overwrite = TRUE)
+if (!dir.exists(paste0(data_path_orig, orig_folder)))
+{
+	unzip(zipfile = dwl, exdir = paste0(data_path_orig, orig_folder), overwrite = TRUE)
+} else {
+	warning(paste0("The directory <", data_path_orig, orig_folder, "> is reused rather then re-unzipped"))
+}
 
 #### Get information
 ## Columns' metadata
@@ -997,21 +1001,125 @@ col_def = fread(paste0(data_path_orig, orig_folder, "metadonnees.csv"), skip = 1
 	setnames(new = c("column_name", "short_descr", "description"))
 
 ## Species
-# species_dt
+species_dt_fr = fread(paste0(data_path_orig, orig_folder, "espar-cdref13.csv")) |>
+	setnames(old = c("// espar", "lib_espar", "cd_ref", "lib_cdref"),
+		new = c("code", "speciesName_fr", "taxref_id", "speciesName_sci"))
 
-# ## Load data and keep columns of interest + renaming
-# tree_dt_fr = fread(paste0(data_path_orig, orig_folder, "ARBRE.csv")) |>
-# 	(\(dt) {
-# 		tree_dt = tree_dt[(VEGET == 0) & (VEGET5 == 0)] # Keep standing living trees only
-# 		tree_dt = tree_dt[(VEGET == 0) & (VEGET5 == 0)] # Keep standing living trees only
-# 	})() # Lambda fct to keek cols
+## Load data and keep columns of interest + renaming
+tree_dt_fr = fread(paste0(data_path_orig, orig_folder, "ARBRE.csv")) |>
+	setkey("IDP", "A")
 
-## Get coordinates
+## Plot information (including coordinates)
 coords = fread(paste0(data_path_orig, orig_folder, "PLACETTE.csv"))
 ```
 
 ### Reshape the data
 
+#### Merging and keeping only column of interest
+
+I add to the tree data the species scientific names according to taxref, the plot coordinates, and the forest type (variable `CSA`).
+
 ```{r}
 
 ```
+
+#### Filtering
+
+I want to keep trees that have been measured twice at breast height, that are alive at both measurements, not damaged, and not pollarded trees.
+
+::: {.callout-tip}
+
+## Variables `VEGET` and `VEGET5`
+
+These two variables were a bit counter-intuitive to me. When a tree is measure twice, then there are two lines in the database, with `VEGET` filled for the first measurement, and `VEGET5` filled for the second measurement. In other words, do not write something like:
+```{r}
+#| eval: false
+tree_dt_fr = tree_dt_fr[(VEGET == 0) & (VEGET5 == 0)]
+```
+where `0` is the code to represenet standing living tree, as you will get an empty result! Actually, the best is to take trees that have `VEGET5 == 0`, as we can resonnably assume a tree alive at his second measurement used to be alive at the first census.
+
+:::
+
+
+::: {.callout-caution}
+
+## Variable temporality
+
+Variables are often changing, some are added, others can be removed. Among the variables I used to filter the data, some evolved, such as:
+
+- `MES_C13`, started in 2016, so it is `NA` before. Up to 2018 (included), it was only measured for `VEGET = 0`, and then taken for all the trees.
+- `FORME`, which lasted between 2005 and 2013, was taken only for trees with a seed origin (and not sprouting), alive or damaged and in forest (not in poplars) for 2005 and 2006. Then
+
+:::
+
+
+```{r}
+#### Filtering the data
+## Removing NAs in circumference
+tree_dt_fr = tree_dt_fr[!is.na(C13)]
+
+## List living trees at the second census
+living_trees = tree_dt_fr[VEGET5 == 0, .(IDP, A)] |>
+	unique()
+
+tt = tree_dt_fr[living_trees]
+
+tt[CAMPAGNE < 2013, .N, by = FORME]
+ww = tt[(CAMPAGNE < 2014),]
+ww[FORME == "", .(CAMPAGNE, IDP, A, ESPAR, VEGET, VEGET5)]
+
+tt[.(500008, 2)]
+
+tt = tree_dt_fr[(VEGET5 == 0) | ((VEGET == 0) & (VEGET5 == ""))]
+tt[, .N, by = FORME]
+
+ww = tt[(CAMPAGNE < 2010) & (VEGET == 0), .N, by = FORME]
+ww = tt[(CAMPAGNE < 2010) & (VEGET == 0),]
+
+ww[FORME == ""]
+
+tt = tt[(FORME == "") | (FORME == 1) | (FORME == 2)]
+tt = tt[is.na(TETARD) | (TETARD == 0)]
+
+tt[, .N, by = ACCI]
+
+qq = tt[is.na(ACCI), .(CAMPAGNE, IDP, A, VEGET, VEGET5, MES_C13)]
+
+tt[is.na(ACCI)]
+
+[ # Keep standing living trees only, 
+	(FORME == "") | (FORME == 1) | (FORME == 2)][ # Keep non-polarded trees, only for campaigns 2005 -- 2013
+	is.na(TETARD) | (TETARD == 0)][ # Keep non-polarded trees, only for campaigns 2014 -- 2018
+	(ACCI == 0)][ # Keep non-accidented trees
+	is.na(MES_C13) | (MES_C13 == 0)][ # Keep trees measured at 1.30 m height (taken from 2016)
+	!is.na(C13)] # Keep trees that have a recorded circumference
+keep_cols = c("CAMPAGNE", "IDP", "A", "ESPAR", "ORI", "AGE13", "AGE", "C13")
+
+tree_dt_fr[, .N, by = VEGET5]
+tree_dt_fr[, unique(VEGET5)]
+tree_dt_fr[(VEGET == 0), .N, by = VEGET5]
+tree_dt_fr[(VEGET == 0) & (VEGET5 == 0), .N]
+
+tree_dt_fr[]
+
+qq = tree_dt_fr[]
+
+tree_dt_fr[, n_measure := .N, by = .(IDP, A)]
+tree_dt_fr = tree_dt_fr[n_measure == 2]
+
+> colnames(tree_dt_fr)
+ [1] "CAMPAGNE" "IDP"      "A"        "ESPAR"   
+ [5] "VEGET"    "VEGET5"   "DATEMORT" "ORI"     
+ [9] "TIGE"     "FORME"    "TETARD"   "Q1"      
+[13] "Q2"       "Q3"       "QUALITE"  "CIBLE"   
+[17] "LIB"      "AGE13"    "AGE"      "SIMPLIF" 
+[21] "ACCI"     "CLON"     "C13"      "MES_C13" 
+[25] "C0"       "HTOT"     "HDEC"     "DDEC"    
+[29] "DECOUPE"  "LFSD"     "V"        "W"       
+[33] "R"        "HRB"      "IR5"      "IR1"     
+[37] "MORTB"    "MA"       "MR"       "SFCOEUR" 
+[41] "SFDORGE"  "SFGELIV"  "SFGUI"    "SFPIED"  
+[45] "DEGGIB"   "V46" 
+
+```
+
